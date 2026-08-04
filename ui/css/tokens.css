@@ -1,0 +1,137 @@
+/* ============================================================================
+   DQ-Stack design tokens
+
+   Aesthetic direction: instrument-grade. The reference set is Bloomberg
+   terminals, Grafana and Linear — not SaaS marketing sites. A planner stares at
+   this for six hours a day, which overturns most conventions of modern web
+   design: density is a feature, motion is mostly harmful, and every hue carries
+   exactly one meaning.
+
+   Typography note. The system specification asks for Inter on the strength of
+   its tabular figures. Instrument Sans carries the UI instead, and every numeral
+   in the product is set in JetBrains Mono — a monospace face is tabular by
+   construction, so column alignment is guaranteed rather than dependent on a
+   font-feature setting surviving every code path. Instrument Serif appears only
+   on executive surfaces, where it encodes a mode change from *scanning* to
+   *reading and deciding*.
+   ============================================================================ */
+
+:root {
+  /* ---- foundation, dark (default) --------------------------------------- */
+  --bg-base:      #0B0E13;
+  --bg-surface:   #12161E;
+  --bg-raised:    #1A202A;
+  --bg-overlay:   #1D242F;
+  --bg-inset:     #090C10;
+  --border-subtle:#232B36;
+  --border-strong:#37424F;
+  --text-primary: #E6EDF3;
+  --text-secondary:#8B98A5;
+  --text-tertiary:#5D6874;
+
+  /* ---- semantic accents. One meaning each, and nothing else. ------------ */
+  --series-forecast: #4C6FFF;
+  --series-actual:   #C7D2DE;
+  --series-override: #E09B15;
+  --series-prior:    #6B7684;
+  --state-risk:      #E0523C;
+  --state-excess:    #14A99A;
+  --state-attention: #C99A2E;
+  --state-ok:        #14A99A;
+
+  --forecast-rgb: 76 111 255;
+  --risk-rgb:     224 82 60;
+  --excess-rgb:   20 169 154;
+  --override-rgb: 224 155 21;
+
+  /* ---- type ------------------------------------------------------------- */
+  --font-ui: "Instrument Sans", "Segoe UI Variable Display", "Segoe UI",
+             "Helvetica Neue", sans-serif;
+  --font-num: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace,
+              "Courier New", monospace;
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+
+  --fs-11: 11px;  /* metadata, units, axis labels */
+  --fs-12: 12px;  /* grid cells, dense tables */
+  --fs-13: 13px;  /* body default, form inputs */
+  --fs-14: 14px;  /* section labels, emphasised values */
+  --fs-16: 16px;  /* panel titles */
+  --fs-20: 20px;  /* screen titles */
+  --fs-28: 28px;  /* executive headings */
+  --fs-40: 40px;  /* executive display figures */
+
+  --lh-dense: 1.35;
+  --lh-prose: 1.55;
+
+  /* ---- spacing. Nine steps, nothing else. ------------------------------- */
+  --s1: 2px;  --s2: 4px;  --s3: 6px;  --s4: 8px;  --s5: 12px;
+  --s6: 16px; --s7: 24px; --s8: 32px; --s9: 48px;
+
+  /* ---- radius. Zero inside grid cells: rounding blurs alignment. -------- */
+  --r-input: 4px;
+  --r-card:  6px;
+  --r-cell:  0px;
+
+  /* ---- elevation. Exactly three levels. -------------------------------- */
+  --e0: none;
+  --e1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --e2: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* ---- motion. Reserved for state changes that need confirmation. ------- */
+  --t-feedback: 120ms;
+  --t-panel: 180ms;
+  --t-instant: 0ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* ---- density (overridden by [data-density]) --------------------------- */
+  --row-h: 28px;
+  --cell-fs: 12px;
+
+  --chrome-h: 46px;
+  --worklist-w: 268px;
+  --dock-h: 348px;
+}
+
+[data-density="dense"]       { --row-h: 24px; --cell-fs: 11px; }
+[data-density="default"]     { --row-h: 28px; --cell-fs: 12px; }
+[data-density="comfortable"] { --row-h: 34px; --cell-fs: 13px; }
+
+/* ---- light theme -------------------------------------------------------- */
+:root[data-theme="light"] {
+  --bg-base:      #FBFCFD;
+  --bg-surface:   #FFFFFF;
+  --bg-raised:    #F3F5F7;
+  --bg-overlay:   #FFFFFF;
+  --bg-inset:     #EEF1F4;
+  --border-subtle:#E4E8EC;
+  --border-strong:#C9D1D9;
+  --text-primary: #0F1721;
+  --text-secondary:#5A6673;
+  --text-tertiary:#8A949F;
+
+  --series-forecast: #3D5AFE;
+  --series-actual:   #2E3A47;
+  --series-override: #D98D00;
+  --series-prior:    #9AA5B1;
+  --state-risk:      #C6402F;
+  --state-excess:    #0E8A7D;
+  --state-attention: #B8860B;
+  --state-ok:        #0E8A7D;
+
+  --forecast-rgb: 61 90 254;
+  --risk-rgb:     198 64 47;
+  --excess-rgb:   14 138 125;
+  --override-rgb: 217 141 0;
+
+  --e1: 0 1px 2px rgba(15, 23, 33, 0.06);
+  --e2: 0 8px 24px rgba(15, 23, 33, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    /* Dropped to zero, not "reduced" — a shortened animation is still an
+       animation you see four hundred times a day. */
+    --t-feedback: 0ms;
+    --t-panel: 0ms;
+  }
+}

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="default">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DQ-Stack — Planner Workspace</title>
+<meta name="description" content="Probabilistic demand forecasting and inventory decision platform. Uncertainty, data health, and economic consequence visible on every number.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ============================================================ chrome -->
+  <header class="chrome">
+    <div class="brand">
+      <span class="brand-mark">DQ<span>·</span>STACK</span>
+      <span class="brand-sub">demand planning</span>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Portals">
+      <button class="tab" role="tab" data-view="workspace" aria-selected="true">Workspace</button>
+      <button class="tab" role="tab" data-view="pipeline" aria-selected="false">Pipeline</button>
+      <button class="tab" role="tab" data-view="evidence" aria-selected="false">Evidence</button>
+      <button class="tab" role="tab" data-view="decisions" aria-selected="false">Decisions</button>
+    </nav>
+
+    <div class="cmd" role="search">
+      <input id="searchInput" type="search" placeholder="Search item or location…"
+             aria-label="Search items and locations" autocomplete="off">
+      <span class="kbd">⌘K</span>
+    </div>
+
+    <div class="chrome-right">
+      <div class="origin-chip">
+        <span>origin</span><b id="originLabel">—</b>
+      </div>
+      <div class="origin-chip">
+        <span>horizon</span><b id="horizonLabel">—</b>
+      </div>
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle colour theme">◐ theme</button>
+      <button class="icon-btn" id="densityBtn" aria-label="Cycle row density">≡ default</button>
+    </div>
+  </header>
+
+  <!-- ========================================================= workspace -->
+  <section id="view-workspace" class="view" data-active="true" role="tabpanel" aria-label="Planner workspace">
+
+    <!-- The exception worklist is permanent furniture, not a separate page.
+         Planners do not browse thirty thousand SKUs; they work a queue, so the
+         queue is the primary navigation. -->
+    <aside class="worklist" aria-label="Exception worklist">
+      <div class="wl-head">
+        <div class="wl-count" id="wlCount">—</div>
+        <div class="wl-label">exceptions in queue</div>
+      </div>
+      <div class="wl-filters" id="wlFilters" role="group" aria-label="Filter exceptions by reason"></div>
+      <div class="wl-list" id="wlList" role="listbox" aria-label="Exceptions" tabindex="0"></div>
+      <div class="wl-foot">
+        <span id="wlFoot">—</span>
+        <span class="kbd">J / K</span>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="crumbs">
+        <span id="crumbScope">All categories</span>
+        <span class="sep">·</span>
+        <span id="crumbCount">—</span>
+        <span class="sep">·</span>
+        <span>sorted by <b id="crumbSort">priority</b></span>
+        <div class="crumbs-right">
+          <div class="seg" role="group" aria-label="Scope">
+            <button data-scope="queue" aria-pressed="true">Queue</button>
+            <button data-scope="all" aria-pressed="false">All series</button>
+          </div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-secondary)">
+            <input type="checkbox" id="priorToggle" checked> prior version
+          </label>
+        </div>
+      </div>
+
+      <div class="grid-wrap">
+        <div class="grid-scroll" id="gridScroll" tabindex="0" role="application"
+             aria-label="Forecast grid. Use arrow keys to move, E to explain, Enter to edit.">
+          <div class="grid-spacer" id="gridSpacer"></div>
+          <canvas id="gridCanvas"></canvas>
+        </div>
+        <!-- Canvas is invisible to assistive technology, so a parallel table of
+             the visible window is maintained here. -->
+        <div id="gridAria" class="sr-only" aria-live="polite"></div>
+        <div class="grid-empty" id="gridEmpty" hidden>No series match the current filters.</div>
+      </div>
+
+      <div class="dock">
+        <div class="dock-chart">
+          <div class="dock-head">
+            <div>
+              <div class="dock-title" id="chartTitle">—</div>
+              <div class="dock-sub" id="chartSub">—</div>
+            </div>
+            <div class="legend">
+              <span><i style="border-color:var(--series-actual)"></i>actual</span>
+              <span><i style="border-color:var(--series-forecast);border-top-style:dashed"></i>forecast</span>
+              <span><i style="border-color:var(--series-prior);border-top-style:dotted"></i>prior</span>
+              <span><i style="border-color:var(--series-override);border-top-style:dashed"></i>override</span>
+            </div>
+          </div>
+          <div class="chart-host" id="chartHost">
+            <canvas id="chartCanvas"></canvas>
+            <div class="crosshair-readout" id="crosshair" data-show="false"></div>
+          </div>
+        </div>
+
+        <div class="dock-side">
+          <div class="panel" id="detailPanel"></div>
+
+          <!-- The override control shows economic impact *before* commit. This is
+               the direct interface expression of the thesis: a planner about to
+               move a number sees what it costs. -->
+          <div class="override">
+            <div class="ov-row">
+              <span class="ov-label">override</span>
+              <select class="ov-select" id="ovWeek" aria-label="Week to override"></select>
+              <input class="ov-input" id="ovValue" type="number" min="0" step="1"
+                     aria-label="Override value in units">
+              <div class="ov-impact">
+                <div class="amt" id="ovImpact" data-sign="flat">—</div>
+                <div class="cap">expected margin impact</div>
+              </div>
+            </div>
+            <div class="ov-row" style="margin-top:8px">
+              <select class="ov-select" id="ovReason" aria-label="Reason for override">
+                <option value="">Reason…</option>
+                <option>Known promotion not in feed</option>
+                <option>Competitor activity</option>
+                <option>Local event</option>
+                <option>Supply constraint</option>
+                <option>Data quality doubt</option>
+                <option>Category judgement</option>
+              </select>
+              <button class="btn" id="ovReset">Reset</button>
+              <button class="btn btn-primary" id="ovCommit" disabled>Commit <span class="kbd" style="border-color:rgba(255,255,255,.4)">⌘↵</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================== pipeline -->
+  <section id="view-pipeline" class="view" role="tabpanel" aria-label="Pipeline">
+    <div class="sheet">
+      <h1 class="sheet-title">The pipeline</h1>
+      <p class="sheet-lede">
+        Seven stages, each with a single responsibility and a typed interface. Stages three through
+        seven all speak in <em>predictive distributions</em> — nothing downstream ever sees a point
+        forecast, and that single interface contract is what allows the decision layer, the
+        calibration layer and the economic evaluation to exist at all. Every number below came from
+        the run that produced the forecast in the workspace.
+      </p>
+      <div class="cards" id="pipelineCards"></div>
+      <div class="flow" id="pipelineFlow"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================== evidence -->
+  <section id="view-evidence" class="view" role="tabpanel" aria-label="Evidence">
+    <div class="sheet">
+      <h1 class="sheet-title">Evidence</h1>
+      <p class="sheet-lede">
+        Three metric tiers — point accuracy, distributional quality, realised economics — and the two
+        comparisons <em>between</em> tiers that the argument rests on: whether each stage adds value,
+        and whether the most accurate configuration is the most profitable one.
+      </p>
+
+      <h2 class="sheet-h2">Candidate leaderboard</h2>
+      <p class="sheet-lede" style="margin-top:0">
+        Ranked by WSPL, the weighted scaled pinball loss, because it scores the whole predictive
+        distribution rather than only its centre. WRMSSE is shown alongside for comparability with
+        the M5 literature.
+      </p>
+      <div id="lbTable"></div>
+
+      <h2 class="sheet-h2">Forecast Value Added, stage by stage</h2>
+      <div id="fvaTable"></div>
+      <div class="note">
+        A stage with negative <b>Δ vs previous</b> is destroying value at the margin even when its FVA
+        against the naive anchor is still positive. Only the ladder shows that, which is why it is
+        reported as a ladder. Every stage in this pipeline has an ablation switch for exactly this
+        reason.
+      </div>
+
+      <h2 class="sheet-h2">Calibration</h2>
+      <div class="two-col">
+        <div>
+          <div id="covTable"></div>
+        </div>
+        <div>
+          <canvas id="relChart" class="mini-chart"></canvas>
+          <p style="font-size:11px;color:var(--text-tertiary);margin-top:8px;line-height:1.55">
+            Reliability diagram. The dotted diagonal is perfect calibration; the red dashed line is
+            empirical coverage before conformal adjustment and the blue line after. Distance from the
+            diagonal is the error the next stage would otherwise inherit when it reads a quantile off
+            this distribution to set inventory.
+          </p>
+        </div>
+      </div>
+
+      <h2 class="sheet-h2">Where the value lands, by planning class</h2>
+      <div id="classTable"></div>
+      <div class="note">
+        The classes are not interchangeable and this is the table that proves it. A single global
+        model applied to every series would be scored by the average of this column and would hide
+        exactly the sparse-series behaviour that Stage 1 exists to route around.
+      </div>
+
+      <h2 class="sheet-h2">Ensemble weights the meta-learner chose</h2>
+      <div id="weightTable"></div>
+      <div class="note">
+        Read across a row. Nobody wrote these rules — the meta-learner derived them from the Stage-1
+        series features, and they land where the forecasting literature says they should: the
+        Croston family and temporal aggregation earn their weight on <b>intermittent</b> and
+        <b>lumpy</b> series, gradient boosting on <b>smooth</b> ones. The seasonal-naive anchor is
+        given almost nothing, which is the correct treatment of a benchmark.
+      </div>
+
+      <h2 class="sheet-h2">Accuracy is not economics</h2>
+      <p class="sheet-lede" style="margin-top:0" id="aveSummary"></p>
+      <div class="two-col">
+        <div><canvas id="aveChart" class="mini-chart" style="height:260px"></canvas></div>
+        <div><div id="invTable"></div></div>
+      </div>
+      <h2 class="sheet-h2">Economics by configuration</h2>
+      <div id="econTable"></div>
+      <div class="note">
+        Model promotion in this system is gated on <b>realised ledger margin</b>, not WRMSSE. The
+        rows above are why. Promote on accuracy and the implementation contradicts the thesis.
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= decisions -->
+  <section id="view-decisions" class="view" role="tabpanel" aria-label="Decisions">
+    <div class="sheet">
+      <h1 class="sheet-title">Decisions</h1>
+      <p class="sheet-lede">
+        The link from forecast to money. The target service quantile is the critical fractile derived
+        from cost asymmetry — underage over underage plus overage — which replaces the industry habit
+        of applying a blanket 95% service level to everything.
+      </p>
+      <div class="cards" id="decCards"></div>
+
+      <h2 class="sheet-h2">The critical fractile in action</h2>
+      <p class="sheet-lede" style="margin-top:0">
+        The eight lowest and eight highest target quantiles in the assortment. A low-margin,
+        high-holding-cost, short-shelf-life item is planned far below 95%; a high-margin durable is
+        planned above it. The formula says so precisely, and a blanket policy cannot express it.
+      </p>
+      <div id="fractileTable"></div>
+
+      <h2 class="sheet-h2">Simulator ledger totals</h2>
+      <div class="two-col">
+        <div><div id="simTable"></div></div>
+        <div>
+          <div id="temporalTable"></div>
+          <div class="note" style="margin-top:16px">
+            Temporal reconciliation makes the daily, weekly and 28-day views arithmetically
+            identical. "The weekly plan disagrees with the quarterly plan" becomes structurally
+            impossible rather than a recurring meeting.
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        The conservation residual is the maximum discrepancy across all series between units in
+        (opening plus received) and units out (sold plus wasted plus on hand). It is asserted as a
+        unit test, not merely reported: a simulator that quietly loses units produces a ledger that
+        looks reasonable and reports the wrong margin.
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ====================================================== command palette -->
+<div class="palette-backdrop" id="paletteBackdrop" data-open="false"></div>
+<div class="palette" id="palette" data-open="false" role="dialog" aria-modal="true" aria-label="Command palette">
+  <input id="paletteInput" type="text" placeholder="Jump to item, location, or planning class…" autocomplete="off">
+  <div class="palette-list" id="paletteList" role="listbox"></div>
+</div>
+
+<div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
+
+<script src="data/bundle.js"></script>
+<script src="js/util.js"></script>
+<script src="js/grid.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/views.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

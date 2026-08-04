@@ -1,0 +1,16 @@
+# DQ-Stack — capstone dependency set
+# Production substitutes noted per spec §"The 12-week capstone cut".
+
+numpy>=1.26
+pandas>=2.2
+scipy>=1.13
+scikit-learn>=1.5
+lightgbm>=4.5          # Stage 3 workhorse: Tweedie + quantile heads
+pyarrow>=16.0          # Arrow IPC / Parquet — CON-1
+duckdb>=1.0            # analytical store (ClickHouse substitute)
+torch>=2.0             # Stage 3 neural (NHITS-style)
+
+# Optional in production, hand-implemented here for zero-dependency reproducibility:
+#   statsforecast     -> dqstack/models/statistical.py (ETS, Croston, SBA, TSB, ADIDA)
+#   hierarchicalforecast -> dqstack/reconcile.py (MinT with shrinkage)
+#   mapie             -> dqstack/calibrate.py (split conformal / CQR)

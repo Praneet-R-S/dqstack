@@ -1,0 +1,24 @@
+# Generated data. Fully reproducible from a fixed seed:
+#   make data      (dqstack/config.py SEED = 20260804)
+data/raw/
+data/interim/
+data/processed/
+
+# Pipeline outputs. Reproducible with:
+#   make pipeline
+artifacts/
+ui/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
