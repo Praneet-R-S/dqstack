@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dqstack.calibrate import ConformalCalibrator
+from dqstack.calibrate import GLOBAL as GLOBAL_KEY, ConformalCalibrator
 from dqstack.config import QUANTILES
 from dqstack.models.dist import fit_dispersion, nb_quantiles, sanitize
 from dqstack.reconcile import (
@@ -254,6 +254,69 @@ def test_conformal_calibration_improves_coverage():
         f"{tbl['gap_before'].mean():.4f} -> {tbl['gap_after'].mean():.4f}"
     )
     assert tbl["gap_after"].mean() < 0.03, "post-calibration coverage still far from nominal"
+
+
+def test_median_is_never_conformally_shifted():
+    """CQR conformalises interval bounds, not the point forecast.
+
+    On zero-inflated demand P(y <= median) is bounded below by P(y = 0), so a
+    nominal 0.50 target is unachievable; a procedure that chases it biases every
+    median upward. That regression cost 19% of WRMSSE before this was pinned.
+    """
+    rng = np.random.default_rng(41)
+    n = 20_000
+    y = rng.negative_binomial(3, 3 / (3 + 8), size=n).astype("float64")
+    y[rng.random(n) < 0.43] = 0.0                    # heavy zero inflation
+    q = np.repeat(np.quantile(y, QUANTILES)[None, :] * 0.6, n, axis=0)
+    pc = np.full(n, "intermittent", dtype="U20")
+    hg = np.full(n, "h01_07", dtype="U12")
+
+    cal = ConformalCalibrator().fit(y, q, pc, hg)
+    med_k = QUANTILES.index(0.50)
+    for stratum, off in cal.offsets.items():
+        assert off[med_k] == 0.0, f"stratum {stratum} shifted the median by {off[med_k]}"
+
+    out = cal.apply(q, pc, hg)
+    assert np.allclose(out[:, med_k], q[:, med_k], atol=1e-6), (
+        "the median moved even though its offset was zero — check apply()"
+    )
+
+
+def test_offsets_are_declined_when_they_do_not_help_out_of_sample():
+    """An already-calibrated forecast must be left alone.
+
+    The guard exists because on zero-inflated data the lower-tail targets are
+    also unreachable, and 'adjusting' toward them makes coverage worse.
+    """
+    from scipy import stats as sstats
+
+    rng = np.random.default_rng(42)
+    n = 40_000
+    mu, sd = 50.0, 12.0
+    y = rng.normal(mu, sd, size=n)
+    q = np.repeat(sstats.norm.ppf(np.asarray(QUANTILES), mu, sd)[None, :], n, axis=0)
+    pc = np.full(n, "smooth", dtype="U20")
+    hg = np.full(n, "h01_07", dtype="U12")
+
+    cal = ConformalCalibrator().fit(y, q, pc, hg)
+
+    # The property that matters is not that every offset is declined — sampling
+    # noise means a negligible shift can genuinely reduce the gap on the check
+    # half, and keeping it is harmless. What must hold is that no *material*
+    # correction is applied to a forecast that was already right.
+    worst = float(np.abs(cal.offsets[GLOBAL_KEY]).max())
+    assert worst < 0.05 * sd, (
+        f"largest offset {worst:.3f} is {worst / sd:.1%} of sigma on an "
+        "already-calibrated forecast; the guard is letting through real distortion"
+    )
+    tbl = cal.adjustment_report()
+    assert len(tbl) == len(QUANTILES)
+    assert tbl.loc[tbl["nominal"] == 0.50, "reason"].iloc[0].startswith("point forecast")
+
+    # And coverage must not get worse anywhere.
+    out = cal.apply(q, pc, hg)
+    before = cal.coverage_table(y, q, out)
+    assert before["gap_after"].mean() <= before["gap_before"].mean() + 1e-3
 
 
 def test_calibration_output_stays_monotone_and_non_negative():

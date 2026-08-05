@@ -34,6 +34,11 @@ const Grid = (() => {
   let overrides = new Map();
   let futureDates = [];
   let sortKey = "priority", sortDir = -1;
+  // Held at module scope on purpose. A ResizeObserver created inline as
+  // `new ResizeObserver(cb).observe(el)` has no strong reference and can be
+  // garbage-collected, after which it silently never fires again — the canvas
+  // then keeps whatever size it happened to measure first.
+  let ro = null;
 
   /* ---- columns ---------------------------------------------------------- */
   function buildCols(dates) {
@@ -458,7 +463,15 @@ const Grid = (() => {
       if (c && c.kind === "week") opts.onEditWeek && opts.onEditWeek(rows[sel], c.widx);
     });
 
-    new ResizeObserver(U.debounce(resize, 40)).observe(scroller);
+    ro = new ResizeObserver(U.debounce(resize, 40));
+    ro.observe(scroller);
+    // Belt and braces: a window listener covers the case where the observer is
+    // unavailable, and one deferred call covers first paint before web fonts and
+    // scrollbars have settled the box.
+    window.addEventListener("resize", U.debounce(resize, 60));
+    requestAnimationFrame(resize);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
+
     window.addEventListener("dq:theme", () => paint());
     window.addEventListener("dq:density", () => resize());
     return api;

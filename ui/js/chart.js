@@ -26,12 +26,17 @@ const Chart = (() => {
   let W = 0, H = 0;
   let hoverX = null;
   let showPrior = true;
+  let ro = null;   // retained; see the note in grid.js
 
   function init() {
     host = document.getElementById("chartHost");
     canvas = document.getElementById("chartCanvas");
     readout = document.getElementById("crosshair");
-    new ResizeObserver(U.debounce(resize, 40)).observe(host);
+    ro = new ResizeObserver(U.debounce(resize, 40));
+    ro.observe(host);
+    window.addEventListener("resize", U.debounce(resize, 60));
+    requestAnimationFrame(resize);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
     canvas.addEventListener("mousemove", (e) => {
       const box = canvas.getBoundingClientRect();
       hoverX = e.clientX - box.left;

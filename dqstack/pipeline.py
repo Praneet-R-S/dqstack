@@ -343,9 +343,9 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     timings["stage6_calibrate"] = time.perf_counter() - t0
     log(f"  strata fitted {len(conformal.offsets) - 1} + global "
         f"({len(cy_a):,} calibration points)")
-    log("  per-level offsets (global): "
-        + ", ".join(f"p{int(q*100)}:{o:+.2f}"
-                    for q, o in zip(QUANTILES, conformal.offsets['__global__'])))
+    adj = conformal.adjustment_report()
+    log("  per-level adjustment (offsets validated on a held-out half):")
+    log("    " + adj.round(3).to_string(index=False).replace("\n", "\n    "))
 
     # ---------------------------------------------------------- eval origin
     section("EVALUATION — eval origin, actuals known")

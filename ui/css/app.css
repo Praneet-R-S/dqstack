@@ -218,7 +218,14 @@ body::after {
 
 .grid-wrap { position: relative; min-height: 0; background: var(--bg-base); }
 .grid-scroll { position: absolute; inset: 0; overflow: auto; }
-.grid-spacer { pointer-events: none; }
+/* The spacer exists only to give the scroll container its extent, and it is taken
+   out of flow deliberately. As an in-flow block it pushes the canvas that follows
+   it thousands of pixels down, and `position: sticky` cannot pull an element back
+   to a position it never occupied — the grid then paints perfectly and sits
+   entirely below the viewport. Out of flow, the canvas is the only in-flow child,
+   starts at the top-left and sticks there, while an absolutely positioned
+   descendant of a scroll container still contributes scrollable overflow. */
+.grid-spacer { position: absolute; top: 0; left: 0; pointer-events: none; }
 #gridCanvas {
   position: sticky; top: 0; left: 0; display: block;
   /* The canvas is invisible to screen readers; a parallel ARIA table is
@@ -228,6 +235,9 @@ body::after {
   position: absolute; inset: 0; display: grid; place-items: center;
   color: var(--text-tertiary); font-size: var(--fs-12); pointer-events: none;
 }
+/* `display: grid` above outranks the user-agent [hidden] rule, so without this
+   the empty-state overlay sits on top of a perfectly good grid forever. */
+.grid-empty[hidden] { display: none; }
 
 /* ---- detail dock ------------------------------------------------------- */
 .dock {
