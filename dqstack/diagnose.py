@@ -202,20 +202,37 @@ def detect_censoring(
     if obs.sum() < cfg.diagnosis.censor_min_history:
         return structural, conf
 
-    # P(zero | weekday) from carried history, Laplace-smoothed.
-    p_zero = np.full(7, 0.5)
+    # P(zero | weekday), estimated from carried days STRICTLY BEFORE each row.
+    #
+    # A whole-series estimate makes the mask non-causal, and the mask is what
+    # defines the training target: `y[suspect] = NaN` decides which cells exist at
+    # all. A supply problem late in the panel would raise the weekday zero-rate and
+    # retrospectively un-flag an earlier day, so P.y[:, :O+1] was not a function of
+    # data up to O for any origin. Expanding per weekday with Laplace smoothing
+    # keeps it causal at the same cost; early rows sit near 0.5 and are therefore
+    # conservative, which is the right failure direction for a detector that masks
+    # data.
+    p_row = np.full(n, 0.5)
+    prior_n = np.zeros(n)
     for d in range(7):
-        m = obs & (wday == d + 1)
-        if m.sum() >= 4:
-            p_zero[d] = (float((sales[m] == 0).sum()) + 1.0) / (float(m.sum()) + 2.0)
+        idx = np.flatnonzero(obs & (wday == d + 1))
+        if len(idx) == 0:
+            continue
+        z = (sales[idx] == 0).astype("float64")
+        cum_z = np.concatenate([[0.0], np.cumsum(z)[:-1]])      # strictly before
+        cum_n = np.arange(len(idx), dtype="float64")
+        p_row[idx] = (cum_z + 1.0) / (cum_n + 2.0)
+        prior_n[idx] = cum_n
 
     # Trailing level from carried days only, so assortment gaps do not deflate it.
     s = pd.Series(np.where(carried, sales, np.nan))
     level = s.rolling(28, min_periods=6).median().shift(1).to_numpy()
     level = np.nan_to_num(level, nan=0.0)
 
-    zero_now = obs & (sales == 0)
-    pz = p_zero[np.clip(wday - 1, 0, 6)]
+    # Require a minimum of prior same-weekday observations before flagging, so the
+    # first few weeks of a series cannot be masked on almost no evidence.
+    zero_now = obs & (sales == 0) & (prior_n >= 4)
+    pz = p_row
     # Two independent multipliers: how surprising a zero is for this weekday,
     # and how much volume the series was recently doing.
     surprise = np.clip(1.0 - pz / 0.85, 0.0, 1.0)

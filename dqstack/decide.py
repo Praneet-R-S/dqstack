@@ -113,10 +113,24 @@ def critical_fractile(cp: CostParams, risk_days: int, cfg=CFG) -> dict[str, np.n
     underage = cp.price * cp.margin_rate
     holding = cp.unit_cost * cp.holding_rate * risk_days
     markdown = cp.unit_cost * cp.markdown_risk
-    # Perishables carry additional spoilage exposure over the risk period.
-    spoil = np.where(
-        cp.shelf_life < 60, cp.unit_cost * np.clip(risk_days / cp.shelf_life, 0, 1) * 0.5, 0.0
-    )
+    # Spoilage exposure exists only when the risk period approaches shelf life.
+    #
+    # This is the twin of the markdown bug fixed below, and it was missed. Charging
+    # unit_cost * (risk_days / shelf_life) * 0.5 bills a 21-day-shelf item for
+    # spoilage at a 9-day risk period, where the simulator can never realise any:
+    # its waste term requires on-hand above shelf_life days of cover, and an
+    # order-up-to level covering R + L = 9 days never reaches 21. Measured on FOODS
+    # parameters the phantom charge was 54% of total overage — larger than markdown
+    # and 11x holding — and it depressed the perishable target quantile from 0.743
+    # to 0.569, forgoing real gross margin to avoid a cost that is never incurred.
+    #
+    # The exposure is therefore the cover *in excess of* shelf life, which is zero
+    # for a 21-day shelf at a 9-day risk period and rises once the risk period
+    # genuinely outruns the shelf. The two halves of Stage 7 now price the same
+    # physical event, which is the property test_overage_components_are_realisable
+    # asserts.
+    excess_cover = np.clip((risk_days - cp.shelf_life) / np.maximum(cp.shelf_life, 1.0), 0.0, 1.0)
+    spoil = np.where(cp.shelf_life < 60, cp.unit_cost * excess_cover * 0.5, 0.0)
     overage = holding + markdown + spoil
 
     q = underage / np.maximum(underage + overage, 1e-9)

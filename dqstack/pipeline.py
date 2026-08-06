@@ -76,6 +76,7 @@ class Trained:
     zeroshot: foundation.ZeroShotPrior
     nn: neural.NeuralCandidate
     cohorts: lifecycle.CohortCurves
+    P_nomask: Panel | None = None
     dispersion: dict[str, dict[str, float]] = field(default_factory=dict)
 
 
@@ -290,7 +291,8 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
                                    verbose=False, with_quantiles=False,
                                    respect_regimes=cfg.enable_regime_windows)
 
-    tr = Trained(gbm=gbm, gbm_nomask=gbm_nomask, zeroshot=zs, nn=nn, cohorts=cohorts)
+    tr = Trained(gbm=gbm, gbm_nomask=gbm_nomask, zeroshot=zs, nn=nn, cohorts=cohorts,
+                 P_nomask=(P_nomask if ablate_censoring else None))
     timings["stage3_train"] = time.perf_counter() - t0
     log(f"  trained in {timings['stage3_train']:.0f}s")
 
@@ -418,15 +420,25 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     # high and MinT(shrink) will sit close to MinT(WLS). That is the honest
     # outcome at this scale and the intensity is reported rather than hidden.
     rec_origins = meta_origins
-    resid = []
+    rc = reconcile.Reconciler()
+    rc.H = reconcile.build_hierarchy(P.series)
+
+    # W must be the covariance of the errors of the vector actually reconciled —
+    # the independent base forecast at every node. Projecting bottom-level errors up
+    # through S instead gives the covariance of bottom-up-implied aggregate errors,
+    # which presumes exactly the coherence reconciliation exists to impose and which
+    # the independent base forecasts do not satisfy.
+    node_res = []
     for O in rec_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
-        _, qs = candidate_quantiles(vintages["meta"], O, horizons, tr)
-        cq = comb.combine_quantiles(qs, W, meta.candidates)
-        med = cq[..., Q50_INDEX]
-        resid.append(np.nan_to_num(y - med, nan=0.0).T)
-    R = np.concatenate(resid, axis=0)
-    rc = reconcile.Reconciler().fit(P.series, R, cfg)
+        y_nodes = rc.H.S @ np.nan_to_num(y, nan=0.0)                # (nodes, H)
+        nb = rc.base_forecasts(P.y, O, horizons)                    # (nodes, H)
+        bottom_med = comb.combine_quantiles(
+            q_by_origin[O], W, meta.candidates)[..., Q50_INDEX]
+        nb = nb.copy()
+        nb[rc.H.bottom_slice()] = bottom_med                        # as reconcile() does
+        node_res.append((nb - y_nodes).T)                           # (H, nodes)
+    rc.fit(P.series, node_residuals=np.concatenate(node_res, axis=0), cfg=cfg)
     timings["stage5_reconcile"] = time.perf_counter() - t0
     log(f"  hierarchy {rc.H.n_nodes} nodes over {rc.H.n_bottom} bottom series, "
         f"{len(reconcile.LEVELS)} levels")
@@ -655,7 +667,16 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     econ("full, blanket 95% service", calib_e, cfg_blanket)
 
     if tr.gbm_nomask is not None:
-        pnm, _, _ = tr.gbm_nomask.predict(P, Oe, horizons)
+        # Predict from the panel it was TRAINED on. Predicting from the masked
+        # panel made this a label-side ablation only, and gave it a train/serve
+        # feature mismatch on every lag and rolling statistic — so the arm was
+        # measuring two things at once and attributing both to censoring.
+        P_nm = (
+            tr.P_nomask.with_series(vintages["eval"].series)
+            if tr.P_nomask is not None
+            else P
+        )
+        pnm, _, _ = tr.gbm_nomask.predict(P_nm, Oe, horizons)
         disp_nm = tr.dispersion.get("lgbm_tweedie", {})
         default = float(np.median(list(disp_nm.values()))) if disp_nm else 8.0
         strata2 = np.char.add(np.char.add(pc[:, None], "|"), hg_2d)

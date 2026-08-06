@@ -165,10 +165,34 @@ class Reconciler:
     shrinkage: float | None = None
     projection_error: float | None = None
 
-    def fit(self, series: pd.DataFrame, bottom_residuals: np.ndarray, cfg=CFG) -> "Reconciler":
-        """`bottom_residuals` is (n_obs, n_bottom) of in-sample forecast errors."""
+    def fit(
+        self,
+        series: pd.DataFrame,
+        bottom_residuals: np.ndarray | None = None,
+        node_residuals: np.ndarray | None = None,
+        cfg=CFG,
+    ) -> "Reconciler":
+        """Estimate W and the projection.
+
+        `node_residuals` (n_obs, n_nodes) are the errors of the vector actually
+        reconciled — the independent base forecast at every node. That is what MinT's
+        W is defined over, and passing it is the correct usage.
+
+        `bottom_residuals` (n_obs, n_bottom) is the legacy path. Projecting bottom
+        errors up through S yields the covariance of *bottom-up-implied* aggregate
+        errors, which is not the covariance of the aggregate forecasts being
+        combined: it assumes every node's error is the sum of its children's, i.e.
+        exactly the coherence that reconciliation exists to impose and that the
+        independent base forecasts do not satisfy. It is retained only so a caller
+        without node residuals still gets a usable, if mis-specified, W.
+        """
         self.H = build_hierarchy(series)
-        node_res = bottom_residuals @ self.H.S.T          # (n_obs, n_nodes)
+        if node_residuals is not None:
+            node_res = np.asarray(node_residuals, dtype="float64")
+        elif bottom_residuals is not None:
+            node_res = bottom_residuals @ self.H.S.T      # (n_obs, n_nodes)
+        else:
+            raise ValueError("fit needs bottom_residuals or node_residuals")
         W, lam = shrink_covariance(node_res)
         self.shrinkage = lam
         self.G = mint_projection(self.H, W)

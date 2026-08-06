@@ -143,6 +143,64 @@ def test_blanket_service_level_ablation_is_flat():
     assert np.allclose(out["target_quantile"], 0.95)
 
 
+def test_overage_components_are_realisable_by_the_ledger():
+    """Every cost the fractile prices must be a cost the simulator can charge.
+
+    This is the property that broke twice. The fractile bills three overage
+    components — holding, markdown, spoilage — and the policy trades real gross
+    margin away to avoid them. If the ledger never levies one, the quantile is
+    depressed for nothing: markdown was un-levied until terminal inventory started
+    being marked down, and spoilage was billed at 54% of overage on a 21-day shelf
+    where a 9-day risk period can never produce waste.
+
+    So: charge spoilage only when the risk period actually outruns shelf life, and
+    when it does, the simulator must be able to realise it.
+    """
+    R, L = CFG.decision.review_period, CFG.decision.lead_time
+    risk = R + L
+
+    # A shelf life comfortably longer than the risk period must attract no
+    # spoilage charge at all.
+    safe = CostParams(price=np.array([4.0]), unit_cost=np.array([2.0]),
+                      margin_rate=np.array([0.26]), shelf_life=np.array([21.0]))
+    assert critical_fractile(safe, risk)["spoilage_component"][0] == pytest.approx(0.0), (
+        "a 21-day shelf is billed for spoilage a 9-day risk period cannot cause"
+    )
+
+    # A shelf life shorter than the risk period must attract one...
+    short = CostParams(price=np.array([4.0]), unit_cost=np.array([2.0]),
+                       margin_rate=np.array([0.26]), shelf_life=np.array([4.0]))
+    charged = critical_fractile(short, risk)["spoilage_component"][0]
+    assert charged > 0, "a 4-day shelf over a 9-day risk period should carry spoilage"
+
+    # ...and the simulator must actually be able to charge it on that item.
+    n, h = 30, 28
+    rng = np.random.default_rng(19)
+    demand = rng.poisson(6.0, size=(n, h)).astype("float64")
+    cp = CostParams(price=np.full(n, 4.0), unit_cost=np.full(n, 2.0),
+                    margin_rate=np.full(n, 0.26), shelf_life=np.full(n, 4.0))
+    res = simulate(demand, np.full(n, 6.0 * risk), cp, np.arange(n).astype(str), _dates(h))
+    assert res.totals["waste_cost"] > 0, (
+        "the fractile charges spoilage on a 4-day shelf but the ledger realises none"
+    )
+
+
+def test_markdown_is_levied_on_terminal_inventory():
+    """The other half of the same property."""
+    n, h = 20, 28
+    demand = np.zeros((n, h))                     # nothing sells; all stock survives
+    cp = CostParams(price=np.full(n, 5.0), unit_cost=np.full(n, 2.0),
+                    margin_rate=np.full(n, 0.3), shelf_life=np.full(n, 720.0))
+    res = simulate(demand, np.full(n, 40.0), cp, np.arange(n).astype(str), _dates(h),
+                   initial_stock=np.full(n, 40.0))
+    assert res.totals["markdown_cost"] > 0
+    expected = 40.0 * 2.0 * CFG.decision.markdown_risk * n
+    assert res.totals["markdown_cost"] == pytest.approx(expected, rel=1e-6)
+    assert res.totals["realized_margin"] < 0, (
+        "holding 40 units of unsold durable stock for 28 days must lose money"
+    )
+
+
 def test_perishable_gets_lower_quantile_than_durable():
     cp = CostParams(
         price=np.array([5.0, 5.0]),

@@ -41,7 +41,14 @@ class Column:
             errs.append(f"{self.name}: {int(s.isna().sum())} nulls in non-nullable column")
         v = s.dropna()
         if self.kind == "int" and not pd.api.types.is_integer_dtype(v):
-            if not np.allclose(v.to_numpy(dtype="float64") % 1, 0):
+            # The int branch is entered precisely when the dtype is *not* integer,
+            # so a string column lands here and `astype("float64")` raises a bare
+            # ValueError before the gate can turn it into a reported rejection. The
+            # whole point of Stage 0 is that a bad feed produces a clear verdict
+            # rather than a stack trace.
+            if not pd.api.types.is_numeric_dtype(v):
+                errs.append(f"{self.name}: expected integral values, got {v.dtype}")
+            elif len(v) and not np.allclose(v.to_numpy(dtype="float64") % 1, 0):
                 errs.append(f"{self.name}: expected integral values")
         if self.kind == "float" and not pd.api.types.is_numeric_dtype(v):
             errs.append(f"{self.name}: expected numeric, got {v.dtype}")

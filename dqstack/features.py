@@ -100,10 +100,16 @@ class Panel:
     def with_series(self, series: pd.DataFrame) -> "Panel":
         """Same matrices, different static-feature vintage.
 
-        The y/carried/price matrices are raw observations and do not depend on
-        when Stage 1 ran; only the diagnostics do. Swapping just the series frame
-        lets each origin block train on diagnostics computed as of that block,
-        without rebuilding a 1,000 x 1,128 panel five times.
+        Swapping just the series frame lets each origin block train on diagnostics
+        computed as of that block, without rebuilding a 1,000 x 1,128 panel five
+        times.
+
+        Note precisely what is and is not vintage-independent. `y_raw`, `carried`
+        and `price` are raw observations. `y` is *not*: it carries the Stage-1
+        censoring mask, so it depends on when the detector ran. That is why the
+        detector is built to be strictly backward-looking per row rather than
+        re-derived per vintage — an earlier version of this docstring claimed y was
+        vintage-independent, which was false and hid a leak.
         """
         return Panel(series=series, dates=self.dates, y=self.y, y_raw=self.y_raw,
                      carried=self.carried, price=self.price, snap=self.snap,

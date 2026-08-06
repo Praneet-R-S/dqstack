@@ -171,7 +171,11 @@ def _fforma_objective(losses: np.ndarray, n_class: int):
         p /= p.sum(axis=1, keepdims=True)
         wl = (p * losses).sum(axis=1, keepdims=True)          # expected loss
         grad = p * (losses - wl)
-        hess = np.maximum(losses * p * (1.0 - p) - grad * (1.0 - 2.0 * p), 1e-6)
+        # FFORMA surrogate hessian: L*p*(1-p) - grad*p. The damping term is
+        # grad*p, not grad*(1-2p) — the latter flips sign at p = 0.5 and can make
+        # the surrogate negative, which the max() then clamps to the floor and
+        # silently turns the update into a fixed-size step.
+        hess = np.maximum(losses * p * (1.0 - p) - grad * p, 1e-6)
         return grad.T.reshape(-1), hess.T.reshape(-1)
 
     return obj
@@ -251,7 +255,9 @@ class MetaLearner:
             p /= p.sum(axis=1, keepdims=True)
             wl = (p * L).sum(axis=1, keepdims=True)
             grad = p * (L - wl)
-            hess = np.maximum(L * p * (1 - p) - grad * (1 - 2 * p), 1e-6)
+            # Same surrogate as _fforma_objective; this is the executing path on
+            # LightGBM 4.x, where `fobj` no longer exists.
+            hess = np.maximum(L * p * (1 - p) - grad * p, 1e-6)
             step = []
             for k in range(K):
                 tgt = -grad[:, k] / hess[:, k]
