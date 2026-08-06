@@ -52,6 +52,53 @@ def test_quality_gate_failure_is_an_exception_type():
     assert issubclass(QualityGateFailure, RuntimeError)
 
 
+# ------------------------------------------------------------------ quantile axis
+
+def test_median_index_is_not_the_midpoint_index():
+    """QUANTILES is deliberately asymmetric — three levels below the median, five
+    above, because the upper tail is what sets inventory. So `len(QUANTILES) // 2`
+    is *not* the median, and using it as one silently scores every point-accuracy
+    metric against P75. That was live across the FVA ladder, the leaderboard, the
+    reconciliation shift and the served forecast, and it presented as a uniform
+    +16% forecast bias on every candidate.
+    """
+    from dqstack.config import Q50_INDEX
+
+    assert QUANTILES[Q50_INDEX] == 0.50
+    midpoint = len(QUANTILES) // 2
+    assert QUANTILES[midpoint] != 0.50, (
+        "QUANTILES became symmetric; this guard and the Q50_INDEX comment need revisiting"
+    )
+    assert Q50_INDEX != midpoint
+
+
+def test_median_of_agrees_with_the_canonical_index():
+    from dqstack.config import Q50_INDEX
+    from dqstack.models.dist import median_of
+
+    rng = np.random.default_rng(51)
+    q = np.sort(rng.uniform(0, 40, size=(64, 12, len(QUANTILES))), axis=-1)
+    assert np.array_equal(median_of(q), q[..., Q50_INDEX])
+
+
+def test_no_module_recomputes_a_median_index_by_halving():
+    """Guards the whole family of this bug rather than the five sites it had."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent / "dqstack"
+    offenders = []
+    for f in root.rglob("*.py"):
+        text = f.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if "len(QUANTILES) // 2" in line or "shape[-1] // 2" in line:
+                offenders.append(f"{f.relative_to(root)}:{lineno}")
+    assert not offenders, (
+        "median index derived by halving; use config.Q50_INDEX instead: " + ", ".join(offenders)
+    )
+
+
 # ------------------------------------------------------------------ stage 3
 
 def test_quantiles_are_monotone_and_non_negative_after_sanitize():
@@ -280,6 +327,28 @@ def test_median_is_never_conformally_shifted():
     assert np.allclose(out[:, med_k], q[:, med_k], atol=1e-6), (
         "the median moved even though its offset was zero — check apply()"
     )
+
+
+def test_median_survives_an_adjusted_neighbour_crossing_it():
+    """A zero median offset is not enough on its own.
+
+    Sorting the quantile vector promotes an adjusted lower level past the median,
+    and after the sort that level *becomes* the median. This is the exact case
+    that kept Stage 6 costing WRMSSE after the offset was already pinned.
+    """
+    cal = ConformalCalibrator()
+    q = np.array([[1.0, 2.0, 4.0, 5.0, 7.0, 9.0, 11.0, 13.0, 16.0]])
+    offsets = np.array([0.0, 0.0, 3.0, 0.0, 1.9, 3.6, 6.3, 11.5, 21.6])
+    med_k = QUANTILES.index(0.50)
+
+    out = cal._monotone_about_median(q + offsets)
+    assert out[0, med_k] == pytest.approx(5.0), (
+        f"median moved to {out[0, med_k]} despite a zero offset"
+    )
+    assert (np.diff(out, axis=-1) >= -1e-6).all(), "result is not monotone"
+    assert (out >= 0).all()
+    # The lower level that would have crossed is clamped to the median, not dropped.
+    assert out[0, med_k - 1] == pytest.approx(5.0)
 
 
 def test_offsets_are_declined_when_they_do_not_help_out_of_sample():

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .config import CFG
+from .config import CFG, Q50_INDEX
 
 # The twelve aggregation levels. Level 12 is the bottom (item x store); the
 # others are the groupings a planning organisation actually reviews.
@@ -229,8 +229,7 @@ class Reconciler:
         distribution by the median's correction preserves both coherence of the
         central forecast and the calibrated spread that Stage 6 established.
         """
-        med_idx = q.shape[-1] // 2
-        med = q[..., med_idx]
+        med = q[..., Q50_INDEX]
         rec = self.reconcile(med, node_base)
         delta = (rec - med)[..., None]
         return np.maximum(q + delta, 0.0)

@@ -83,12 +83,13 @@ class ZeroShotPrior:
                 out[c] = out[c].astype(str).astype(dtype)
         return out[self.features[group]]
 
-    def fit(self, P: Panel, train_origins: list[int], rounds: int = 260) -> "ZeroShotPrior":
+    def fit(self, P: Panel, train_origins: list[int], rounds: int = 260,
+            respect_regimes: bool = True) -> "ZeroShotPrior":
         from ..features import feature_columns
 
         for group, (lo, hi) in HORIZON_GROUPS.items():
             hs = tuple(range(lo, hi + 1))
-            d = make_design(P, train_origins, hs)
+            d = make_design(P, train_origins, hs, respect_regimes=respect_regimes)
             d = d[np.isfinite(d["y"])].reset_index(drop=True)
             feats = admissible(feature_columns(d))
             self.features[group] = feats

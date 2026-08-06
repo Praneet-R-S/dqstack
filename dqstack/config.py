@@ -37,6 +37,14 @@ HORIZON_GROUPS = {                # Stage 3: grouped direct multi-horizon
 QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.975, 0.99)
 Q_LABELS = tuple(f"p{int(round(q * 1000)):03d}" for q in QUANTILES)
 
+# The index of the median. Never write `len(QUANTILES) // 2` — this tuple is
+# deliberately asymmetric (three levels below the median, five above, because the
+# upper tail is what sets inventory), so the midpoint index is 4, which is P75.
+# Using it as the median silently scores every point-accuracy metric against the
+# 75th percentile and makes the whole system look like it over-forecasts.
+Q50_INDEX = QUANTILES.index(0.50)
+assert QUANTILES[Q50_INDEX] == 0.50
+
 # ---------------------------------------------------------------- stage 1
 
 @dataclass(frozen=True)

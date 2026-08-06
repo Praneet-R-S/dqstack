@@ -48,21 +48,50 @@ def pelt_l2(x: np.ndarray, penalty: float, min_size: int) -> list[int]:
     F = np.full(n + 1, np.inf)
     F[0] = -penalty
     prev = np.zeros(n + 1, dtype="int64")
-    candidates = [0]
+
+    # Candidate set in a preallocated buffer with a live count, so each iteration
+    # is numpy slicing rather than list rebuilding. The inner loop must be
+    # vectorised: with the *correct* pruning rule the candidate set stays large
+    # (that is the point — the buggy rule was fast precisely because it discarded
+    # candidates it had no right to), and a Python-level loop over it costs ~31
+    # minutes for 1,000 series against ~20 seconds vectorised.
+    cand = np.empty(n + 2, dtype="int64")
+    cand[0] = 0
+    ncand = 1
 
     for t in range(min_size, n + 1):
-        best, best_s = np.inf, 0
-        for s in candidates:
-            if t - s < min_size:
-                continue
-            v = F[s] + cost(s, t) + penalty
-            if v < best:
-                best, best_s = v, s
-        if not np.isfinite(best):
+        c = cand[:ncand]
+        m = t - c
+        live = m >= 1
+        c, m = c[live], m[live]
+        if c.size == 0:
             continue
-        F[t], prev[t] = best, best_s
-        candidates = [s for s in candidates if F[s] + penalty <= F[t]]
-        candidates.append(t)
+
+        seg = cs[t] - cs[c]
+        costs = (cs2[t] - cs2[c]) - seg * seg / m
+        total = F[c] + costs + penalty
+
+        elig = m >= min_size
+        if not elig.any() or not np.isfinite(total[elig]).any():
+            # Nothing admissible yet; keep accumulating candidates.
+            cand[ncand] = t
+            ncand += 1
+            continue
+        j = np.flatnonzero(elig)[np.argmin(total[elig])]
+        F[t], prev[t] = total[j], c[j]
+
+        # Killick's pruning rule: discard s only when it can never again be the
+        # optimal predecessor, i.e. keep while F[s] + C(s,t) + K <= F[t], with
+        # K = 0 for the L2 mean-shift cost. Substituting the constant `penalty`
+        # for `cost(s, t)` over-prunes whenever cost(s, t) < penalty — exactly the
+        # low-within-variance, level-shift regime this detector exists to find. It
+        # returns a higher-cost partition than the optimum, often collapsing to
+        # {0, t} and finding nothing, while still claiming to be exact.
+        keep = c[F[c] + costs <= F[t]]
+        ncand = keep.size
+        cand[:ncand] = keep
+        cand[ncand] = t
+        ncand += 1
 
     cps: list[int] = []
     t = n
@@ -195,9 +224,21 @@ def detect_censoring(
 
 # ------------------------------------------------------------------ main
 
-def run(panel: pd.DataFrame | None = None, cfg=CFG) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
+        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Diagnose every series using data up to `asof` only.
+
+    The cutoff exists because these outputs are *features*. Computing them once
+    over the full history and attaching them to a training row at an earlier
+    origin leaks: a 2025 example would carry that series' 2026 intermittency,
+    health score and age. It cannot leak the target value, only the series'
+    character, which is precisely the kind of mild leakage that survives review
+    and inflates a backtest.
+    """
     if panel is None:
         panel = pd.read_parquet(INTERIM / "panel.parquet")
+    if asof is not None:
+        panel = panel[panel["date"] <= pd.Timestamp(asof)].reset_index(drop=True)
 
     panel = panel.sort_values(["series_id", "date"], kind="stable").reset_index(drop=True)
     asof = pd.Timestamp(panel["date"].max())
@@ -314,16 +355,39 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG) -> tuple[pd.DataFrame, pd.Da
                     regime_start = pd.Timestamp(dates_all[lo + cand])
         weeks_since_break = float((asof - regime_start).days) / 7.0
 
-        # --- terminal test: recent level collapsed, or a long trailing zero run
+        # --- terminal test: recent level collapsed, or a trailing zero run
         look = cfg.diagnosis.terminal_lookback_days
-        recent = valid[-look:] if n_valid > look else valid
-        prior = valid[-2 * look : -look] if n_valid > 2 * look else valid
-        ratio = float(recent.mean() / prior.mean()) if prior.mean() > 0 else 1.0
-        trailing_zeros = int(_longest_run((valid[-look:] == 0))) if n_valid > look else 0
+        # The comparison window must not contain the window it is compared against.
+        # Falling back to `prior = valid` when history is short puts `recent`
+        # inside its own baseline, pulling the ratio toward 1 and silently
+        # disabling the test on exactly the young series most likely to be dying.
+        if n_valid > 2 * look:
+            recent, prior = valid[-look:], valid[-2 * look : -look]
+        elif n_valid >= 2 * 28:
+            h = n_valid // 2
+            recent, prior = valid[-h:], valid[:-h]
+        else:
+            recent = prior = None
+        ratio = (
+            float(recent.mean() / prior.mean())
+            if recent is not None and prior.mean() > 0
+            else 1.0
+        )
+
+        # A *trailing* run, not the longest run anywhere in the window. An item
+        # that was out for three weeks in month one and has sold every day since
+        # is not terminal, and `_longest_run` over the window cannot tell the
+        # difference.
+        zero_tail = 0
+        for v in valid[::-1]:
+            if v != 0:
+                break
+            zero_tail += 1
+
         delisted = bool(last_i < len(carried) - 14)
         is_terminal = bool(
             ratio < cfg.diagnosis.terminal_decline_ratio
-            or trailing_zeros >= cfg.diagnosis.terminal_min_zero_run
+            or zero_tail >= cfg.diagnosis.terminal_min_zero_run
             or delisted
         )
 

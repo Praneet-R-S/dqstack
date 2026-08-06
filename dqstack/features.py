@@ -45,6 +45,31 @@ CAT_FEATURES = [
 ]
 
 
+DIAG_COLS = [
+    "series_id", "planning_class", "adi", "cv2", "health_score", "regime_start",
+    "age_weeks", "weeks_since_break", "seasonal_strength", "trend_strength",
+    "spectral_entropy", "acf7", "acf364", "zero_share", "cv", "mean_demand",
+    "censored_rate", "ooa_rate", "abc", "xyz", "avg_price", "price_volatility",
+    "revenue", "days_since_last_sale", "is_terminal", "n_obs",
+]
+ID_COLS = ["series_id", "item_id", "store_id", "dept_id", "cat_id",
+           "state_id", "cluster_id"]
+
+
+def series_frame(ids: pd.DataFrame, diag: pd.DataFrame) -> pd.DataFrame:
+    """Attach a diagnostics *vintage* to the stable series identity columns.
+
+    Split out from build_panel so a caller can rebuild the static-feature frame
+    from Stage 1 run at a different as-of date, without touching the matrices.
+    """
+    out = ids.merge(
+        diag[DIAG_COLS].assign(series_id=lambda d: d["series_id"].astype(str)),
+        on="series_id", how="left",
+    )
+    out["planning_class"] = out["planning_class"].fillna("cold_start")
+    return out
+
+
 # ------------------------------------------------------------------ panel -> matrices
 
 @dataclass
@@ -70,6 +95,18 @@ class Panel:
 
     def index_of(self, d) -> int:
         return int(self.dates.get_loc(pd.Timestamp(d)))
+
+    def with_series(self, series: pd.DataFrame) -> "Panel":
+        """Same matrices, different static-feature vintage.
+
+        The y/carried/price matrices are raw observations and do not depend on
+        when Stage 1 ran; only the diagnostics do. Swapping just the series frame
+        lets each origin block train on diagnostics computed as of that block,
+        without rebuilding a 1,000 x 1,128 panel five times.
+        """
+        return Panel(series=series, dates=self.dates, y=self.y, y_raw=self.y_raw,
+                     carried=self.carried, price=self.price, calendar=self.calendar,
+                     n_history=self.n_history)
 
 
 def build_panel(
@@ -127,19 +164,8 @@ def build_panel(
         )
         .reset_index()
     )
-    series = pd.DataFrame({"series_id": sids}).merge(meta, on="series_id", how="left")
-    series = series.merge(
-        diag[[
-            "series_id", "planning_class", "adi", "cv2", "health_score", "regime_start",
-            "age_weeks", "weeks_since_break", "seasonal_strength", "trend_strength",
-            "spectral_entropy", "acf7", "acf364", "zero_share", "cv", "mean_demand",
-            "censored_rate", "ooa_rate", "abc", "xyz", "avg_price", "price_volatility",
-            "revenue", "days_since_last_sale", "is_terminal", "n_obs",
-        ]].assign(series_id=lambda d: d["series_id"].astype(str)),
-        on="series_id",
-        how="left",
-    )
-    series["planning_class"] = series["planning_class"].fillna("cold_start")
+    ids = pd.DataFrame({"series_id": sids}).merge(meta, on="series_id", how="left")
+    series = series_frame(ids[ID_COLS], diag)
 
     cal = (
         panel[["date", "wday", "month", "year", "event_name", "event_type", "snap"]]
@@ -359,6 +385,7 @@ def make_design(
     origins: list[int],
     horizons: range | tuple[int, ...],
     with_target: bool = True,
+    respect_regimes: bool = True,
 ) -> pd.DataFrame:
     """Assemble the model-ready matrix for a set of origins.
 
@@ -418,6 +445,24 @@ def make_design(
     # signal and must not become training examples.
     if with_target:
         out = out[out["future_carried"] == 1].reset_index(drop=True)
+
+        # Stage 1's regime segmentation only means something if it truncates
+        # something. `regime_start` was previously computed, carried through the
+        # feature frame and shown in the UI while changing no training example at
+        # all — the entire PELT stage had no effect on any model, which is also
+        # why a defect in the pruning rule was invisible in every metric.
+        #
+        # Applied to training rows rather than by blanking feature windows: the
+        # specification asks for the training window to start at the most recent
+        # credible break, not for pre-break history to become unreadable. A lag-364
+        # feature spanning a break is still information, and Stage 1 already hands
+        # the model `weeks_since_break` so it can discount it.
+        if respect_regimes and "regime_start" in P.series.columns:
+            rs = P.series[["series_id", "regime_start"]].dropna()
+            if len(rs):
+                out = out.merge(rs, on="series_id", how="left")
+                keep = out["regime_start"].isna() | (out["target_date"] >= out["regime_start"])
+                out = out[keep].drop(columns=["regime_start"]).reset_index(drop=True)
     return out
 
 
@@ -430,41 +475,101 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
 
 @dataclass
 class SplitPlan:
-    """Rolling-origin, purged split. Every block is separated from the next by
-    one full horizon so a training target never overlaps a later block's target.
+    """Rolling-origin, purged split.
+
+    Five blocks, each separated from the next by one full horizon so that no
+    block's *target dates* ever overlap a later block's. Purging by origin alone
+    is not enough: an origin 7 days before the next block still forecasts 28 days
+    forward, so its targets run 21 days into that block. Halving one contiguous
+    calibration block — which is what this used to do — left the FFORMA meta
+    origins and the conformal origins sharing 21 target dates, so Stage 6 was
+    calibrated partly on data Stage 4 had already fitted to, and the coverage
+    guarantee was optimistic in exactly the way the stage exists to prevent.
     """
 
     train: list[int]
-    calib: list[int]
+    meta: list[int]
+    conformal: list[int]
     eval: int
     live: int
     dates: pd.DatetimeIndex
+    horizon: int = 28
+
+    @property
+    def calib(self) -> list[int]:
+        """Backwards-compatible view of both held-out blocks."""
+        return self.meta + self.conformal
+
+    def target_span(self, origins: list[int] | int) -> tuple[int, int]:
+        o = [origins] if isinstance(origins, int) else origins
+        return min(o) + 1, max(o) + self.horizon
+
+    def assert_purged(self) -> None:
+        """Fails loudly rather than quietly training on overlapping targets."""
+        blocks = [("train", self.train), ("meta", self.meta),
+                  ("conformal", self.conformal), ("eval", [self.eval])]
+        for (n1, b1), (n2, b2) in zip(blocks[:-1], blocks[1:]):
+            end1 = self.target_span(b1)[1]
+            start2 = self.target_span(b2)[0]
+            if end1 >= start2:
+                raise ValueError(
+                    f"{n1} targets end at index {end1} but {n2} targets begin at "
+                    f"{start2} — blocks overlap by {end1 - start2 + 1} days"
+                )
 
     def describe(self) -> str:
         d = self.dates
-        return (
-            f"train  {len(self.train):>3} origins  {d[self.train[0]].date()} .. {d[self.train[-1]].date()}\n"
-            f"calib  {len(self.calib):>3} origins  {d[self.calib[0]].date()} .. {d[self.calib[-1]].date()}\n"
-            f"eval     1 origin   {d[self.eval].date()}  (targets +1..+28, actuals known)\n"
-            f"live     1 origin   {d[self.live].date()}  (no actuals; this is the served forecast)"
-        )
+
+        def line(name: str, o: list[int]) -> str:
+            lo, hi = self.target_span(o)
+            return (f"{name:<9} {len(o):>3} origins  {d[o[0]].date()} .. {d[o[-1]].date()}"
+                    f"   targets {d[lo].date()} .. {d[hi].date()}")
+
+        return "\n".join([
+            line("train", self.train),
+            line("meta", self.meta),
+            line("conformal", self.conformal),
+            line("eval", [self.eval]) + "  (actuals known)",
+            line("live", [self.live]) + "  (no actuals; the served forecast)",
+        ])
 
 
 def make_splits(
-    P: Panel, horizon: int = 28, n_train_origins: int = 32, step: int = 7, calib_span: int = 56
+    P: Panel,
+    horizon: int = 28,
+    n_train_origins: int = 32,
+    step: int = 7,
+    n_meta_origins: int = 5,
+    n_conformal_origins: int = 5,
+    min_origin: int = 400,
 ) -> SplitPlan:
     # The live origin is the last day with observed sales. Its targets land in
     # the extended future region, which has calendar and planned price but no
-    # actuals � that is the forecast the workspace serves.
+    # actuals — that is the forecast the workspace serves.
     live = P.n_history - 1
     ev = live - horizon
-    calib_end = ev - horizon
-    calib = list(range(calib_end - calib_span, calib_end + 1, step))
-    train_end = calib[0] - horizon
-    train = list(range(train_end - step * (n_train_origins - 1), train_end + 1, step))
-    if train[0] < 400:
-        train = [o for o in train if o >= 400]
-    return SplitPlan(train=train, calib=calib, eval=ev, live=live, dates=P.dates)
+
+    def block(end: int, n: int) -> list[int]:
+        return list(range(end - step * (n - 1), end + 1, step))
+
+    # Walk backwards from the eval origin, inserting a full horizon of purge
+    # between every pair of blocks.
+    conformal = block(ev - horizon, n_conformal_origins)
+    meta = block(conformal[0] - horizon, n_meta_origins)
+    train = block(meta[0] - horizon, n_train_origins)
+
+    train = [o for o in train if o >= min_origin]
+    if not train:
+        raise ValueError(
+            f"no training origins survive the purge: need history beyond index "
+            f"{min_origin}, but the first training origin would be "
+            f"{meta[0] - horizon - step * (n_train_origins - 1)}"
+        )
+
+    sp = SplitPlan(train=train, meta=meta, conformal=conformal, eval=ev,
+                   live=live, dates=P.dates, horizon=horizon)
+    sp.assert_purged()
+    return sp
 
 
 if __name__ == "__main__":

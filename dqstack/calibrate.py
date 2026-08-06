@@ -183,7 +183,38 @@ class ConformalCalibrator:
         for s in np.unique(strata):
             if s in self.offsets:
                 adj[strata == s] = self.offsets[s]
-        return sanitize((flat + adj).reshape(shape))
+        return self._monotone_about_median(flat + adj).reshape(shape)
+
+    def _monotone_about_median(self, a: np.ndarray) -> np.ndarray:
+        """Restore monotonicity without displacing the median.
+
+        Pinning the median's *offset* to zero is not sufficient. The usual
+        repair — clip at zero and sort the whole quantile vector — will happily
+        promote an adjusted neighbour past the median, and after the sort that
+        neighbour *is* the median. Measured on real output: a p25 shifted up by
+        3 units moved a median of 5.0 to 7.0 with its own offset at zero, which
+        is how this stage went on costing 19% of WRMSSE after the offset was
+        already pinned.
+
+        So the median is held as the anchor and each tail is made monotone
+        toward it: lower levels are pushed down to at most their upper
+        neighbour, upper levels up to at least their lower neighbour. The result
+        is non-decreasing across the whole vector, non-negative, and leaves the
+        point forecast exactly where the model put it.
+        """
+        taus = np.asarray(self.quantiles)
+        m = int(np.argmin(np.abs(taus - 0.5)))
+        a = np.nan_to_num(np.asarray(a, dtype="float64"),
+                          nan=0.0, posinf=0.0, neginf=0.0)
+        a = np.maximum(a, 0.0)
+
+        # Sweeping outward from the median makes each clamp reference an already
+        # settled neighbour, so one pass per side is enough.
+        for k in range(m - 1, -1, -1):
+            a[:, k] = np.minimum(a[:, k], a[:, k + 1])
+        for k in range(m + 1, a.shape[1]):
+            a[:, k] = np.maximum(a[:, k], a[:, k - 1])
+        return a.astype("float32")
 
     # -------------------------------------------------------------- report
 

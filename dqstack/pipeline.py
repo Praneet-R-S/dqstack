@@ -37,10 +37,13 @@ from .config import (
     HORIZON_GROUPS,
     INTERIM,
     PROCESSED,
+    Q50_INDEX,
     QUANTILES,
     Config,
 )
-from .features import Panel, build_panel, horizon_group_of, make_splits
+from .features import (
+    ID_COLS, Panel, build_panel, horizon_group_of, make_splits, series_frame,
+)
 from .models import foundation, lifecycle, neural, statistical
 from .models.dist import fit_dispersion, nb_quantiles, sanitize
 from .models.gbm import GBMPool
@@ -212,13 +215,37 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     t0 = time.perf_counter()
     P = build_panel(ing.panel, diag, masks, apply_mask=cfg.enable_censor_masking)
     sp = make_splits(P, horizon=HORIZON, n_train_origins=12 if quick else 32)
-    n_meta = max(2, len(sp.calib) // 2)
-    meta_origins, conf_origins = sp.calib[:n_meta], sp.calib[n_meta:]
+    # Blocks come pre-purged from make_splits, which asserts that no block's
+    # target dates reach into the next one's.
+    meta_origins, conf_origins = sp.meta, sp.conformal
     timings["stage2_featurize"] = time.perf_counter() - t0
     log(f"  matrix {P.n_series} series x {P.n_days} days; "
         f"{np.isnan(P.y).mean():.1%} of cells masked as not-demand-signal")
     log("  " + sp.describe().replace("\n", "\n  "))
     log(f"  meta origins {len(meta_origins)}, conformal origins {len(conf_origins)}")
+
+    # ---- static-feature vintages, one per origin block.
+    #
+    # Stage 1's outputs are *features*. Computed once over the full history and
+    # attached to a training row at an earlier origin, they leak: a 2025 example
+    # would carry that series' 2026 intermittency, health score, revenue and age.
+    # It cannot leak the target value, only the series' character — which is
+    # exactly the mild leakage that survives review and inflates a backtest.
+    #
+    # Each block therefore gets diagnostics computed as of its *first* origin, so
+    # every static feature is strictly backward-looking. Later origins inside a
+    # block see slightly stale diagnostics, which is fine: staleness is what a
+    # production system has too, whereas foresight is not.
+    ids = P.series[ID_COLS]
+    vintages: dict[str, Panel] = {}
+    for name, at in (("train", sp.train[0]), ("meta", sp.meta[0]),
+                     ("conformal", sp.conformal[0]), ("eval", sp.eval)):
+        d_v, _ = diagnose.run(hist_panel, cfg, asof=P.dates[at])
+        vintages[name] = P.with_series(series_frame(ids, d_v))
+        log(f"  diagnostics vintage {name:<10s} as of {P.dates[at].date()}")
+    vintages["live"] = P            # full history is correct for the served forecast
+    log(f"  class churn train->live "
+        f"{(vintages['train'].series['planning_class'].to_numpy() != P.series['planning_class'].to_numpy()).mean():.1%}")
 
     # ---------------------------------------------------------- stage 3
     section("STAGE 3 — train the candidate pool")
@@ -227,26 +254,31 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     fit_origins = sp.train[:-3]
 
     log("  LightGBM (Tweedie point, category-segmented + 9 quantile heads)")
-    gbm = GBMPool().fit(P, fit_origins, valid_for_es)
+    P_tr = vintages["train"]
+    gbm = GBMPool().fit(P_tr, fit_origins, valid_for_es,
+                        respect_regimes=cfg.enable_regime_windows)
 
     log("  zero-shot prior (covariate-only global model, foundation-model slot)")
-    zs = foundation.ZeroShotPrior().fit(P, fit_origins)
+    zs = foundation.ZeroShotPrior().fit(P_tr, fit_origins,
+                                        respect_regimes=cfg.enable_regime_windows)
 
     log("  NHITS (neural candidate)")
     nn = neural.NeuralCandidate(horizon=HORIZON).fit(
-        P, max_origin=sp.train[-1], n_samples=20_000 if quick else 60_000
+        P_tr, max_origin=sp.train[-1], n_samples=20_000 if quick else 60_000
     )
 
     log("  cohort lifecycle curves")
-    cohorts = lifecycle.CohortCurves().fit(P, max_origin=sp.train[-1])
+    cohorts = lifecycle.CohortCurves().fit(P_tr, max_origin=sp.train[-1])
     log(f"      {len(cohorts.curves)} cohort curves fitted")
 
     gbm_nomask = None
     if ablate_censoring:
         log("  ablation arm: Tweedie trained on unmasked sales (stockout zeros kept)")
         P_nomask = build_panel(ing.panel, diag, masks, apply_mask=False)
+        P_nomask = P_nomask.with_series(vintages["train"].series)
         gbm_nomask = GBMPool().fit(P_nomask, fit_origins, valid_for_es,
-                                   verbose=False, with_quantiles=False)
+                                   verbose=False, with_quantiles=False,
+                                   respect_regimes=cfg.enable_regime_windows)
 
     tr = Trained(gbm=gbm, gbm_nomask=gbm_nomask, zeroshot=zs, nn=nn, cohorts=cohorts)
     timings["stage3_train"] = time.perf_counter() - t0
@@ -260,7 +292,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     for O in meta_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
         acc_actual.append(y)
-        for name, mu in candidate_points(P, O, horizons, tr).items():
+        for name, mu in candidate_points(vintages["meta"], O, horizons, tr).items():
             acc_points.setdefault(name, []).append(mu)
     A = np.concatenate(acc_actual, axis=0)
     strata_2d = np.char.add(
@@ -278,13 +310,13 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     loss_frames = []
     for O in meta_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
-        _, qs = candidate_quantiles(P, O, horizons, tr)
+        _, qs = candidate_quantiles(vintages["meta"], O, horizons, tr)
         qs = {k: v for k, v in qs.items() if k in ENSEMBLE}
         loss_frames.append(comb.candidate_losses(y, qs, np.isfinite(y)))
     losses = sum(loss_frames) / len(loss_frames)
     losses.index = P.series.index
 
-    diag_aligned = P.series.set_index(P.series.index)
+    diag_aligned = vintages["meta"].series.set_index(vintages["meta"].series.index)
     meta = comb.MetaLearner().fit(diag_aligned, losses, cfg)
     W = meta.weights(diag_aligned, cfg)
     timings["stage4_combine"] = time.perf_counter() - t0
@@ -306,9 +338,9 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     resid = []
     for O in rec_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
-        _, qs = candidate_quantiles(P, O, horizons, tr)
+        _, qs = candidate_quantiles(vintages["meta"], O, horizons, tr)
         cq = comb.combine_quantiles(qs, W, meta.candidates)
-        med = cq[..., len(QUANTILES) // 2]
+        med = cq[..., Q50_INDEX]
         resid.append(np.nan_to_num(y - med, nan=0.0).T)
     R = np.concatenate(resid, axis=0)
     rc = reconcile.Reconciler().fit(P.series, R, cfg)
@@ -325,7 +357,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     cy, cq_list, cpc, chg = [], [], [], []
     for O in conf_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
-        _, qs = candidate_quantiles(P, O, horizons, tr)
+        _, qs = candidate_quantiles(vintages["conformal"], O, horizons, tr)
         cqq = comb.combine_quantiles(qs, W, meta.candidates)
         if cfg.enable_reconciliation:
             cqq = rc.reconcile_quantiles(cqq, rc.base_forecasts(P.y, O, horizons))
@@ -353,7 +385,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     Oe = sp.eval
     y_eval = np.stack([P.y[:, Oe + h] for h in horizons], axis=1)
     valid_eval = np.isfinite(y_eval)
-    pts_e, qs_e = candidate_quantiles(P, Oe, horizons, tr)
+    pts_e, qs_e = candidate_quantiles(vintages["eval"], Oe, horizons, tr)
 
     comb_e = comb.combine_quantiles(qs_e, W, meta.candidates)
     node_base_e = rc.base_forecasts(P.y, Oe, horizons)
@@ -371,7 +403,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     denom = evaluate.scale_denominator(np.nan_to_num(y_train_win, nan=0.0))
     denom_abs = np.nanmean(np.abs(np.diff(np.nan_to_num(y_train_win, nan=0.0), axis=1)), axis=1)
 
-    med = lambda q: q[..., len(QUANTILES) // 2]
+    med = lambda q: q[..., Q50_INDEX]
     stage_forecasts = {
         "0 seasonal naive (anchor)": pts_e["seasonal_naive"],
         "1 best single (LGBM-Q)": med(qs_e["lgbm_quantile"]),

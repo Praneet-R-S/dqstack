@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from . import combine as comb
-from .config import ARTIFACTS, CFG, HORIZON, QUANTILES, UI_DATA
+from .config import ARTIFACTS, CFG, HORIZON, Q50_INDEX, QUANTILES, UI_DATA
 from .decide import quantile_moments
 from .features import horizon_group_of
 
@@ -81,7 +81,7 @@ def prior_forecast(state: dict, lag: int = 7) -> tuple[np.ndarray, list[str]]:
     if CFG.enable_calibration:
         cq = state["conformal"].apply(cq, pc2, hg2)
 
-    med = cq[..., len(QUANTILES) // 2]
+    med = cq[..., Q50_INDEX]
     # Align: horizon h at the prior origin targets the same date as horizon
     # h - lag at the live origin.
     out = np.full((P.n_series, HORIZON), np.nan, dtype="float32")
@@ -102,7 +102,7 @@ def build_exceptions(
     Each reason is surfaced as its own tag so a planner can filter to the kind of
     problem they are in the mood to fix.
     """
-    med = fan[..., len(QUANTILES) // 2]
+    med = fan[..., Q50_INDEX]
     lo = fan[..., QUANTILES.index(0.10)]
     hi = fan[..., QUANTILES.index(0.90)]
 

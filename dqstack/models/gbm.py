@@ -85,12 +85,13 @@ class GBMPool:
         valid_origins: list[int],
         verbose: bool = True,
         with_quantiles: bool = True,
+        respect_regimes: bool = True,
     ) -> "GBMPool":
         for group, (lo, hi) in HORIZON_GROUPS.items():
             hs = tuple(range(lo, hi + 1))
             t0 = time.perf_counter()
-            tr = make_design(P, train_origins, hs)
-            va = make_design(P, valid_origins, hs)
+            tr = make_design(P, train_origins, hs, respect_regimes=respect_regimes)
+            va = make_design(P, valid_origins, hs, respect_regimes=respect_regimes)
             tr = tr[np.isfinite(tr["y"])].reset_index(drop=True)
             va = va[np.isfinite(va["y"])].reset_index(drop=True)
 

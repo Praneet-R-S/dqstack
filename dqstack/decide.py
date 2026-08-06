@@ -233,7 +233,22 @@ def simulate(
     waste_cost = (rec["waste"] * cp.unit_cost[:, None]).sum(axis=1)
     gross_margin = (rec["sales"] * (cp.price * cp.margin_rate)[:, None]).sum(axis=1)
     lost_margin = (rec["lost"] * (cp.price * cp.margin_rate)[:, None]).sum(axis=1)
-    realized_margin = gross_margin - holding_cost - waste_cost
+
+    # Markdown on whatever is still on the shelf when the horizon ends.
+    #
+    # Without this the simulator lets over-ordering be almost free: leftover stock
+    # simply vanishes at t = H, holding is only 0.22%/day, and the only penalty
+    # for ordering too much is spoilage on perishables. The critical fractile
+    # meanwhile *prices* markdown_risk as a component of overage, so the policy was
+    # being charged in the quantile for a cost the ledger never levied — the two
+    # halves of Stage 7 disagreed about what overage means, and the promotion gate
+    # reads the half that under-charges.
+    #
+    # Terminal stock is distinct from waste: waste is already gone and charged at
+    # full cost, this is stock that survived and must be cleared at a discount.
+    terminal_stock = rec["closing"][:, -1]
+    markdown_cost = terminal_stock * cp.unit_cost * cp.markdown_risk
+    realized_margin = gross_margin - holding_cost - waste_cost - markdown_cost
 
     # ---- ledger: one row per series-review-period
     for p, t0 in enumerate(review_days):
@@ -265,8 +280,15 @@ def simulate(
             )
         )
     ledger = pd.concat(ledger_rows, ignore_index=True)
+    last_period = ledger["period"].max()
+    ledger["markdown_cost"] = np.where(
+        ledger["period"].to_numpy() == last_period,
+        np.tile(markdown_cost, ledger["period"].nunique()),
+        0.0,
+    )
     ledger["realized_margin"] = (
-        ledger["gross_margin"] - ledger["holding_cost"] - ledger["waste_cost"]
+        ledger["gross_margin"] - ledger["holding_cost"]
+        - ledger["waste_cost"] - ledger["markdown_cost"]
     )
     ledger["fill_rate"] = ledger["sales"] / ledger["demand"].replace(0, np.nan)
 
@@ -282,6 +304,7 @@ def simulate(
         "gross_margin": float(gross_margin.sum()),
         "holding_cost": float(holding_cost.sum()),
         "waste_cost": float(waste_cost.sum()),
+        "markdown_cost": float(markdown_cost.sum()),
         "lost_margin": float(lost_margin.sum()),
         "realized_margin": float(realized_margin.sum()),
         "avg_inventory": float(rec["closing"].mean()),
