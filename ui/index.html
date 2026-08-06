@@ -309,14 +309,15 @@
 <!-- ====================================================== command palette -->
 <div class="palette-backdrop" id="paletteBackdrop" data-open="false"></div>
 <div class="palette" id="palette" data-open="false" role="dialog" aria-modal="true" aria-label="Command palette">
-  <input id="paletteInput" type="text" placeholder="Jump to item, location, or planning class…" autocomplete="off">
+  <input id="paletteInput" type="text" aria-label="Jump to item, location, or planning class"
+         placeholder="Jump to item, location, or planning class…" autocomplete="off">
   <div class="palette-list" id="paletteList" role="listbox"></div>
 </div>
 
 <div class="palette-backdrop" id="keysBackdrop" data-open="false"></div>
 <div class="palette" id="keysSheet" data-open="false" role="dialog" aria-modal="true"
      aria-label="Keyboard shortcuts">
-  <input value="Keyboard — spreadsheet conventions, not a new language" readonly
+  <input aria-label="Keyboard shortcuts" value="Keyboard — spreadsheet conventions, not a new language" readonly
          style="font-family:var(--font-ui);font-size:var(--fs-14)">
   <div class="palette-list">
     <div class="palette-item"><span>Move cell selection</span><span class="kbd">← ↑ ↓ →</span></div>
@@ -336,9 +337,9 @@
 
 <div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
 
-<script src="data/bundle.js?v=a6cc76d6"></script>
+<script src="data/bundle.js?v=7fe0fd9a"></script>
 <script src="js/util.js?v=18df86dd"></script>
-<script src="js/grid.js?v=ac0d923f"></script>
+<script src="js/grid.js?v=be833f18"></script>
 <script src="js/chart.js?v=9922be45"></script>
 <script src="js/views.js?v=75c048ff"></script>
 <script src="js/app.js?v=d498caff"></script>

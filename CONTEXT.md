@@ -170,6 +170,23 @@ Numbers move between runs; treat `artifacts/metrics.json` as authoritative and t
   down to ~0.43 overall recall is partial-censoring days, undetectable from sales
   alone — an honest asymmetry worth reporting.
 
+**Reconciliation: report with it, order without it.**
+
+Judged across all twelve aggregation levels, MinT improves the top and degrades the
+bottom, monotonically: total **-0.45**, state -0.36, category -0.31, store -0.19, ...
+item_store **+0.44**. Leaf-level WRMSSE goes 0.77 to 1.20, worse than the
+seasonal-naive anchor at 0.98. The ablation prices it: the arm without reconciliation
+earns **+150,692** realised margin over the full system, the largest positive delta in
+the table.
+
+Stage 7 sets an order-up-to level per item-location, so the decision is made at the
+leaves and there the trade is against us. `ReconcileConfig.for_decisions = False`
+routes the *decision* path through the unreconciled distribution while the aggregate
+planning views keep the reconciled one, which is coherent by construction and
+materially better at every level a planning organisation reviews. Reporting one number
+for both would have to be wrong for one of them. The spec anticipated this and
+declined to choose: "which matters depends on the decision being made."
+
 **Open / negative:**
 
 - **Combination does not clearly pay here.** The FFORMA proxy `Σ pₖLₖ` is *linear in
@@ -187,27 +204,46 @@ Numbers move between runs; treat `artifacts/metrics.json` as authoritative and t
 
 ## 6. What is left
 
-### A. Evidence gaps (~1 day)
-1. **`make ablate` has never run.** Three training runs. Definition-of-done item.
-2. **No CI.** Spec: "budgets that are not automated are wishes."
-3. **The M5 benchmark gate is unmeetable on synthetic data** and needs reframing in
-   the thesis, not quiet omission.
+### A. Evidence gaps — DONE except the writing
+1. **`make ablate` runs**, writing `artifacts/ablation.csv` (light arms: four backtest
+   origins, no cost sweep).
+2. **CI exists** (`.github/workflows/ci.yml`): tests, a UTF-8 source check, a JS parse
+   check, and an end-to-end smoke run asserting every artifact plus the run invariants
+   (conservation < 1e-6, no negative stock, projection error < 1e-6).
+3. **The M5 benchmark gate is unmeetable on synthetic data** and still needs reframing
+   in the thesis rather than quiet omission. The substitute claim is the censoring
+   precision/recall that real M5 cannot provide. STILL OPEN — a writing task.
 
-### B. Spec'd planner features missing (~3–4 days)
-Six of nine keyboard bindings are implemented. Missing, all real workflow:
-**Cmd-D fill-down**, **Cmd-C/Cmd-V Excel-compatible TSV paste**, **Shift-arrow
-multi-cell selection**, **Cmd-Z/Shift-Cmd-Z undo/redo across the pending set** (spec:
-"a planner who pastes a column and realizes it was the wrong column needs one
-keystroke, not forty"). Also **hierarchical grouping with expand/collapse and live
-aggregation**, and **column pinning/resize/reorder with persisted views**.
+### B. Planner features — DONE
+All nine of the spec's keybindings: arrows, Shift-arrow range extension, J/K,
+Cmd-D fill-down, Cmd-C/Cmd-V Excel-compatible TSV copy and paste, Cmd-Z/Shift-Cmd-Z
+undo-redo across the whole pending set, Enter, Cmd-Enter, Esc (itself undoable), E,
+Cmd-K, and `?` for a shortcut sheet. Plus hierarchical grouping with expand/collapse
+and live aggregation that includes pending edits, and persisted column widths/order.
 
-### C. Architecture the cut retains but was substituted away (~2 days)
-No API and no DuckDB — the UI reads a static JS bundle, so CON-1 (Arrow IPC), CON-3
-(batch read path) and CON-5 (aggregation in the store) are unexercised, and the
-DuckDB-WASM client-side query trick the spec calls the biggest perceived-performance
-win does not exist. **Performance budgets never measured** (bundle <250KB, LCP <1.5s,
-60fps over 30k rows). **Accessibility never audited** — the parallel ARIA grid exists
-but no screen reader or contrast check has been run.
+### C. Architecture and budgets — DONE
+`dqstack/serve.py`: DuckDB analytical store over the Parquet lake with aggregation as
+SQL (CON-5), Arrow IPC transfer (CON-1), read-only HTTP API with no inference on the
+read path (CON-3). Verify with `python -m dqstack.serve --selftest`.
+
+Measured, not asserted:
+
+| budget | target | measured |
+|---|---|---|
+| app code, gzipped | < 250 KB | **47.8 KB** |
+| grid paint, p95 | < 16 ms | **5.9 ms** (was 40 ms) |
+| frames > 32 ms | zero | **zero** |
+| sort / regroup | < 150 ms | 33 ms / 118 ms |
+| WCAG 2.2 AA contrast | 9 checks | **9 pass** |
+
+Arrow versus JSON on this project's own 28,000-row matrix: **1.44 MB against 3.26 MB
+(2.3x) and 1.1 ms against 65.6 ms to parse (61x)**. The spec's claim that "the parse
+cost difference is worse than the transfer cost difference" holds, with a factor of 26
+between the two ratios.
+
+Still open in C: **DuckDB-WASM in the browser** (the client-side query trick the spec
+calls the biggest perceived-performance win), and the UI still reads the static bundle
+rather than the API — the API exists and is tested, but nothing consumes it yet.
 
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
@@ -237,6 +273,17 @@ for eleven weeks and writing badly for one.
 
 - **Never write `len(QUANTILES) // 2`** for the median. Use `config.Q50_INDEX`. There
   is a test that greps the package for the halving idiom.
+- **Redirected stdout on Windows is cp1252.** One non-ASCII character in a log line
+  raises UnicodeEncodeError and kills a 25-minute run at the moment it reports
+  progress. Entry points call `_utf8_stdout()`; keep arm labels ASCII regardless.
+- **A `file://` page caches assets indefinitely.** `export.stamp_assets()` stamps every
+  local URL in index.html with a content hash. If a fix "isn't taking", check the hash
+  changed before debugging the logic.
+- **The ARIA mirror is on the render path**, not documentation. A null field there — a
+  group header's deliberately-absent target quantile — threw and took down the paint.
+- **The micro-fan is the frame budget.** Not the mirror, not getComputedStyle. It is
+  cached to offscreen canvases and degraded during scroll; clearing that cache on every
+  edit is intentional.
 - **`pathlib.write_text` on Windows uses cp1252** and will corrupt em-dashes in source
   files. Pass `encoding="utf-8"` explicitly. One file had to be repaired from git.
 - **`ResizeObserver` must be retained** in a variable or it is garbage-collected and

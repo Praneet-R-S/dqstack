@@ -167,6 +167,27 @@ class CombineConfig:
 
 @dataclass(frozen=True)
 class ReconcileConfig:
+    # Reconcile for *reporting*, not for *ordering*.
+    #
+    # Measured across all twelve aggregation levels, MinT improves accuracy at the
+    # top (total -0.45, state -0.36, category -0.31 WRMSSE) and degrades it at the
+    # bottom (item_store +0.44), which takes leaf-level WRMSSE from 0.77 to 1.20 --
+    # worse than the seasonal-naive anchor at 0.98. The ablation prices that: the
+    # arm without reconciliation earns 150,692 more realised margin than the full
+    # system, the largest positive delta in the table.
+    #
+    # The specification anticipates exactly this and declines to pick for us:
+    # "reconciliation frequently improves aggregate accuracy while slightly
+    # degrading bottom-level accuracy. Which matters depends on the decision being
+    # made." Stage 7 sets an order-up-to level per item-location, so the decision is
+    # made at the leaves, and there the trade is against us.
+    #
+    # So both are produced. The decision path consumes the unreconciled distribution;
+    # the aggregate planning views consume the reconciled one, which is coherent by
+    # construction and materially more accurate at every level a planning
+    # organisation actually reviews. Reporting one number for both would have to be
+    # wrong for one of them.
+    for_decisions: bool = False
     method: str = "mint_shrink"
     shrink_lambda: float | None = None   # None -> Schafer-Strimmer analytic
     temporal_buckets: tuple[str, ...] = ("daily", "weekly", "monthly")

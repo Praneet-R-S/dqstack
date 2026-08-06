@@ -32,12 +32,30 @@ from .pipeline import run
 # Each arm is (label, config-override, whether Stage 3 must be retrained).
 ARMS: tuple[tuple[str, dict, bool], ...] = (
     ("full system", {}, True),
-    ("− censor masking", {"enable_censor_masking": False}, True),
-    ("− regime windows", {"enable_regime_windows": False}, True),
+    ("no censor masking", {"enable_censor_masking": False}, True),
+    ("no regime windows", {"enable_regime_windows": False}, True),
 )
 
 
+def _utf8_stdout() -> None:
+    """Make stdout UTF-8 regardless of platform default.
+
+    Redirected stdout on Windows defaults to cp1252, so a single non-ASCII character
+    in a log line raises UnicodeEncodeError and takes down a long-running job at the
+    point it tries to report progress. That killed a 25-minute ablation arm on an
+    en-dash in a label.
+    """
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main() -> None:
+    _utf8_stdout()
     rows: list[dict] = []
     posthoc: list[dict] = []
 

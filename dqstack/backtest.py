@@ -71,6 +71,10 @@ def evaluate_origin(
     pc2 = np.repeat(pc[:, None], len(horizons), axis=1)
     hg2 = np.broadcast_to(hg, (len(pc), len(horizons)))
     cal = conformal.apply(rec, pc2, hg2) if cfg.enable_calibration else rec
+    # What the system actually issues for ordering. See ReconcileConfig.for_decisions.
+    decide_src = cal if cfg.reconcile.for_decisions else (
+        conformal.apply(cq, pc2, hg2) if cfg.enable_calibration else cq
+    )
 
     # Weights and scalers are recomputed per origin: an M5 dollar-volume weight is
     # a property of the 28 days before the origin, not a constant.
@@ -92,7 +96,7 @@ def evaluate_origin(
         }
 
     rows = [row(n, qs[n]) for n in ensemble if n in qs]
-    rows.append(row(SYSTEM, cal))
+    rows.append(row(SYSTEM, decide_src))
     rows.append(row("no calibration", rec))
     rows.append(row("no reconciliation", cq))
 
@@ -102,7 +106,7 @@ def evaluate_origin(
     sids = P.series["series_id"].to_numpy()
 
     econ = {}
-    for name, q in (("DQ-Stack (full)", cal), ("no calibration", rec),
+    for name, q in (("DQ-Stack (full)", decide_src), ("no calibration", rec),
                     ("best single (LGBM-Q)", qs["lgbm_quantile"]),
                     ("seasonal naive", qs["seasonal_naive"])):
         res, _ = dec.decide(q, dm, cp, sids, dates, cfg)
@@ -139,6 +143,7 @@ def evaluate_origin(
         "combination": evaluate.wrmsse(y, med(cq), denom, wts, valid),
         "reconciliation": evaluate.wrmsse(y, med(rec), denom, wts, valid),
         "calibration": evaluate.wrmsse(y, med(cal), denom, wts, valid),
+        "issued_for_decisions": evaluate.wrmsse(y, med(decide_src), denom, wts, valid),
     }
     return rows, cov, stage, hier
 

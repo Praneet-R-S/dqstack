@@ -500,6 +500,16 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     hg_2d = np.broadcast_to(hg_arr, (len(pc), len(horizons)))
     calib_e = conformal.apply(recon_e, pc_2d, hg_2d) if cfg.enable_calibration else recon_e
 
+    # The decision path. Reconciliation is coherent and more accurate at every
+    # aggregate level, and less accurate at the leaves — and the order-up-to level is
+    # a leaf-level decision, so it reads the unreconciled distribution. See
+    # ReconcileConfig.for_decisions for the measurements behind this.
+    decide_src = calib_e if cfg.reconcile.for_decisions else (
+        conformal.apply(comb_e, pc_2d, hg_2d) if cfg.enable_calibration else comb_e
+    )
+    log(f"  decision path reads the "
+        f"{'reconciled' if cfg.reconcile.for_decisions else 'unreconciled'} distribution")
+
     # weights and scalers
     tail = hist_panel[(hist_panel["date"] > P.dates[Oe] - pd.Timedelta(days=28))
                       & (hist_panel["date"] <= P.dates[Oe])]
@@ -638,7 +648,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
 
     sids = P.series["series_id"].to_numpy()
     eval_dates = pd.DatetimeIndex([P.dates[Oe + h] for h in horizons])
-    res_full, frac_full = dec.decide(calib_e, demand_eval, cp, sids, eval_dates, cfg)
+    res_full, frac_full = dec.decide(decide_src, demand_eval, cp, sids, eval_dates, cfg)
     log(f"  target quantile: mean {frac_full['target_quantile'].mean():.3f}, "
         f"range {frac_full['target_quantile'].min():.3f}–{frac_full['target_quantile'].max():.3f}")
     log(f"  ledger rows {len(res_full.ledger):,}")
@@ -665,7 +675,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         })
         return r
 
-    econ("DQ-Stack (full)", calib_e)
+    econ("DQ-Stack (full)", decide_src)
     econ("no calibration", recon_e)
     econ("no reconciliation", comb_e)
     econ("best single (LGBM-Q)", qs_e["lgbm_quantile"])
@@ -674,7 +684,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     econ("Croston/SBA only", qs_e["croston_sba"])
 
     cfg_blanket = replace(cfg, enable_critical_fractile=False)
-    econ("full, blanket 95% service", calib_e, cfg_blanket)
+    econ("full, blanket 95% service", decide_src, cfg_blanket)
 
     if tr.gbm_nomask is not None:
         # Predict from the panel it was TRAINED on. Predicting from the masked
@@ -715,7 +725,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     if not light:
         section("COST SENSITIVITY — is the critical fractile robust to its assumptions?")
         t0 = time.perf_counter()
-        sens_tbl = sens.sweep(calib_e, demand_eval, cp, sids, eval_dates, cfg)
+        sens_tbl = sens.sweep(decide_src, demand_eval, cp, sids, eval_dates, cfg)
         sens_sum = sens.summarise(sens_tbl)
         sens.report(sens_tbl, sens_sum, log=log)
         sens.persist(sens_tbl, sens_sum)
@@ -731,9 +741,12 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
                if cfg.enable_reconciliation else comb_l)
     calib_l = conformal.apply(recon_l, pc_2d, hg_2d) if cfg.enable_calibration else recon_l
 
+    decide_l = calib_l if cfg.reconcile.for_decisions else (
+        conformal.apply(comb_l, pc_2d, hg_2d) if cfg.enable_calibration else comb_l
+    )
     risk = cfg.decision.review_period + cfg.decision.lead_time
     frac_l = dec.critical_fractile(cp, risk, cfg)
-    S_star_l = dec.risk_period_quantile(calib_l[:, :risk, :], frac_l["target_quantile"])
+    S_star_l = dec.risk_period_quantile(decide_l[:, :risk, :], frac_l["target_quantile"])
     frac_l["order_up_to"] = S_star_l
     wk_base, mo_base = rc.temporal_base(P.y, Ol, HORIZON)
     temporal = reconcile.temporal_reconcile(med(calib_l), wk_base, mo_base)
@@ -828,7 +841,25 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     return state
 
 
+def _utf8_stdout() -> None:
+    """Make stdout UTF-8 regardless of platform default.
+
+    Redirected stdout on Windows defaults to cp1252, so a single non-ASCII character
+    in a log line raises UnicodeEncodeError and takes down a long-running job at the
+    point it tries to report progress. That killed a 25-minute ablation arm on an
+    en-dash in a label.
+    """
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main() -> None:
+    _utf8_stdout()
     ap = argparse.ArgumentParser(description="Run the DQ-Stack pipeline end to end.")
     ap.add_argument("--quick", action="store_true", help="fewer origins and epochs")
     ap.add_argument("--no-ablate", action="store_true", help="skip the censoring ablation arm")

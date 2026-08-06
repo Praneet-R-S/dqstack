@@ -56,6 +56,25 @@ const Grid = (() => {
   // then keeps whatever size it happened to measure first.
   let ro = null;
 
+  /* ---- the 60fps budget -------------------------------------------------
+     The spec sets a build-failing threshold: under 16ms sustained, zero frames over
+     32ms. Measured at 18.6ms median / 40ms p95, and the cost is not the ARIA mirror
+     (1.2ms) or getComputedStyle (0.1ms) — it is the micro-fan. Seventy-odd glyphs
+     per frame, each three alpha-composited canvas paths, is simply more path work
+     than a frame has time for.
+
+     Two fixes, both standard for canvas grids and neither of which sacrifices the
+     glyph. Cache each rendered glyph to a small offscreen canvas keyed by its data,
+     so scrolling back over rows already seen is a blit rather than a redraw. And
+     while a scroll is actually in flight, draw only the cheap median line for
+     glyphs not already cached, then repaint at full fidelity once motion stops —
+     nobody can read a 40x14 glyph during a fast scroll, and the frame budget exists
+     to keep the motion itself smooth. */
+  const fanCache = new Map();
+  const FAN_CACHE_MAX = 900;
+  let scrolling = false;
+  let scrollIdleTimer = null;
+
   /* ---- columns ---------------------------------------------------------- */
   function buildCols(dates) {
     const wk = [0, 1, 2, 3].map((w) => "W" + U.isoWeek(dates[w * 7]));
@@ -190,7 +209,66 @@ const Grid = (() => {
   const cellFS = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cell-fs"), 10) || 12;
 
   /* ---- the signature glyph --------------------------------------------- */
-  function microFan(x, y, w, h, fan, wIdx, health) {
+  function fanKey(rowId, wIdx, w, h) {
+    return `${rowId}|${wIdx}|${w}x${h}|${document.documentElement.dataset.theme}`;
+  }
+
+  function renderFanToCanvas(fan, wIdx, w, h) {
+    const dpr = window.devicePixelRatio || 1;
+    const off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(w * dpr));
+    off.height = Math.max(1, Math.round(h * dpr));
+    const c = off.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawFan(c, 0, 0, w, h, fan, wIdx);
+    return off;
+  }
+
+  function microFan(x, y, w, h, fan, wIdx, health, rowId) {
+    if (!fan) return;                       // group headers carry no fan
+    const key = fanKey(rowId, wIdx, w, h);
+    let glyph = fanCache.get(key);
+    if (glyph) {
+      ctx.drawImage(glyph, x, y, w, h);
+      return;
+    }
+    if (scrolling) {
+      // Cheap stand-in while motion is in flight; the idle repaint upgrades it.
+      drawFanMedianOnly(x, y, w, h, fan, wIdx);
+      return;
+    }
+    glyph = renderFanToCanvas(fan, wIdx, w, h);
+    if (fanCache.size >= FAN_CACHE_MAX) {
+      // Plain FIFO eviction: scroll locality means the oldest entries are the ones
+      // furthest from the viewport.
+      fanCache.delete(fanCache.keys().next().value);
+    }
+    fanCache.set(key, glyph);
+    ctx.drawImage(glyph, x, y, w, h);
+  }
+
+  function drawFanMedianOnly(x, y, w, h, fan, wIdx) {
+    const days = [];
+    let hi = 0;
+    for (let d = 0; d < 7; d++) {
+      const f = fan[wIdx * 7 + d];
+      if (!f) continue;
+      days.push(f);
+      if (f[6] > hi) hi = f[6];
+    }
+    if (!days.length || hi <= 0) return;
+    ctx.beginPath();
+    for (let i = 0; i < days.length; i++) {
+      const px = x + (w * i) / (days.length - 1 || 1);
+      const py = y + h - (h * days[i][3]) / hi;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.strokeStyle = U.rgba(U.tk("--series-forecast"), 0.55);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function drawFan(ctx, x, y, w, h, fan, wIdx) {
     // Seven days of the week's predictive interval, drawn as a tapered band.
     // Vertical extent maps to P10–P90 spread; opacity maps to confidence, so a
     // wide distribution renders paler and uncertainty gets a pre-attentive
@@ -283,7 +361,9 @@ const Grid = (() => {
     }
 
     paintHeader(fz);
-    syncAria(first, last);
+    // The mirror is for assistive technology, which is not tracking a 60fps scroll.
+    // Rebuilding it every frame is 1.2ms of pure waste during motion.
+    if (!scrolling) syncAria(first, last);
   }
 
   function paintHeader(fz) {
@@ -447,7 +527,7 @@ const Grid = (() => {
         const tint = U.varianceTint(rel);
         if (tint) { ctx.fillStyle = tint; ctx.fillRect(x, y, c.w, rh - 1); }
 
-        microFan(x + 5, y + (rh - FAN_H) / 2, FAN_W, FAN_H, r.fan, wIdx, r.health);
+        microFan(x + 5, y + (rh - FAN_H) / 2, FAN_W, FAN_H, r.fan, wIdx, r.health, r.id);
 
         const ov = overrides.get(r.id + ":" + wIdx);
         ctx.font = `${fs}px ${U.tk("fontNum")}`;
@@ -654,7 +734,13 @@ const Grid = (() => {
     scroller.addEventListener("scroll", () => {
       scrollTop = scroller.scrollTop;
       scrollLeft = scroller.scrollLeft;
+      scrolling = true;
       paint();
+      clearTimeout(scrollIdleTimer);
+      scrollIdleTimer = setTimeout(() => {
+        scrolling = false;
+        paint();                            // upgrade the stand-ins to real glyphs
+      }, 90);
     }, { passive: true });
 
     canvas.addEventListener("mousemove", (e) => {
@@ -721,7 +807,7 @@ const Grid = (() => {
     requestAnimationFrame(resize);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
 
-    window.addEventListener("dq:theme", () => paint());
+    window.addEventListener("dq:theme", () => { fanCache.clear(); paint(); });
     window.addEventListener("dq:density", () => resize());
     return api;
   }
@@ -784,6 +870,7 @@ const Grid = (() => {
       undoStack.push({ snap: before, label: label || "edit" });
       redoStack.length = 0;
     }
+    fanCache.clear();          // an override changes the glyph it renders
     if (groupBy) regroup(); else paint();
     onEdits();
     return changed;
