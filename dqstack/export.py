@@ -34,6 +34,31 @@ def _r(a, nd=1):
     return np.round(np.asarray(a, dtype="float64"), nd).tolist()
 
 
+def _weekly_bands(fan_daily: np.ndarray) -> np.ndarray:
+    """Aggregate 28 daily quantile vectors into 4 weekly ones.
+
+    Same moment-matching argument as `decide.risk_period_quantile`: accumulate the
+    mean and variance of each day's predictive distribution, add a modest
+    day-to-day correlation, and read the weekly quantiles off a Negative Binomial
+    matched to those moments.
+    """
+    from scipy import stats as _st
+
+    from .decide import DAILY_RHO, quantile_moments
+
+    mean_d, var_d = quantile_moments(fan_daily)                 # (28,)
+    weeks = fan_daily.shape[0] // 7
+    out = np.zeros((weeks, len(CHART_Q)))
+    for w in range(weeks):
+        sl = slice(w * 7, (w + 1) * 7)
+        mu = max(float(mean_d[sl].sum()), 1e-9)
+        sd = np.sqrt(var_d[sl])
+        var = float((sd**2).sum() + DAILY_RHO * (sd.sum() ** 2 - (sd**2).sum()))
+        r = float(np.clip(mu**2 / max(var - mu, 1e-9), 0.05, 1e6))
+        out[w] = _st.nbinom.ppf(np.asarray(CHART_Q), r, r / (r + mu))
+    return np.nan_to_num(np.maximum(out, 0.0))
+
+
 def _clean(o):
     """JSON-safe: numpy scalars, NaN and Inf all become plain Python."""
     if isinstance(o, dict):
@@ -232,7 +257,11 @@ def export_bundle(state: dict, out_dir: Path = UI_DATA, explain_top: int = 160) 
         lg = led_s.reindex([sid]).iloc[0]
 
         f = fan[i][:, CHART_IDX]
-        wk = f.reshape(4, 7, len(CHART_Q)).sum(axis=1)
+        # Weekly bands by moment matching, not by summing daily quantiles. Summing
+        # quantiles assumes the seven days are perfectly dependent, which inflates
+        # a weekly P10-P90 band by roughly 2.6x and would have a planner reading a
+        # far wider weekly interval than the model actually implies.
+        wk = _weekly_bands(fan[i])
 
         w_i = W[i]
         order = np.argsort(-w_i)[:5]

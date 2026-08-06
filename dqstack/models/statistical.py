@@ -212,9 +212,23 @@ def adida(P: Panel, O: int, horizons: np.ndarray, bucket: int = 7) -> np.ndarray
     prof = prof / np.maximum(prof.sum(axis=1, keepdims=True), 1e-9) * bucket
     prof = np.where(np.isfinite(prof), prof, 1.0)
 
+    # Index the profile by the target date's actual weekday.
+    #
+    # `blocks` was reshaped from the *end* of the history, so profile column p
+    # corresponds to weekday (O - usable + 1 + p) mod 7, not to p itself. Indexing
+    # with `(O + h) % bucket` is only correct when the history length happens to be
+    # a multiple of 7, and otherwise silently rotates every weekday effect —
+    # applying Saturday's multiplier to a Tuesday. Reading the weekday off the
+    # calendar removes the arithmetic entirely.
+    wd = P.calendar["dayofweek"].to_numpy()
+    first_block_day = (O + 1) - usable         # index of blocks[:, 0, 0]
+    col_wd = wd[first_block_day : first_block_day + bucket]     # weekday per column
+
     out = np.empty((S, len(horizons)))
     for j, h in enumerate(horizons):
-        out[:, j] = level * prof[:, (O + h) % bucket]
+        target_wd = wd[min(O + h, len(wd) - 1)]
+        col = int(np.flatnonzero(col_wd == target_wd)[0])
+        out[:, j] = level * prof[:, col]
     return np.maximum(out, 0.0)
 
 

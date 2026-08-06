@@ -250,8 +250,16 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     # ---------------------------------------------------------- stage 3
     section("STAGE 3 — train the candidate pool")
     t0 = time.perf_counter()
+    # Early-stopping validation origins must be purged from the fitting origins by
+    # a full horizon. Taking the last three origins as validation while fitting on
+    # everything up to them leaves the final fitting origins forecasting 28 days
+    # forward into the validation targets, so early stopping was choosing tree
+    # counts against targets the model had partly been trained on.
+    n_purge = max(1, HORIZON // 7)
     valid_for_es = sp.train[-3:]
-    fit_origins = sp.train[:-3]
+    fit_origins = sp.train[: -(3 + n_purge)]
+    log(f"  early-stopping split: fit on {len(fit_origins)} origins, "
+        f"validate on {len(valid_for_es)}, {n_purge} purged between")
 
     log("  LightGBM (Tweedie point, category-segmented + 9 quantile heads)")
     P_tr = vintages["train"]
@@ -313,12 +321,21 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         _, qs = candidate_quantiles(vintages["meta"], O, horizons, tr)
         qs = {k: v for k, v in qs.items() if k in ENSEMBLE}
         loss_frames.append(comb.candidate_losses(y, qs, np.isfinite(y)))
-    losses = sum(loss_frames) / len(loss_frames)
+    # nanmean across origins, not a plain sum. A series whose targets are entirely
+    # masked at one origin gets NaN there, and `sum()` propagates it, so that
+    # series' loss row became NaN for every candidate and MetaLearner.fit dropped
+    # it — silently excluding ~15% of the panel from the weights that are then
+    # applied to it.
+    losses = pd.concat(loss_frames).groupby(level=0).mean()
+    losses = losses.reindex(range(P.n_series))
     losses.index = P.series.index
 
     diag_aligned = vintages["meta"].series.set_index(vintages["meta"].series.index)
     meta = comb.MetaLearner().fit(diag_aligned, losses, cfg)
-    W = meta.weights(diag_aligned, cfg)
+    W = (meta.weights(diag_aligned, cfg) if cfg.enable_combination
+         else meta.select_weights(diag_aligned, losses))
+    if not cfg.enable_combination:
+        log("  ablation: selection instead of combination (one-hot argmin weights)")
     timings["stage4_combine"] = time.perf_counter() - t0
 
     wrep = comb.weight_report(W, meta.candidates, diag_aligned)
@@ -399,9 +416,11 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     tail = hist_panel[(hist_panel["date"] > P.dates[Oe] - pd.Timedelta(days=28))
                       & (hist_panel["date"] <= P.dates[Oe])]
     wts = evaluate.m5_weights(tail).reindex(P.series["series_id"]).fillna(0.0).to_numpy()
-    y_train_win = P.y[:, max(0, Oe - 365) : Oe + 1]
-    denom = evaluate.scale_denominator(np.nan_to_num(y_train_win, nan=0.0))
-    denom_abs = np.nanmean(np.abs(np.diff(np.nan_to_num(y_train_win, nan=0.0), axis=1)), axis=1)
+    # NaN is passed through deliberately: scale_denominator uses nanmean, so masked
+    # days are excluded rather than read as a crash to zero and back.
+    y_train_win = P.y[:, max(0, Oe - 365) : Oe + 1].astype("float64")
+    denom = evaluate.scale_denominator(y_train_win)
+    denom_abs = np.nanmean(np.abs(np.diff(y_train_win, axis=1)), axis=1)
 
     med = lambda q: q[..., Q50_INDEX]
     stage_forecasts = {
@@ -552,7 +571,8 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     frac_l = dec.critical_fractile(cp, risk, cfg)
     S_star_l = dec.risk_period_quantile(calib_l[:, :risk, :], frac_l["target_quantile"])
     frac_l["order_up_to"] = S_star_l
-    temporal = reconcile.temporal_reconcile(med(calib_l))
+    wk_base, mo_base = rc.temporal_base(P.y, Ol, HORIZON)
+    temporal = reconcile.temporal_reconcile(med(calib_l), wk_base, mo_base)
     log(f"  {P.n_series:,} series x {HORIZON}-day horizon x {len(QUANTILES)} quantiles")
     log(f"  temporal consistency: |sum(daily) - monthly| max "
         f"{np.abs(temporal['daily'].sum(axis=1) - temporal['monthly'][:, 0]).max():.2e}")

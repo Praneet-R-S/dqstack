@@ -82,6 +82,7 @@ class Panel:
     y_raw: np.ndarray             # (S, T) recorded sales, unmasked
     carried: np.ndarray           # (S, T) bool
     price: np.ndarray             # (S, T) float, NaN when not carried
+    snap: np.ndarray              # (S, T) int8 — state-specific benefit days
     calendar: pd.DataFrame
     n_history: int = 0            # columns [0, n_history) have observed sales
 
@@ -105,8 +106,8 @@ class Panel:
         without rebuilding a 1,000 x 1,128 panel five times.
         """
         return Panel(series=series, dates=self.dates, y=self.y, y_raw=self.y_raw,
-                     carried=self.carried, price=self.price, calendar=self.calendar,
-                     n_history=self.n_history)
+                     carried=self.carried, price=self.price, snap=self.snap,
+                     calendar=self.calendar, n_history=self.n_history)
 
 
 def build_panel(
@@ -146,6 +147,11 @@ def build_panel(
     carried = scatter(panel["is_carried"].to_numpy(), bool, False)
     price = scatter(panel["sell_price"].to_numpy(dtype="float32"), "float32", np.nan)
     suspect = scatter(panel["suspected_censored"].fillna(False).to_numpy(), bool, False)
+    # SNAP is state-specific: CA, TX and WI issue benefits on different days.
+    # Collapsing it to a calendar column via drop_duplicates("date") keeps one
+    # arbitrary state's schedule and broadcasts it to every store in the country,
+    # which silently destroys a documented M5 driver for two thirds of the panel.
+    snap = scatter(panel["snap"].fillna(0).to_numpy(dtype="int8"), "int8", 0)
 
     y = y_raw.copy()
     y[~carried] = np.nan                     # structural: not demand signal at all
@@ -168,7 +174,7 @@ def build_panel(
     series = series_frame(ids[ID_COLS], diag)
 
     cal = (
-        panel[["date", "wday", "month", "year", "event_name", "event_type", "snap"]]
+        panel[["date", "wday", "month", "year", "event_name", "event_type"]]
         .drop_duplicates("date")
         .sort_values("date")
         .reset_index(drop=True)
@@ -177,7 +183,7 @@ def build_panel(
 
     observed = np.flatnonzero(np.isfinite(y_raw).any(axis=0))
     n_history = int(observed.max()) + 1 if len(observed) else T
-    return Panel(series, dates, y, y_raw, carried, price,
+    return Panel(series, dates, y, y_raw, carried, price, snap,
                  _calendar_features(cal), n_history=n_history)
 
 
@@ -269,7 +275,11 @@ def origin_features(P: Panel, O: int) -> tuple[np.ndarray, list[str]]:
             add(f"rmed_{w}", np.nanmedian(win, axis=1))
             add(f"rmin_{w}", np.nanmin(win, axis=1))
             add(f"rmax_{w}", np.nanmax(win, axis=1))
-            add(f"rzero_{w}", np.nanmean((win == 0).astype("float32"), axis=1))
+            # `win == 0` turns NaN into False, so a plain mean divides by the
+            # window length and counts every masked (non-signal) day as a
+            # non-zero sale. The zero share is over *observed* days only.
+            obs_w = np.isfinite(win)
+            add(f"rzero_{w}", (win == 0).sum(axis=1) / np.maximum(obs_w.sum(axis=1), 1))
         if w >= 28:
             add(f"rskew_{w}", _nan_moment(win, 3))
 
@@ -413,7 +423,10 @@ def make_design(
 
             row = cal.iloc[t]
             for c in TARGET_CAL:
+                if c == "snap":
+                    continue                      # per-series, set below
                 df[c] = row[c]
+            df["snap"] = P.snap[:, t]
             df["event_name"] = row["event_name"]
             df["event_type"] = row["event_type"]
 

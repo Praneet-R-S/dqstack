@@ -197,8 +197,38 @@ class Reconciler:
         from .models.statistical import ets_matrix
 
         assert self.H is not None
-        agg_hist = self.H.S @ np.nan_to_num(y_hist[:, : O + 1], nan=0.0)
+        # Masked cells are censored or out-of-assortment days. Zero-filling them
+        # before aggregating pushes every aggregate below true demand — and it does
+        # so hardest for the most-censored departments, which is exactly where the
+        # aggregate view was supposed to be more reliable than its components. Fill
+        # each series with its own observed mean instead, so a missing day is
+        # treated as an average day rather than a lost sale.
+        hist = y_hist[:, : O + 1].astype("float64")
+        row_mean = np.nanmean(np.where(np.isfinite(hist), hist, np.nan), axis=1, keepdims=True)
+        filled = np.where(np.isfinite(hist), hist, np.nan_to_num(row_mean))
+        agg_hist = self.H.S @ filled
         return np.maximum(ets_matrix(agg_hist, np.asarray(horizons)), 0.0)
+
+    def temporal_base(self, y_hist: np.ndarray, O: int, horizon: int
+                      ) -> tuple[np.ndarray, np.ndarray]:
+        """Independent weekly and monthly forecasts for the temporal hierarchy.
+
+        Same argument as `base_forecasts` for the cross-sectional case: temporal
+        reconciliation can only do something if the coarse views are produced
+        independently of the fine one. Aggregating the daily forecast and calling
+        that a weekly forecast makes the stage an identity.
+
+        History is aggregated to weekly buckets and forecast there directly, which
+        is the point — a weekly series is far less intermittent than its days.
+        """
+        from .models.statistical import ets_matrix
+
+        y = np.nan_to_num(y_hist[:, : O + 1], nan=0.0)
+        weeks = horizon // 7
+        usable = (y.shape[1] // 7) * 7
+        wk_hist = y[:, y.shape[1] - usable :].reshape(y.shape[0], -1, 7).sum(axis=2)
+        wk = np.maximum(ets_matrix(wk_hist, np.arange(1, weeks + 1), period=4), 0.0)
+        return wk, wk.sum(axis=1, keepdims=True)
 
     def reconcile(self, bottom: np.ndarray, node_base: np.ndarray | None = None) -> np.ndarray:
         """Optimally combine base forecasts across levels.
@@ -234,11 +264,24 @@ class Reconciler:
         delta = (rec - med)[..., None]
         return np.maximum(q + delta, 0.0)
 
-    def coherence_error(self, bottom: np.ndarray) -> float:
-        """Max relative gap between an aggregate and the sum of its components."""
-        agg = self.H.S @ bottom
-        direct = self.H.S @ bottom
-        return float(np.abs(agg - direct).max())
+    def incoherence(self, node_base: np.ndarray) -> float:
+        """How far the independent base forecasts disagree across levels.
+
+        This is the quantity reconciliation exists to remove, so it is the only
+        one worth reporting. Measuring it *after* reconciliation is meaningless:
+        aggregates are defined as `S @ bottom` there, so any such check compares
+        an expression with itself and returns zero no matter what the projection
+        did. (It previously did exactly that — `agg` and `direct` were the same
+        expression — and reported a reassuring 0.0.)
+
+        Returns the largest relative gap between a node's own base forecast and
+        the sum of its constituent bottom-level base forecasts.
+        """
+        assert self.H is not None
+        bottom = node_base[self.H.bottom_slice()]
+        implied = self.H.S @ bottom
+        denom = np.maximum(np.abs(implied), 1.0)
+        return float((np.abs(node_base - implied) / denom).max())
 
 
 # ------------------------------------------------------------------ temporal
@@ -246,7 +289,11 @@ class Reconciler:
 TEMPORAL_WEEKS = 4       # 28 days = 4 weeks = 1 monthly bucket
 
 
-def temporal_reconcile(daily: np.ndarray) -> dict[str, np.ndarray]:
+def temporal_reconcile(
+    daily: np.ndarray,
+    weekly_base: np.ndarray | None = None,
+    monthly_base: np.ndarray | None = None,
+) -> dict[str, np.ndarray]:
     """Make daily, weekly and 28-day totals arithmetically consistent.
 
     The temporal hierarchy over a 28-day horizon has 28 leaves, 4 weekly nodes
@@ -258,26 +305,57 @@ def temporal_reconcile(daily: np.ndarray) -> dict[str, np.ndarray]:
     S, H = daily.shape
     assert H % 7 == 0, "temporal reconciliation expects whole weeks"
     weeks = H // 7
+
+    if weekly_base is None and monthly_base is None:
+        # Nothing to reconcile against. Derive the aggregates and say plainly that
+        # this is an identity, because the previous version did exactly this while
+        # presenting itself as reconciliation: it recomputed the monthly total as
+        # the sum of the weekly totals, which is the sum of the dailies, so the
+        # correction term was identically zero and the "reconciled" dailies were
+        # the input. The reported temporal residual of ~1e-04 was measuring
+        # floating-point noise, not agreement between disagreeing views.
+        blocks = daily.reshape(S, weeks, 7)
+        wk = blocks.sum(axis=2)
+        return {
+            "daily": np.maximum(daily, 0.0),
+            "weekly": np.maximum(wk, 0.0),
+            "monthly": np.maximum(wk.sum(axis=1, keepdims=True), 0.0),
+            "reconciled": False,
+        }
+
+    # ---- genuine temporal MinT over 1 monthly + `weeks` weekly + H daily nodes.
+    n_nodes = 1 + weeks + H
+    St = np.zeros((n_nodes, H))
+    St[0] = 1.0                                             # monthly
+    for w in range(weeks):
+        St[1 + w, w * 7 : (w + 1) * 7] = 1.0                # weekly
+    St[1 + weeks :] = np.eye(H)                             # daily (bottom)
+
+    # Variance scaling: an aggregate of k days carries k times the variance of a
+    # day under independence, so weight each node by 1/k. This is MinT with a
+    # diagonal W — the standard structural choice when there are too few residual
+    # observations to estimate a full temporal covariance, and it is what makes an
+    # aggregate view count for more than a single noisy day.
+    w_diag = St.sum(axis=1)
+    Wt = np.diag(w_diag)
+    WiS = np.linalg.solve(Wt, St)
+    Gt = np.linalg.solve(St.T @ WiS, WiS.T)                 # (H, n_nodes)
+
     blocks = daily.reshape(S, weeks, 7)
+    wk_in = blocks.sum(axis=2) if weekly_base is None else np.asarray(weekly_base, float)
+    mo_in = (
+        wk_in.sum(axis=1, keepdims=True)
+        if monthly_base is None
+        else np.asarray(monthly_base, float).reshape(S, 1)
+    )
 
-    wk_direct = blocks.sum(axis=2)                     # (S, weeks)
-    mo_direct = wk_direct.sum(axis=1, keepdims=True)   # (S, 1)
+    y_all = np.concatenate([mo_in, wk_in, daily], axis=1)   # (S, n_nodes)
+    daily_rec = np.maximum(y_all @ Gt.T, 0.0)
 
-    # Average the two views of the monthly total: the sum of weekly sums and the
-    # sum of dailies agree here by construction, so the reconciled monthly total
-    # is the common value; weekly is then the MinT-optimal split.
-    mo = mo_direct
-    wk = wk_direct + (mo - wk_direct.sum(axis=1, keepdims=True)) / weeks
-
-    share = blocks / np.maximum(wk_direct[:, :, None], 1e-9)
-    daily_rec = share * wk[:, :, None]
-    # A week whose direct sum is zero has no shape to preserve — common on sparse
-    # series — so its reconciled total is spread evenly across its own seven days.
-    # The fallback must be week-shaped, not panel-shaped.
-    daily_rec = np.where(np.isfinite(daily_rec), daily_rec, wk[:, :, None] / 7.0)
-
+    rec_blocks = daily_rec.reshape(S, weeks, 7)
     return {
-        "daily": np.maximum(daily_rec, 0.0).reshape(S, H),
-        "weekly": np.maximum(wk, 0.0),
-        "monthly": np.maximum(mo, 0.0),
+        "daily": daily_rec,
+        "weekly": rec_blocks.sum(axis=2),
+        "monthly": daily_rec.sum(axis=1, keepdims=True),
+        "reconciled": True,
     }

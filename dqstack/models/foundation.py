@@ -55,6 +55,13 @@ HISTORY_PREFIXES = (
 )
 # Diagnostic scalars are series-specific summaries; excluded for the same reason.
 HISTORY_EXACT = {
+    # item_id is excluded because item_id and store_id *jointly are* series_id.
+    # Leaving both in lets a "zero-shot" model memorise the very series it is
+    # supposed to have never seen, which would make its cold-start result
+    # meaningless — the one thing this slot exists to measure. store_id stays:
+    # a genuinely new item still launches into a known store, and store identity
+    # alone maps to a hundred series rather than one.
+    "item_id",
     "adi", "cv2", "cv", "zero_share", "mean_demand", "acf7", "acf364",
     "seasonal_strength", "trend_strength", "spectral_entropy", "age_weeks",
     "weeks_since_break", "censored_rate", "ooa_rate", "health_score",

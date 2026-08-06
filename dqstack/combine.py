@@ -184,6 +184,20 @@ class MetaLearner:
             self._trees.append(step)
         return None
 
+    def select_weights(self, diag: pd.DataFrame, losses: pd.DataFrame) -> np.ndarray:
+        """One-hot on the per-series argmin. The *selection* ablation arm.
+
+        This is what Stage 4 is arguing against, so it has to be runnable:
+        cfg.enable_combination was previously reported in the metrics block and
+        consulted nowhere, so a 'no combination' arm would have silently run the
+        full combination and reported it as an ablation.
+        """
+        L = losses.to_numpy(dtype='float64')
+        best = np.nanargmin(np.where(np.isfinite(L), L, np.inf), axis=1)
+        W = np.zeros_like(L)
+        W[np.arange(len(best)), best] = 1.0
+        return W
+
     def weights(self, diag: pd.DataFrame, cfg=CFG) -> np.ndarray:
         """Weight vector per series. Non-negative and summing to one by
         construction (softmax), with an entropy floor guarding collapse."""

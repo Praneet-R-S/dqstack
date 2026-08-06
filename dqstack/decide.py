@@ -165,6 +165,17 @@ def simulate(
     S, H = demand.shape
     R, L = cfg.decision.review_period, cfg.decision.lead_time
 
+    # order_up_to may be (S,) or (S, n_periods). A periodic-review policy
+    # recomputes the level at every review against that period's own risk window;
+    # reusing a level derived from horizons 1..R+L for all four reviews prices
+    # weeks 2-4 off week 1's demand, which understates any series with a trend,
+    # a promotion later in the horizon, or a launch ramp.
+    oup = np.atleast_2d(np.asarray(order_up_to, dtype="float64"))
+    if oup.shape[0] == 1 and S != 1:
+        oup = oup.reshape(-1, 1) if oup.size == S else np.repeat(oup, S, axis=0)
+    if oup.shape == (S,):
+        oup = oup.reshape(S, 1)
+
     on_hand = (
         initial_stock
         if initial_stock is not None
@@ -204,7 +215,9 @@ def simulate(
         order = np.zeros(S)
         if t in review_days:
             in_transit = pipeline[:, t + 1 :].sum(axis=1)
-            order = np.maximum(order_up_to - on_hand - in_transit, 0.0)
+            p_idx = min(review_days.index(t), oup.shape[1] - 1)
+            level_now = oup[:, p_idx]
+            order = np.maximum(level_now - on_hand - in_transit, 0.0)
             order = np.round(order)
             if t + L < pipeline.shape[1]:
                 pipeline[:, t + L] += order
@@ -261,7 +274,7 @@ def simulate(
                     "period": p,
                     "period_start": dates[t0],
                     "period_end": dates[t1 - 1],
-                    "order_up_to": order_up_to,
+                    "order_up_to": oup[:, min(p, oup.shape[1] - 1)],
                     "order_placed": rec["orders"][:, t0],
                     "opening_stock": rec["opening"][:, t0],
                     "demand": rec["demand"][:, sl].sum(axis=1),
@@ -334,10 +347,24 @@ def decide(
     """Full Stage 7: fractile -> order-up-to -> simulate -> ledger."""
     R, L = cfg.decision.review_period, cfg.decision.lead_time
     risk_days = R + L
+    H = q_daily.shape[1]
     frac = critical_fractile(cp, risk_days, cfg)
-    S_star = risk_period_quantile(q_daily[:, :risk_days, :], frac["target_quantile"])
 
-    res = simulate(demand_actual, S_star, cp, series_ids, dates, cfg)
+    # One order-up-to level per review, each read off that review's own R+L window.
+    review_days = list(range(0, H, R))
+    levels = np.zeros((q_daily.shape[0], len(review_days)))
+    for p, t0 in enumerate(review_days):
+        window = q_daily[:, t0 : min(t0 + risk_days, H), :]
+        if window.shape[1] < risk_days:
+            # The final review's window runs past the horizon; scale the shorter
+            # window up rather than silently ordering for fewer days.
+            scale = risk_days / max(window.shape[1], 1)
+            levels[:, p] = risk_period_quantile(window, frac["target_quantile"]) * scale
+        else:
+            levels[:, p] = risk_period_quantile(window, frac["target_quantile"])
+
+    res = simulate(demand_actual, levels, cp, series_ids, dates, cfg)
     res.ledger["target_quantile"] = np.tile(frac["target_quantile"], res.ledger["period"].nunique())
-    frac["order_up_to"] = S_star
+    frac["order_up_to"] = levels[:, 0]
+    frac["order_up_to_by_period"] = levels
     return res, frac

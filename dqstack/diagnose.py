@@ -25,6 +25,9 @@ from .config import CFG, INTERIM, PROCESSED
 
 CLASSES = ("smooth", "erratic", "intermittent", "lumpy", "cold_start", "terminal")
 
+# Days on which stores do not trade. Zeros here are structural.
+CLOSURE_EVENTS = ("Christmas",)
+
 
 # ------------------------------------------------------------------ changepoints
 
@@ -168,7 +171,8 @@ def _longest_run(mask: np.ndarray) -> int:
 # ------------------------------------------------------------------ censoring
 
 def detect_censoring(
-    sales: np.ndarray, carried: np.ndarray, wday: np.ndarray, cfg=CFG
+    sales: np.ndarray, carried: np.ndarray, wday: np.ndarray, cfg=CFG,
+    closed: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Two-signal censoring detection.
 
@@ -186,6 +190,13 @@ def detect_censoring(
     n = len(sales)
     structural = ~carried
     conf = np.zeros(n, dtype="float64")
+
+    # Store-closure days (Christmas) are zero for every item in the store at once.
+    # That is a structural zero, not a per-item stockout, and treating it as one
+    # manufactures a false positive on every series simultaneously — the single
+    # largest source of false positives in the detector.
+    if closed is not None:
+        structural = structural | closed
 
     obs = carried & ~structural
     if obs.sum() < cfg.diagnosis.censor_min_history:
@@ -253,6 +264,10 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
     starts = np.flatnonzero(np.concatenate([[True], codes[1:] != codes[:-1]]))
     bounds = np.append(starts, n_rows)
 
+    # Closure days, resolved once for the whole panel.
+    ev = panel["event_name"].astype(str).to_numpy()
+    closed_all = np.isin(ev, CLOSURE_EVENTS)
+
     sales_all = panel["sales"].to_numpy(dtype="float64")
     carried_all = panel["is_carried"].to_numpy()
     wday_all = panel["wday"].to_numpy()
@@ -269,7 +284,8 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
         price = price_all[sl]
         dts = dates_all[sl]
 
-        structural, conf = detect_censoring(sales, carried, wday, cfg)
+        structural, conf = detect_censoring(sales, carried, wday, cfg,
+                                            closed=closed_all[sl])
         suspected = conf >= cfg.diagnosis.censor_prob_threshold
         mask_structural[sl] = structural
         mask_conf[sl] = conf
@@ -410,11 +426,18 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
         last_sale_gap = int((asof - pd.Timestamp(dts[last_i])).days)
         freshness = float(np.clip(1.0 - last_sale_gap / 14.0, 0.0, 1.0))
 
+        # `price_completeness` is 1 - ooa_rate by construction here: FR-07 defines
+        # availability *as* price-record presence, so the two terms are the same
+        # measurement and summing both charges assortment gaps twice (0.45 of the
+        # score). The redundant term is dropped and its weight folded into the
+        # assortment term, which keeps the components summing to one. The column is
+        # still reported, because on a real feed a carried day can lack a price and
+        # the two would then differ.
         w = cfg.health
+        w_assort = w.out_of_assortment + w.price_completeness
         health = 1.0 - (
             w.censored * np.clip(censored_rate / 0.08, 0, 1)
-            + w.out_of_assortment * np.clip(ooa_rate / 0.25, 0, 1)
-            + w.price_completeness * (1.0 - price_completeness)
+            + w_assort * np.clip(ooa_rate / 0.25, 0, 1)
             + w.freshness * (1.0 - freshness)
         )
         health = float(np.clip(health, 0.0, 1.0))

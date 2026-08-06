@@ -408,8 +408,19 @@ def generate(seed: int = SEED, write: bool = True) -> dict[str, pd.DataFrame]:
         }
     )
 
+    # Control totals, emitted by the *source* at generation time, before any
+    # downstream aggregation. FR-06 needs an independently declared figure to
+    # compare against; recomputing the total from the same column it is checking
+    # produces a check that cannot fail, which is what it did before.
+    control = (
+        sales_df.groupby("store_id", observed=True)["sales"].sum().reset_index()
+        .rename(columns={"sales": "declared_units"})
+    )
+    control["declared_rows"] = sales_df.groupby("store_id", observed=True).size().to_numpy()
+
     out = {
         "sales": sales_df,
+        "sales_control": control,
         "prices": price_df,
         "calendar": cal.drop(columns=["day"]),
         "items": items_out,

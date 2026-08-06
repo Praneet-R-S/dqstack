@@ -56,7 +56,7 @@ class GBMPool:
     point: dict[tuple[str, str], lgb.Booster] = field(default_factory=dict)
     quant: dict[tuple[str, float], lgb.Booster] = field(default_factory=dict)
     features: dict[str, list[str]] = field(default_factory=dict)
-    categories: dict[str, pd.CategoricalDtype] = field(default_factory=dict)
+    categories: dict[tuple[str, str], pd.CategoricalDtype] = field(default_factory=dict)
     importance: dict[str, pd.DataFrame] = field(default_factory=dict)
     timings: dict[str, float] = field(default_factory=dict)
     segment_by: str = "cat_id"
@@ -64,15 +64,19 @@ class GBMPool:
     # -------------------------------------------------------------- helpers
 
     def _align(self, df: pd.DataFrame, group: str) -> pd.DataFrame:
-        """Reindex categorical levels to those seen at fit time.
+        """Reindex categorical levels to those seen at fit time, per group.
 
         Without this, a prediction batch containing a subset of categories gets
         different integer codes than training used, and LightGBM silently
-        mispredicts. This is a common and hard-to-spot production bug.
+        mispredicts. Keyed by (group, column) rather than column alone: the
+        `horizon_group` feature takes a different single value in each group, so a
+        column-only key left every group holding the last one fitted, and at
+        predict time that feature became NaN for two of the three groups after
+        having been a valid category during training.
         """
         out = df.copy()
-        for c, dtype in self.categories.items():
-            if c in out.columns:
+        for (g, c), dtype in self.categories.items():
+            if g == group and c in out.columns:
                 out[c] = out[c].astype(str).astype(dtype)
         return out[self.features[group]]
 
@@ -102,7 +106,7 @@ class GBMPool:
                     dtype = pd.CategoricalDtype(
                         sorted(set(tr[c].astype(str)) | set(va[c].astype(str)))
                     )
-                    self.categories[c] = dtype
+                    self.categories[(group, c)] = dtype
             tr_x, va_x = self._align(tr, group), self._align(va, group)
             cats = [c for c in CAT_FEATURES if c in feats]
 

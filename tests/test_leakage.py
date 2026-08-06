@@ -48,7 +48,12 @@ def test_origin_features_are_invariant_to_later_data(panel: Panel):
         y_raw=panel.y_raw.copy(),
         carried=panel.carried.copy(),
         price=panel.price.copy(),
+        # SNAP is a published benefit calendar, known ahead of time like holidays,
+        # so it is deliberately not truncated — and it is a target-date feature
+        # rather than an origin feature, so it cannot affect this assertion.
+        snap=panel.snap.copy(),
         calendar=panel.calendar,
+        n_history=panel.n_history,
     )
     truncated.y[:, O + 1 :] = np.nan
     truncated.y_raw[:, O + 1 :] = np.nan

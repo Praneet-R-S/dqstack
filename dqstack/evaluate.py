@@ -37,6 +37,11 @@ def scale_denominator(y_train: np.ndarray, period: int = 1) -> np.ndarray:
     (never sold, or a single flat value) are excluded rather than given an
     infinite score.
     """
+    # The scaler must be measured on the same footing as the numerator. Replacing
+    # masked history with zeros inflates the seasonal difference — a censored day
+    # reads as a crash to zero and a recovery — which deflates RMSSE for precisely
+    # the most-censored series while the numerator excludes those days entirely.
+    y_train = np.asarray(y_train, dtype="float64")
     d = np.diff(y_train, n=1, axis=1) if period == 1 else y_train[:, period:] - y_train[:, :-period]
     with np.errstate(invalid="ignore"):
         return np.nanmean(d**2, axis=1)

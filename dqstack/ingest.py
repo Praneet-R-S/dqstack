@@ -72,6 +72,11 @@ def _validate_table(
     name: str, df: pd.DataFrame, tables: dict[str, pd.DataFrame], run_id: str
 ) -> FeedRun:
     schema = ALL_SCHEMAS[name]
+    # Fingerprinting indexes the declared columns, so a feed missing one would
+    # raise a bare pandas KeyError before the quality gate could report it as a
+    # blocking failure — the gate exists to turn bad feeds into a clear rejection,
+    # not a stack trace.
+    present = [c for c in schema.names if c in df.columns]
     run = FeedRun(
         run_id=run_id,
         table=name,
@@ -79,7 +84,7 @@ def _validate_table(
         row_count=len(df),
         expected_row_count=_expected_rows(name, tables),
         declared_fingerprint=schema.fingerprint(),
-        schema_fingerprint=schema.observed_fingerprint(df[schema.names]),
+        schema_fingerprint=schema.observed_fingerprint(df[present]),
     )
 
     # --- schema conformance (blocking) — FR-01
@@ -151,22 +156,56 @@ def _validate_table(
     return run
 
 
-def _reconcile_totals(sales: pd.DataFrame, run_id: str) -> FeedRun:
+def _reconcile_totals(
+    sales: pd.DataFrame, control: pd.DataFrame | None, run_id: str
+) -> FeedRun:
     """Compare ingested aggregate totals against source-declared totals — FR-06.
 
-    The source declaration is emitted alongside the feed; here it is recomputed
-    from the raw file so the check exercises the comparison path.
+    The declaration must come from a *different artefact* than the figure being
+    checked. Deriving both sides from the sales column makes the comparison an
+    identity that can never fail however badly the feed is broken — a check that
+    reports "pass" unconditionally is worse than no check, because it is credited
+    in the run record.
+
+    The control file is emitted by the source at generation time and carries units
+    and row counts per store, so a truncated, duplicated or partially loaded feed
+    fails here rather than silently training.
     """
-    run = FeedRun(run_id=run_id, table="sales_totals", started_at=utc_stamp(), row_count=len(sales))
-    declared = int(sales["sales"].sum())
-    ingested = int(sales.groupby("store_id", observed=True)["sales"].sum().sum())
-    diff = abs(declared - ingested) / max(declared, 1)
-    ok = diff <= CFG.gate.total_reconciliation_tolerance
+    run = FeedRun(run_id=run_id, table="sales_totals", started_at=utc_stamp(),
+                  row_count=len(sales))
+    if control is None or control.empty:
+        run.checks.append(
+            FeedCheck("total_reconciliation", "warn",
+                      "no source control file present; FR-06 not exercised",
+                      blocking=False)
+        )
+        return run
+
+    got = sales.groupby("store_id", observed=True)["sales"].sum()
+    rows = sales.groupby("store_id", observed=True).size()
+    want = control.set_index("store_id")["declared_units"]
+    want_rows = control.set_index("store_id")["declared_rows"]
+
+    common = want.index.intersection(got.index)
+    missing = [s for s in want.index if s not in got.index]
+    declared, ingested = float(want.loc[common].sum()), float(got.loc[common].sum())
+    diff = abs(declared - ingested) / max(declared, 1.0)
+    ok = diff <= CFG.gate.total_reconciliation_tolerance and not missing
+
     run.checks.append(
         FeedCheck(
             "total_reconciliation",
             "pass" if ok else "fail",
-            f"declared {declared:,} vs ingested {ingested:,} ({diff:.4%} gap)",
+            f"declared {declared:,.0f} vs ingested {ingested:,.0f} ({diff:.4%} gap)"
+            + (f"; {len(missing)} stores absent from the feed" if missing else ""),
+        )
+    )
+    row_gap = int((want_rows.loc[common] - rows.loc[common]).abs().sum())
+    run.checks.append(
+        FeedCheck(
+            "row_count_by_store",
+            "pass" if row_gap == 0 else "fail",
+            f"{row_gap:,} rows differ from the source declaration",
         )
     )
     return run
@@ -180,11 +219,13 @@ def run(strict: bool | None = None) -> IngestResult:
         name: pd.read_parquet(RAW / f"{name}.parquet")
         for name in ("sales", "prices", "calendar", "items", "stores")
     }
+    ctrl_path = RAW / "sales_control.parquet"
+    control = pd.read_parquet(ctrl_path) if ctrl_path.exists() else None
     for name in ("sales", "calendar"):
         tables[name]["date"] = pd.to_datetime(tables[name]["date"])
 
     feed_runs = [_validate_table(n, tables[n], tables, run_id) for n in ALL_SCHEMAS]
-    feed_runs.append(_reconcile_totals(tables["sales"], run_id))
+    feed_runs.append(_reconcile_totals(tables["sales"], control, run_id))
 
     (ARTIFACTS / "feed_runs.json").write_text(
         json.dumps([f.to_dict() for f in feed_runs], indent=2)
