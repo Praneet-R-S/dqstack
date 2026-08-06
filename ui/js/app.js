@@ -595,6 +595,12 @@
     renderFilters();
     refresh();
 
+    // Establish the initial view in code rather than trusting the markup. A
+    // reloaded tab can retain the previous session's tab state, and an attribute
+    // that has drifted leaves every view hidden — which presents as a blank app
+    // with no error in the console.
+    setView("workspace");
+
     document.querySelectorAll(".tab").forEach((t) =>
       t.addEventListener("click", () => setView(t.dataset.view))
     );

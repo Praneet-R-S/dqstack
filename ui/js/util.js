@@ -46,8 +46,11 @@ const U = (() => {
     return nf(v, a < 10 && a % 1 !== 0 ? 1 : 0);
   };
 
+  // Sign outside the currency symbol: "-$223", not "$-223".
   const money = (v, d = 0) =>
-    v === null || v === undefined || Number.isNaN(v) ? "—" : "$" + compact(v, d);
+    v === null || v === undefined || Number.isNaN(v)
+      ? "—"
+      : (v < 0 ? "-$" : "$") + compact(Math.abs(v), d);
 
   const pct = (v, d = 1) =>
     v === null || v === undefined || Number.isNaN(v) ? "—" : (v * 100).toFixed(d) + "%";
