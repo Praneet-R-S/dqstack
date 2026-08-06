@@ -297,6 +297,36 @@ change — precisely when correct intervals matter most. Mitigated with a rollin
 calibration window and continuous coverage monitoring, not by assuming the
 guarantee holds forever.
 
+**Lower-tail coverage is not achievable on zero-inflated demand, and Stage 6 does
+not pretend otherwise.** When 43% of actuals are exactly zero and the predicted
+low quantile is also zero, `P(y <= q)` is bounded below by `P(y = 0)`, so a nominal
+0.05 target is arithmetically out of reach. The calibrator validates each offset on
+a held-out half and declines to adjust levels where adjustment does not help,
+which is why the reported adjustment table shows the lower levels as
+"declined: no out-of-sample gain" rather than silently shifting mass upward to
+chase a number it cannot hit. The median is never shifted at all — CQR
+conformalises interval bounds, not the point forecast.
+
+**The censoring mask uses whole-sample weekday zero-rates.** `P(zero | weekday)`
+is estimated over each series' full history rather than as of each origin, so the
+mask that defines the training target carries a small amount of foresight. Fixing
+it properly means recomputing masks per origin, which is 42 rebuilds of a
+1,000 × 1,128 panel. What leaks is a stationary property of the series, not a
+target value, and the static diagnostic *features* — the larger and more direct
+leak — are now computed per origin block. This is the one known residual.
+
+**The backtest rolls the evaluation origin, not retraining.** Models are fitted
+once on the training block and evaluated at eight purged origins. That measures
+how a fixed system behaves as the origin moves, which is the question the
+combination-versus-selection claim needs. It does not measure the value of weekly
+retraining, and the results must not be read as if it did.
+
+**Eight paired origins is a small sample.** The paired comparisons report Wilcoxon
+and exact sign tests, and with eight observations neither reaches conventional
+significance unless the effect is large. Where the direction is consistent but the
+test is underpowered, that is what the summary says — "consistent direction,
+underpowered" is the honest reading, not "no effect".
+
 **Overrides are not persisted.** There is no write path to a system of record
 here, so commits are announced and cleared. The impact estimate is real; the
 durable override ledger is not built.

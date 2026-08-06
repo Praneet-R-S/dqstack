@@ -29,6 +29,7 @@ import pandas as pd
 from . import calibrate as cal_mod
 from . import combine as comb
 from . import decide as dec
+from . import backtest as bt
 from . import diagnose, evaluate, ingest, reconcile
 from .config import (
     ARTIFACTS,
@@ -239,7 +240,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     ids = P.series[ID_COLS]
     vintages: dict[str, Panel] = {}
     for name, at in (("train", sp.train[0]), ("meta", sp.meta[0]),
-                     ("conformal", sp.conformal[0]), ("eval", sp.eval)):
+                     ("conformal", sp.conformal[0]), ("eval", sp.evals[0])):
         d_v, _ = diagnose.run(hist_panel, cfg, asof=P.dates[at])
         vintages[name] = P.with_series(series_frame(ids, d_v))
         log(f"  diagnostics vintage {name:<10s} as of {P.dates[at].date()}")
@@ -471,6 +472,45 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     log("    " + leaderboard.round(4).to_string(index=False).replace("\n", "\n    "))
     timings["evaluate"] = time.perf_counter() - t0
 
+    # ---------------------------------------------------------- rolling backtest
+    section(f"ROLLING BACKTEST — {len(sp.evals)} evaluation origins")
+    t0 = time.perf_counter()
+
+    tmat_all = truth.pivot_table(index="series_id", columns="date",
+                                 values="latent_demand", aggfunc="first")                     .reindex(P.series["series_id"])
+
+    items_bt = ing.items.set_index("item_id")
+    it_bt = P.series["item_id"].astype(str).to_numpy()
+    price_bt = np.nan_to_num(P.series["avg_price"].to_numpy(dtype="float64"), nan=3.0)
+    price_bt = np.where(price_bt <= 0.05, 3.0, price_bt)
+    cp_bt = dec.CostParams(
+        price=price_bt,
+        unit_cost=items_bt.loc[it_bt, "unit_cost"].to_numpy(),
+        margin_rate=items_bt.loc[it_bt, "margin_rate"].to_numpy(),
+        shelf_life=items_bt.loc[it_bt, "shelf_life_days"].to_numpy().astype("float64"),
+    )
+
+    bt_rows, bt_cov, bt_stages = [], [], []
+    for O in sp.evals:
+        rows, cov, stage = bt.evaluate_origin(
+            O, P, vintages["eval"], tr, W, meta, rc, conformal, cp_bt,
+            tmat_all, hist_panel, horizons, ENSEMBLE, cfg,
+        )
+        bt_rows.extend(rows)
+        bt_cov.append(cov)
+        bt_stages.append(stage)
+        log(f"  origin {P.dates[O].date()}  "
+            f"system WSPL {[r for r in rows if r['method'] == bt.SYSTEM][0]['wspl']:.4f}")
+
+    per_origin = pd.DataFrame(bt_rows)
+    bt_summary = bt.summarise(per_origin, pd.DataFrame(bt_stages))
+    log("")
+    bt.report(per_origin, bt_summary, log=log)
+    bt.persist(per_origin, bt_summary)
+    pd.concat(bt_cov, ignore_index=True).to_csv(
+        ARTIFACTS / "backtest_coverage.csv", index=False)
+    timings["backtest"] = time.perf_counter() - t0
+
     # ---------------------------------------------------------- stage 7
     section("STAGE 7 — decide (critical fractile, simulator, ledger)")
     t0 = time.perf_counter()
@@ -616,6 +656,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         "mint_shrinkage": rc.shrinkage,
         "mint_projection_error": rc.projection_error,
         "simulator_totals": res_full.totals,
+        "backtest": bt_summary,
         "timings_seconds": {k: round(v, 2) for k, v in timings.items()},
         "config": {
             "enable_censor_masking": cfg.enable_censor_masking,

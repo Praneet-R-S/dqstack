@@ -503,10 +503,20 @@ class SplitPlan:
     train: list[int]
     meta: list[int]
     conformal: list[int]
-    eval: int
+    evals: list[int]                     # rolling evaluation origins, all with actuals
     live: int
     dates: pd.DatetimeIndex
     horizon: int = 28
+
+    @property
+    def eval(self) -> int:
+        """The most recent evaluation origin.
+
+        Kept as the single origin the workspace and the detail panels describe;
+        every *reported* metric is aggregated across `evals`, because a conclusion
+        drawn from one origin is a conclusion about one month's weather.
+        """
+        return self.evals[-1]
 
     @property
     def calib(self) -> list[int]:
@@ -520,7 +530,7 @@ class SplitPlan:
     def assert_purged(self) -> None:
         """Fails loudly rather than quietly training on overlapping targets."""
         blocks = [("train", self.train), ("meta", self.meta),
-                  ("conformal", self.conformal), ("eval", [self.eval])]
+                  ("conformal", self.conformal), ("eval", self.evals)]
         for (n1, b1), (n2, b2) in zip(blocks[:-1], blocks[1:]):
             end1 = self.target_span(b1)[1]
             start2 = self.target_span(b2)[0]
@@ -542,7 +552,7 @@ class SplitPlan:
             line("train", self.train),
             line("meta", self.meta),
             line("conformal", self.conformal),
-            line("eval", [self.eval]) + "  (actuals known)",
+            line("eval", self.evals) + f"  ({len(self.evals)} origins, actuals known)",
             line("live", [self.live]) + "  (no actuals; the served forecast)",
         ])
 
@@ -554,20 +564,24 @@ def make_splits(
     step: int = 7,
     n_meta_origins: int = 5,
     n_conformal_origins: int = 5,
+    n_eval_origins: int = 8,
     min_origin: int = 400,
 ) -> SplitPlan:
     # The live origin is the last day with observed sales. Its targets land in
     # the extended future region, which has calendar and planned price but no
     # actuals — that is the forecast the workspace serves.
     live = P.n_history - 1
-    ev = live - horizon
 
     def block(end: int, n: int) -> list[int]:
         return list(range(end - step * (n - 1), end + 1, step))
 
-    # Walk backwards from the eval origin, inserting a full horizon of purge
-    # between every pair of blocks.
-    conformal = block(ev - horizon, n_conformal_origins)
+    # Walk backwards from the last evaluable origin, inserting a full horizon of
+    # purge between every pair of blocks. Multiple evaluation origins are the point:
+    # a single origin measures one month's weather, and the whole
+    # combination-versus-selection question is a claim about variance that cannot
+    # be settled from one draw.
+    evals = block(live - horizon, n_eval_origins)
+    conformal = block(evals[0] - horizon, n_conformal_origins)
     meta = block(conformal[0] - horizon, n_meta_origins)
     train = block(meta[0] - horizon, n_train_origins)
 
@@ -579,7 +593,7 @@ def make_splits(
             f"{meta[0] - horizon - step * (n_train_origins - 1)}"
         )
 
-    sp = SplitPlan(train=train, meta=meta, conformal=conformal, eval=ev,
+    sp = SplitPlan(train=train, meta=meta, conformal=conformal, evals=evals,
                    live=live, dates=P.dates, horizon=horizon)
     sp.assert_purged()
     return sp
