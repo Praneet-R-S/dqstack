@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="css/tokens.css">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/tokens.css?v=fef6f69c">
+<link rel="stylesheet" href="css/app.css?v=0dacb235">
 </head>
 <body>
 <div id="app">
@@ -79,6 +79,19 @@
             <button data-scope="queue" aria-pressed="true">Queue</button>
             <button data-scope="all" aria-pressed="false">All series</button>
           </div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-secondary)">
+            group
+            <select class="ov-select" id="groupBy" aria-label="Group rows by"
+                    style="max-width:120px">
+              <option value="">none</option>
+              <option value="cat">category</option>
+              <option value="dept">department</option>
+              <option value="store">store</option>
+              <option value="state">state</option>
+              <option value="cls">planning class</option>
+            </select>
+          </label>
+          <button class="icon-btn" id="colReset" title="Reset column widths and order">⇄ cols</button>
           <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-secondary)">
             <input type="checkbox" id="priorToggle" checked> prior version
           </label>
@@ -323,11 +336,11 @@
 
 <div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
 
-<script src="data/bundle.js"></script>
-<script src="js/util.js"></script>
-<script src="js/grid.js"></script>
-<script src="js/chart.js"></script>
-<script src="js/views.js"></script>
-<script src="js/app.js"></script>
+<script src="data/bundle.js?v=a6cc76d6"></script>
+<script src="js/util.js?v=18df86dd"></script>
+<script src="js/grid.js?v=ac0d923f"></script>
+<script src="js/chart.js?v=9922be45"></script>
+<script src="js/views.js?v=75c048ff"></script>
+<script src="js/app.js?v=d498caff"></script>
 </body>
 </html>

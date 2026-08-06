@@ -726,6 +726,16 @@
         refresh();
       })
     );
+    $("groupBy").addEventListener("change", (e) => {
+      Grid.setGroupBy(e.target.value);
+      $("crumbSort").textContent = e.target.value
+        ? `priority, grouped by ${e.target.selectedOptions[0].textContent}`
+        : "priority";
+    });
+    $("colReset").addEventListener("click", () => {
+      Grid.resetColumns();
+      toast("Column widths and order reset");
+    });
     $("themeBtn").addEventListener("click", toggleTheme);
     $("densityBtn").addEventListener("click", cycleDensity);
     $("priorToggle").addEventListener("change", () => {

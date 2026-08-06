@@ -198,6 +198,34 @@ def build_exceptions(
 
 # ------------------------------------------------------------------ main
 
+def stamp_assets(ui_root: Path) -> None:
+    """Version every local asset URL in index.html by a hash of its content.
+
+    A `file://` app has no cache headers, and browsers happily serve a stale
+    stylesheet or script for a page that has changed underneath them — which
+    already cost two debugging rounds where a fix on disk was provably not the code
+    running. Hashing the content means the URL changes exactly when the file does.
+    """
+    import hashlib
+    import re
+
+    index = ui_root / "index.html"
+    if not index.exists():
+        return
+    html = index.read_text(encoding="utf-8")
+
+    def stamp(m: "re.Match[str]") -> str:
+        attr, path = m.group(1), m.group(2).split("?")[0]
+        f = ui_root / path
+        if not f.exists():
+            return m.group(0)
+        h = hashlib.sha1(f.read_bytes()).hexdigest()[:8]
+        return f'{attr}="{path}?v={h}"'
+
+    html = re.sub(r'(href|src)="((?:css|js|data)/[^"]+)"', stamp, html)
+    index.write_text(html, encoding="utf-8")
+
+
 def export_bundle(state: dict, out_dir: Path = UI_DATA, explain_top: int = 160) -> Path:
     P = state["P"]
     diag = state["diag"]
@@ -414,4 +442,6 @@ def export_bundle(state: dict, out_dir: Path = UI_DATA, explain_top: int = 160) 
     target.write_text("window.DQ_DATA=" + payload + ";", encoding="utf-8")
     (out_dir / "bundle.json").write_text(payload, encoding="utf-8")
     print(f"  wrote {target} ({len(payload) / 1e6:.1f} MB)", flush=True)
+    stamp_assets(out_dir.parent)
+    print("  stamped ui/index.html asset URLs with content hashes", flush=True)
     return target

@@ -176,7 +176,16 @@ def bundle_at(P: Panel, O: int, tr: Trained, horizons: tuple[int, ...]) -> Bundl
 
 # ------------------------------------------------------------------ run
 
-def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -> dict:
+def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
+        light: bool = False) -> dict:
+    """Run every stage.
+
+    `light` trims the rolling backtest to four origins and skips the cost
+    sensitivity sweep. Used by the ablation runner: an ablation arm is asking
+    whether a *stage* earns its place, which the eval-origin economics answer,
+    whereas the eight-origin backtest and the 75-scenario sweep answer questions
+    about origin stability and cost robustness that only need asking once.
+    """
     t_start = time.perf_counter()
     timings: dict[str, float] = {}
     horizons = tuple(range(1, HORIZON + 1))
@@ -217,7 +226,8 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     section("STAGE 2 — featurize")
     t0 = time.perf_counter()
     P = build_panel(ing.panel, diag, masks, apply_mask=cfg.enable_censor_masking)
-    sp = make_splits(P, horizon=HORIZON, n_train_origins=12 if quick else 32)
+    sp = make_splits(P, horizon=HORIZON, n_train_origins=12 if quick else 32,
+                     n_eval_origins=4 if light else 8)
     # Blocks come pre-purged from make_splits, which asserts that no block's
     # target dates reach into the next one's.
     meta_origins, conf_origins = sp.meta, sp.conformal
@@ -701,13 +711,15 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     timings["stage7_decide"] = time.perf_counter() - t0
 
     # ---------------------------------------------------------- cost sensitivity
-    section("COST SENSITIVITY — is the critical fractile robust to its assumptions?")
-    t0 = time.perf_counter()
-    sens_tbl = sens.sweep(calib_e, demand_eval, cp, sids, eval_dates, cfg)
-    sens_sum = sens.summarise(sens_tbl)
-    sens.report(sens_tbl, sens_sum, log=log)
-    sens.persist(sens_tbl, sens_sum)
-    timings["sensitivity"] = time.perf_counter() - t0
+    sens_sum = {}
+    if not light:
+        section("COST SENSITIVITY — is the critical fractile robust to its assumptions?")
+        t0 = time.perf_counter()
+        sens_tbl = sens.sweep(calib_e, demand_eval, cp, sids, eval_dates, cfg)
+        sens_sum = sens.summarise(sens_tbl)
+        sens.report(sens_tbl, sens_sum, log=log)
+        sens.persist(sens_tbl, sens_sum)
+        timings["sensitivity"] = time.perf_counter() - t0
 
     # ---------------------------------------------------------- live origin
     section("LIVE FORECAST — final origin, served to the UI")

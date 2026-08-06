@@ -44,7 +44,7 @@ def main() -> None:
     for label, override, _ in ARMS:
         print(f"\n{'#' * 78}\n#  ABLATION ARM: {label}\n{'#' * 78}", flush=True)
         cfg = replace(CFG, **override) if override else CFG
-        state = run(cfg=cfg, ablate_censoring=(label == "full system"))
+        state = run(cfg=cfg, ablate_censoring=(label == "full system"), light=True)
         m = state["metrics"]
         sim = m["simulator_totals"]
         full = next((e for e in m["economics"] if e["method"] == "DQ-Stack (full)"), {})
@@ -64,6 +64,11 @@ def main() -> None:
                 "censor_precision": m["censoring_detection"]["precision"],
                 "censor_recall": m["censoring_detection"]["recall"],
                 "fva_vs_anchor": m["fva_ladder"][-1]["fva_vs_anchor"],
+                "backtest_system_wspl": next(
+                    (r["wspl_mean"] for r in m["backtest"]["by_method"]
+                     if r["method"] == "DQ-Stack (full)"), None),
+                "recon_levels_improved": m["backtest"].get("hierarchy", {})
+                    .get("levels_improved"),
             }
         )
 

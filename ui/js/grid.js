@@ -38,6 +38,15 @@ const Grid = (() => {
   // Selection is a rectangle, not a row. The spec's keyboard model is Excel's, and
   // fill-down, range paste and range undo are all defined over a rectangle — so the
   // anchor/focus pair is the primitive everything else is built on.
+  // Grouping. `groupBy` is a field name on the row, or null for the flat list.
+  // `collapsed` holds the group keys currently folded shut. Aggregates are computed
+  // on demand from the member rows, never stored — a stored aggregate is a second
+  // source of truth that drifts the moment an override lands.
+  let groupBy = null;
+  let collapsed = new Set();
+  let baseRows = [];              // ungrouped, sorted rows
+  let colState = {};              // persisted widths / order
+
   let anchor = { row: 0, col: 0 };   // where the selection started
   let focus = { row: 0, col: 0 };    // where it currently extends to
   let editCol = 0;                   // which week column has keyboard focus
@@ -85,6 +94,95 @@ const Grid = (() => {
     const s = selRect();
     return rowIdx >= s.r0 && rowIdx <= s.r1 && colIndex >= s.c0 && colIndex <= s.c1;
   };
+
+  /* ---- grouping ---------------------------------------------------------
+     A group header is a synthetic row carrying live aggregates of its members.
+     Sums are additive so they aggregate directly; a target quantile and a health
+     score are not, so the header shows a member-weighted mean for health and omits
+     the fractile entirely rather than inventing an average of ratios. */
+
+  function aggregate(key, members) {
+    const sum = (f) => members.reduce((a, r) => a + (f(r) || 0), 0);
+
+    // Aggregation must include pending edits, or "live" is a misnomer: a planner
+    // who fills a column down would watch the group total sit still. An override
+    // sets a level, not a distribution, so the whole week's quantile vector is
+    // shifted by the same amount — the band keeps its width and its centre moves.
+    const eff = (r, w, k) => {
+      const wk = r.weekly[w];
+      if (!wk) return 0;
+      const ov = overrides.get(r.id + ":" + w);
+      if (ov === undefined) return wk[k] || 0;
+      return Math.max(0, (wk[k] || 0) + (ov - wk[3]));
+    };
+
+    const weekly = [0, 1, 2, 3].map((w) => {
+      const out = new Array(7).fill(0);
+      for (const r of members) for (let k = 0; k < out.length; k++) out[k] += eff(r, w, k);
+      return out;
+    });
+    return {
+      __group: true,
+      key,
+      count: members.length,
+      id: "__grp__" + key,
+      item: key,
+      store: `${members.length} series`,
+      cls: "",
+      // Revenue-weighted so a group's health reflects what it is worth, not a
+      // headcount of its sparsest members.
+      health: (() => {
+        const wsum = sum((r) => Math.max(r._s.revenue, 1e-9));
+        return wsum > 0
+          ? members.reduce((a, r) => a + r.health * Math.max(r._s.revenue, 1e-9), 0) / wsum
+          : members.reduce((a, r) => a + r.health, 0) / Math.max(members.length, 1);
+      })(),
+      weekly,
+      priorWeekly: [0, 1, 2, 3].map((w) =>
+        members.every((r) => r.priorWeekly[w] !== null)
+          ? sum((r) => r.priorWeekly[w])
+          : null
+      ),
+      fan: null,                       // no micro-fan on a header row
+      // Deliberately the sum of the four week medians rather than of 28 daily
+      // medians: the two differ slightly under moment matching, and a header
+      // whose 28D column does not equal W1+W2+W3+W4 reads as broken.
+      total: [0, 1, 2, 3].reduce((a, w) => a + weekly[w][3], 0),
+      p10: [0, 1, 2, 3].reduce((a, w) => a + weekly[w][1], 0),
+      p90: [0, 1, 2, 3].reduce((a, w) => a + weekly[w][5], 0),
+      targetQ: null,                   // a mean of ratios is not a ratio
+      orderUpTo: sum((r) => r.orderUpTo),
+      swing: (() => {
+        const pr = sum((r) => r.priorWeekly.reduce((a, v) => a + (v || 0), 0));
+        const now = sum((r) => r.total);
+        return pr > 1 ? (now - pr) / pr : null;
+      })(),
+      relWidth: null,
+      reasons: [...new Set(members.flatMap((r) => r.reasons))],
+      priority: Math.max(...members.map((r) => r.priority)),
+      ledger: { lostMargin: sum((r) => r.ledger.lostMargin) },
+      lostMargin: sum((r) => r.ledger.lostMargin),
+      _members: members,
+      _s: { revenue: sum((r) => r._s.revenue) },
+    };
+  }
+
+  function buildDisplayRows() {
+    if (!groupBy) return baseRows.slice();
+    const groups = new Map();
+    for (const r of baseRows) {
+      const k = String(r[groupBy] ?? "—");
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    const out = [];
+    for (const k of [...groups.keys()].sort()) {
+      const members = groups.get(k);
+      out.push(aggregate(k, members));
+      if (!collapsed.has(k)) out.push(...members);
+    }
+    return out;
+  }
 
   const frozenW = () => cols.filter((c) => c.frozen).reduce((a, c) => a + c.w, 0);
   const totalW = () => cols.reduce((a, c) => a + c.w, 0);
@@ -241,6 +339,14 @@ const Grid = (() => {
     const y = HEADER_H + i * rh - scrollTop;
     if (y + rh < HEADER_H || y > vh) return;
 
+    const isGroup = !!r.__group;
+    if (isGroup) {
+      ctx.fillStyle = U.tk("--bg-raised");
+      const x0 = frozen ? 0 : frozenW();
+      ctx.fillRect(x0, y, frozen ? frozenW() : totalW(), rh);
+      ctx.fillStyle = U.rgba(U.tk("--series-forecast"), 0.5);
+      if (frozen) ctx.fillRect(0, y, 2, rh);
+    }
     const isSel = i === sel;
     const isHover = i === hover;
     if (isSel || isHover) {
@@ -284,6 +390,14 @@ const Grid = (() => {
         break;
       }
       case "text": {
+        if (r.__group && c.key === "item") {
+          ctx.font = `600 ${fs}px ${U.tk("fontUI")}`;
+          ctx.fillStyle = U.tk("--text-primary");
+          ctx.textAlign = "left";
+          const open = !collapsed.has(r.key);
+          ctx.fillText(`${open ? "\u25be" : "\u25b8"}  ${r.item}`, x + pad, mid);
+          break;
+        }
         ctx.font = `${fs}px ${U.tk("fontNum")}`;
         ctx.fillStyle = U.tk("--text-primary");
         const t = c.key === "item" ? r.item.replace(/^(FOODS|HOUSEHOLD|HOBBIES)_/, "") : r[c.key];
@@ -307,6 +421,16 @@ const Grid = (() => {
         const wIdx = c.widx;
         const wk = r.weekly[wIdx];
         if (!wk) break;
+        if (r.__group) {
+          // Live aggregate, recomputed from members. No micro-fan: summed
+          // quantiles are not a group's quantiles, and drawing one would imply a
+          // distribution that was never estimated.
+          ctx.font = `600 ${fs}px ${U.tk("fontNum")}`;
+          ctx.fillStyle = U.tk("--text-primary");
+          ctx.textAlign = "right";
+          ctx.fillText(U.nf(Math.round(wk[3])), x + c.w - pad, mid);
+          break;
+        }
         const myCol = cols.indexOf(c);
         if (inSelection(rowIdxBeingPainted, myCol)) {
           ctx.fillStyle = U.rgba(U.tk("--series-forecast"), 0.16);
@@ -342,12 +466,14 @@ const Grid = (() => {
         break;
       }
       case "band": {
+        if (r.__group) break;
         ctx.font = `${fs - 1}px ${U.tk("fontNum")}`;
         ctx.fillStyle = U.tk("--text-secondary");
         ctx.fillText(`${Math.round(r.p10)}–${Math.round(r.p90)}`, tx, mid);
         break;
       }
       case "tq": {
+        if (r.targetQ === null) break;      // not meaningful for a group
         ctx.font = `${fs}px ${U.tk("fontNum")}`;
         // Deliberately not colour-coded: the fractile is not good or bad, it is
         // simply what the cost structure implies.
@@ -384,25 +510,52 @@ const Grid = (() => {
     }
   }
 
-  /* ---- accessibility mirror ------------------------------------------- */
+  /* ---- accessibility mirror -------------------------------------------
+     A canvas is invisible to assistive technology, so the visible window is
+     mirrored as a real table. It has to survive every row shape the grid can
+     produce, including group headers where a target quantile is deliberately null —
+     a mean of ratios is not a ratio. Reading `.toFixed` off that null threw and took
+     the whole paint down, which is a reminder that the mirror is code on the render
+     path, not documentation. */
+  const num = (v, d = 0) =>
+    v === null || v === undefined || Number.isNaN(v) ? "not applicable" : v.toFixed(d);
+
   function syncAria(first, last) {
     if (!aria) return;
-    const head = cols.filter((c) => c.label).map((c) => `<th>${c.label}</th>`).join("");
     let body = "";
     for (let i = first; i < Math.min(last, first + 60); i++) {
       const r = rows[i];
+      if (r.__group) {
+        const open = !collapsed.has(r.key);
+        body +=
+          `<tr aria-selected="${i === sel}" aria-expanded="${open}">` +
+          `<th scope="row" colspan="4">Group ${r.item}, ${r.count} series, ` +
+          `${open ? "expanded" : "collapsed"}. Weighted data health ${num(r.health, 2)}</th>` +
+          r.weekly.map((w) => `<td>${Math.round(w[3])} units, aggregate</td>`).join("") +
+          `<td>${Math.round(r.total)}</td><td>not applicable for a group</td>` +
+          `<td>order up to ${Math.round(r.orderUpTo)}</td></tr>`;
+        continue;
+      }
+      const flags = r.reasons && r.reasons.length
+        ? `, flagged ${r.reasons.map((x) => U.REASON_LABEL[x] || x).join(" and ")}`
+        : "";
       body +=
         `<tr aria-selected="${i === sel}"><td>${r.item}</td><td>${r.store}</td>` +
-        `<td>${r.cls}</td><td>health ${r.health.toFixed(2)}</td>` +
-        r.weekly.map((w) => `<td>${Math.round(w[3])} units, P10 ${Math.round(w[1])} to P90 ${Math.round(w[5])}</td>`).join("") +
-        `<td>${Math.round(r.total)}</td><td>target quantile ${r.targetQ.toFixed(3)}</td>` +
-        `<td>order up to ${r.orderUpTo}</td></tr>`;
+        `<td>${r.cls}</td><td>health ${num(r.health, 2)}${flags}</td>` +
+        r.weekly.map((w) =>
+          `<td>${Math.round(w[3])} units, P10 ${Math.round(w[1])} to P90 ${Math.round(w[5])}</td>`
+        ).join("") +
+        `<td>${Math.round(r.total)}</td><td>target quantile ${num(r.targetQ, 3)}</td>` +
+        `<td>order up to ${Math.round(r.orderUpTo)}</td></tr>`;
     }
+    const grouped = groupBy ? `, grouped by ${groupBy}` : "";
     aria.innerHTML =
-      `<table><caption>Forecast grid, rows ${first + 1} to ${Math.min(last, rows.length)} of ${rows.length}</caption>` +
+      `<table><caption>Forecast grid${grouped}. Showing rows ${first + 1} to ` +
+      `${Math.min(last, rows.length)} of ${rows.length}.</caption>` +
       `<thead><tr><th>Item</th><th>Location</th><th>Class</th><th>Data health</th>` +
       cols.filter((c) => c.kind === "week").map((c) => `<th>${c.label}</th>`).join("") +
-      `<th>28 day total</th><th>Target quantile</th><th>Order up to</th></tr></thead><tbody>${body}</tbody></table>`;
+      `<th>28 day total</th><th>Target quantile</th><th>Order up to</th></tr></thead>` +
+      `<tbody>${body}</tbody></table>`;
   }
 
   /* ---- layout / events ------------------------------------------------- */
@@ -455,15 +608,37 @@ const Grid = (() => {
     if (!key) return;
     if (sortKey === key) sortDir = -sortDir;
     else { sortKey = key; sortDir = key === "item" || key === "store" || key === "cls" ? 1 : -1; }
-    const cur = rows[sel] && rows[sel].id;
-    rows.sort((a, b) => {
+    baseRows.sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey];
       if (typeof av === "string") return sortDir * av.localeCompare(bv);
       return sortDir * ((av ?? -Infinity) - (bv ?? -Infinity));
     });
-    const back = rows.findIndex((r) => r.id === cur);
-    sel = back >= 0 ? back : 0;
-    paint();
+    regroup();
+  }
+
+  function colRightEdge(col) {
+    let x = 0;
+    for (const c of cols) { x += c.w; if (c === col) return x; }
+    return x;
+  }
+
+  function applyColState() {
+    if (colState.widths) {
+      for (const c of cols) if (colState.widths[c.key]) c.w = colState.widths[c.key];
+    }
+    if (Array.isArray(colState.order) && colState.order.length === cols.length) {
+      const byKey = new Map(cols.map((c) => [c.key, c]));
+      const reordered = colState.order.map((k) => byKey.get(k)).filter(Boolean);
+      if (reordered.length === cols.length) cols = reordered;
+    }
+  }
+
+  function saveColState() {
+    colState = {
+      widths: Object.fromEntries(cols.map((c) => [c.key, c.w])),
+      order: cols.map((c) => c.key),
+    };
+    try { localStorage.setItem("dq.cols", JSON.stringify(colState)); } catch (_) {}
   }
 
   /* ---- public --------------------------------------------------------- */
@@ -495,11 +670,46 @@ const Grid = (() => {
         return;
       }
       const i = rowAt(e.clientY);
-      if (i >= 0 && i < rows.length) select(i, false);
+      if (i >= 0 && i < rows.length) {
+        const r = rows[i];
+        if (r.__group) { api.toggleGroup(r.key); return; }
+        select(i, false);
+      }
     });
     canvas.addEventListener("dblclick", (e) => {
       const c = colAt(e.clientX);
       if (c && c.kind === "week") opts.onEditWeek && opts.onEditWeek(rows[sel], c.widx);
+    });
+
+    // Persisted column widths and order. A planner who has arranged the grid to
+    // their workflow should not have to redo it every morning.
+    try {
+      colState = JSON.parse(localStorage.getItem("dq.cols") || "{}");
+    } catch (_) { colState = {}; }
+    applyColState();
+
+    // Drag the right edge of a header cell to resize.
+    let drag = null;
+    canvas.addEventListener("mousedown", (e) => {
+      const box = scroller.getBoundingClientRect();
+      if (e.clientY - box.top > HEADER_H) return;
+      const c = colAt(e.clientX);
+      if (!c) return;
+      const edge = colRightEdge(c) - (e.clientX - box.left + (c.frozen ? 0 : scrollLeft));
+      if (Math.abs(edge) <= 4) {
+        drag = { col: c, startX: e.clientX, startW: c.w };
+        e.preventDefault();
+      }
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!drag) return;
+      drag.col.w = Math.max(36, Math.round(drag.startW + (e.clientX - drag.startX)));
+      resize();
+    });
+    window.addEventListener("mouseup", () => {
+      if (!drag) return;
+      drag = null;
+      saveColState();
     });
 
     ro = new ResizeObserver(U.debounce(resize, 40));
@@ -517,11 +727,23 @@ const Grid = (() => {
   }
 
   function setRows(next) {
-    rows = next;
+    baseRows = next;
+    rows = buildDisplayRows();
     sel = 0;
     scroller.scrollTop = 0;
     resize();
-    if (rows.length) onSelect(rows[0], 0);
+    const first = rows.find((r) => !r.__group);
+    if (first) onSelect(first, rows.indexOf(first));
+  }
+
+  function regroup() {
+    const keep = rows[sel] && rows[sel].id;
+    rows = buildDisplayRows();
+    const back = rows.findIndex((r) => r.id === keep);
+    sel = back >= 0 ? back : 0;
+    focus.row = sel;
+    anchor.row = sel;
+    resize();
   }
 
   /* ---- Excel-semantics editing ---------------------------------------------
@@ -545,7 +767,7 @@ const Grid = (() => {
 
   function restore(snap) {
     overrides = new Map(snap);
-    paint();
+    if (groupBy) regroup(); else paint();
     onEdits();
   }
 
@@ -562,7 +784,7 @@ const Grid = (() => {
       undoStack.push({ snap: before, label: label || "edit" });
       redoStack.length = 0;
     }
-    paint();
+    if (groupBy) regroup(); else paint();
     onEdits();
     return changed;
   }
@@ -701,6 +923,27 @@ const Grid = (() => {
     get canUndo() { return undoStack.length; },
     get canRedo() { return redoStack.length; },
     get pendingMap() { return overrides; },
+    setGroupBy(field) {
+      groupBy = field || null;
+      collapsed.clear();
+      regroup();
+    },
+    get groupBy() { return groupBy; },
+    toggleGroup(key) {
+      collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key);
+      regroup();
+    },
+    collapseAll() {
+      rows.filter((r) => r.__group).forEach((r) => collapsed.add(r.key));
+      regroup();
+    },
+    expandAll() { collapsed.clear(); regroup(); },
+    resetColumns() {
+      try { localStorage.removeItem("dq.cols"); } catch (_) {}
+      colState = {};
+      buildCols(futureDates);
+      resize();
+    },
     onEdits(fn) { onEdits = fn; },
     // Discarding is itself a transaction, so Cmd-Z brings the edits back. A planner
     // who hits Escape by accident should not lose an afternoon's work.
