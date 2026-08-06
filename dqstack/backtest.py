@@ -52,7 +52,7 @@ def evaluate_origin(
     horizons: tuple[int, ...],
     ensemble: list[str],
     cfg=CFG,
-) -> tuple[list[dict], pd.DataFrame, dict]:
+) -> tuple[list[dict], pd.DataFrame, dict, pd.DataFrame]:
     """Metrics for every candidate and for the assembled system at one origin."""
     from .pipeline import candidate_quantiles
 
@@ -122,6 +122,16 @@ def evaluate_origin(
     )
     cov["origin"] = str(P.dates[O].date())
 
+    # Accuracy at every aggregation level, for the forecast before and after
+    # reconciliation. Judging Stage 5 at the bottom level alone tests the one level
+    # where MinT is expected to lose and none of the levels where it is expected to
+    # win, so the bottom-only verdict is not a verdict at all.
+    hier = evaluate.hierarchical_accuracy(
+        y, {"pre_reconciliation": med(cq), "post_reconciliation": med(rec)},
+        rc.H, valid,
+    )
+    hier["origin"] = str(P.dates[O].date())
+
     stage = {
         "origin": str(P.dates[O].date()),
         "anchor": evaluate.wrmsse(y, pts["seasonal_naive"], denom, wts, valid),
@@ -130,7 +140,7 @@ def evaluate_origin(
         "reconciliation": evaluate.wrmsse(y, med(rec), denom, wts, valid),
         "calibration": evaluate.wrmsse(y, med(cal), denom, wts, valid),
     }
-    return rows, cov, stage
+    return rows, cov, stage, hier
 
 
 # ------------------------------------------------------------------ aggregation
@@ -180,6 +190,31 @@ def paired_compare(
     }
 
 
+def summarise_hierarchy(hier: pd.DataFrame) -> dict:
+    """Where reconciliation helps and where it costs, level by level."""
+    piv = hier.pivot_table(index=["level", "origin"], columns="method", values="wrmsse")
+    piv = piv.dropna()
+    if piv.empty:
+        return {}
+    piv["delta"] = piv["post_reconciliation"] - piv["pre_reconciliation"]
+    by_level = piv.groupby("level").agg(
+        pre=("pre_reconciliation", "mean"),
+        post=("post_reconciliation", "mean"),
+        delta=("delta", "mean"),
+        origins_improved=("delta", lambda d: int((d < 0).sum())),
+        n_origins=("delta", "size"),
+    ).reset_index()
+    by_level["improved"] = by_level["delta"] < 0
+    return {
+        "by_level": by_level.round(5).to_dict("records"),
+        "levels_improved": int(by_level["improved"].sum()),
+        "levels_total": int(len(by_level)),
+        "bottom_level_delta": float(
+            by_level.loc[by_level["level"] == "item_store", "delta"].iloc[0]
+        ) if (by_level["level"] == "item_store").any() else None,
+    }
+
+
 def summarise(per_origin: pd.DataFrame, stages: pd.DataFrame) -> dict:
     """Aggregate the per-origin table, plus the comparisons that matter."""
     num = ["wrmsse", "wspl", "mase", "bias", "realized_margin", "fill_rate", "lost_margin"]
@@ -206,7 +241,13 @@ def summarise(per_origin: pd.DataFrame, stages: pd.DataFrame) -> dict:
                        lower_is_better=False),
         paired_compare(per_origin, "wspl", SYSTEM, "no calibration"),
         paired_compare(per_origin, "wspl", SYSTEM, "no reconciliation"),
-        paired_compare(per_origin, "bias", SYSTEM, "lgbm_quantile"),
+        # Bias is signed, so it must be compared on magnitude. Ranking raw bias
+        # "lower is better" declares the most severely *under*-forecasting method
+        # the winner: the run that prompted this reported lgbm_quantile as better
+        # on bias at 8/8 origins at -0.134 against the system's -0.063, which is
+        # backwards.
+        paired_compare(per_origin.assign(abs_bias=per_origin["bias"].abs()),
+                       "abs_bias", SYSTEM, "lgbm_quantile"),
     ]
 
     st = stages.set_index("origin")
@@ -227,6 +268,22 @@ def summarise(per_origin: pd.DataFrame, stages: pd.DataFrame) -> dict:
         "paired_comparisons": [c for c in comparisons if c.get("n", 0) >= 2],
         "stage_ladder": ladder,
     }
+
+
+def report_hierarchy(hsum: dict, log=print) -> None:
+    if not hsum:
+        log("  (no hierarchical results)")
+        return
+    log(f"  reconciliation improved accuracy at {hsum['levels_improved']} of "
+        f"{hsum['levels_total']} aggregation levels")
+    log(f"    {'level':<18s} {'pre':>9s} {'post':>9s} {'delta':>9s} {'origins better':>15s}")
+    for r in sorted(hsum["by_level"], key=lambda x: x["delta"]):
+        log(f"    {r['level']:<18s} {r['pre']:>9.4f} {r['post']:>9.4f} "
+            f"{r['delta']:>+9.4f} {r['origins_improved']:>10d}/{r['n_origins']}")
+    b = hsum.get("bottom_level_delta")
+    if b is not None:
+        log(f"\n  bottom level (item_store) delta {b:+.4f} — "
+            f"{'degraded' if b > 0 else 'improved'}, which is the documented tradeoff")
 
 
 def report(per_origin: pd.DataFrame, summary: dict, log=print) -> None:

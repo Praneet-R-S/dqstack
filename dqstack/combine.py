@@ -73,6 +73,91 @@ def candidate_losses(
     return pd.DataFrame(rows)
 
 
+# ------------------------------------------------------------------ stacking
+
+def stacked_weights(
+    y: np.ndarray,
+    cand_q: dict[str, np.ndarray],
+    candidates: list[str],
+    valid: np.ndarray,
+    strata: np.ndarray,
+    min_rows: int = 2_000,
+) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """Per-stratum weights minimising the pinball loss of the *combined* forecast.
+
+    This exists because the FFORMA objective is a proxy that cannot express the
+    thing Stage 4 is arguing for.
+
+        FFORMA proxy   L(p) = sum_k p_k * L_k
+        what we want   L(p) = pinball(y, sum_k p_k * q_k)
+
+    The proxy is the expected loss of *randomly selecting* candidate k with
+    probability p_k. It is linear in p, so its minimum over the simplex sits at a
+    vertex — pure selection — and any diversification the softmax produces is
+    regularisation rather than optimisation. Measured on this data the proxy left
+    the clearly-best candidate holding 14-26% of the weight while seven others
+    shared the rest, and the resulting combination lost to that single candidate at
+    every evaluation origin.
+
+    The second form is the loss of the combination actually issued. Pinball loss is
+    a maximum of linear functions of the forecast, hence convex in the weights, so
+    the constrained minimum is well defined and reachable — and it is interior
+    whenever averaging genuinely helps. Solved per stratum with SLSQP on the
+    simplex, which is the classical quantile-stacking construction.
+
+    Returns (weights per stratum, the per-series weight matrix).
+    """
+    from scipy.optimize import minimize
+
+    K = len(candidates)
+    Q = np.stack([np.nan_to_num(cand_q[c], nan=0.0) for c in candidates], axis=2)
+    taus = np.asarray(QUANTILES, dtype="float64")
+
+    def loss(w, yy, qq):
+        comb = np.tensordot(qq, w, axes=([1], [0]))          # (n, Qlev)
+        d = yy[:, None] - comb
+        return float(np.maximum(taus * d, (taus - 1.0) * d).mean())
+
+    out: dict[str, np.ndarray] = {}
+    x0 = np.full(K, 1.0 / K)
+    cons = ({"type": "eq", "fun": lambda w: w.sum() - 1.0},)
+    bnds = [(0.0, 1.0)] * K
+
+    for s in np.unique(strata):
+        m = (strata == s) & valid
+        if m.sum() < min_rows:
+            continue
+        yy = y[m]
+        qq = Q[m]                                            # (n, K, Qlev)
+        qq = np.swapaxes(qq, 1, 2)                           # (n, Qlev, K)
+        res = minimize(loss, x0, args=(yy, qq), method="SLSQP",
+                       bounds=bnds, constraints=cons,
+                       options={"maxiter": 120, "ftol": 1e-9})
+        w = np.clip(res.x, 0.0, None)
+        out[str(s)] = w / max(w.sum(), 1e-12)
+
+    # Global fallback for thin strata.
+    m = valid
+    yy, qq = y[m], np.swapaxes(Q[m], 1, 2)
+    res = minimize(loss, x0, args=(yy, qq), method="SLSQP",
+                   bounds=bnds, constraints=cons, options={"maxiter": 120, "ftol": 1e-9})
+    g = np.clip(res.x, 0.0, None)
+    out["__global__"] = g / max(g.sum(), 1e-12)
+    return out, np.asarray(out["__global__"])
+
+
+def weights_from_strata(
+    strata_per_series: np.ndarray, table: dict[str, np.ndarray], K: int
+) -> np.ndarray:
+    """Expand per-stratum weights to one row per series."""
+    W = np.repeat(table["__global__"][None, :], len(strata_per_series), axis=0)
+    for s, w in table.items():
+        if s == "__global__":
+            continue
+        W[strata_per_series.astype(str) == s] = w
+    return W
+
+
 # ------------------------------------------------------------------ FFORMA
 
 def _fforma_objective(losses: np.ndarray, n_class: int):

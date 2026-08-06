@@ -30,6 +30,7 @@ from . import calibrate as cal_mod
 from . import combine as comb
 from . import decide as dec
 from . import backtest as bt
+from . import sensitivity as sens
 from . import diagnose, evaluate, ingest, reconcile
 from .config import (
     ARTIFACTS,
@@ -317,10 +318,12 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     section("STAGE 4 — combine (FFORMA meta-learner)")
     t0 = time.perf_counter()
     loss_frames = []
+    q_by_origin: dict[int, dict[str, np.ndarray]] = {}
     for O in meta_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
         _, qs = candidate_quantiles(vintages["meta"], O, horizons, tr)
         qs = {k: v for k, v in qs.items() if k in ENSEMBLE}
+        q_by_origin[O] = qs
         loss_frames.append(comb.candidate_losses(y, qs, np.isfinite(y)))
     # nanmean across origins, not a plain sum. A series whose targets are entirely
     # masked at one origin gets NaN there, and `sum()` propagates it, so that
@@ -347,9 +350,57 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         )
         log(f"  meta-features restored from diagnostics: {extra}")
     meta = comb.MetaLearner().fit(diag_aligned, losses, cfg)
-    W = (meta.weights(diag_aligned, cfg) if cfg.enable_combination
-         else meta.select_weights(diag_aligned, losses))
-    if not cfg.enable_combination:
+    W_fforma = meta.weights(diag_aligned, cfg)
+
+    # Convex stacking on the loss of the combination actually issued, fitted on the
+    # same meta origins. Both arms are then scored on those origins; the arm chosen
+    # is the one that wins there, and the eval origins remain untouched
+    # out-of-sample. Choosing on the eval origins would be selecting a method on the
+    # data used to report it.
+    y_meta = np.concatenate(
+        [np.stack([P.y[:, O + h] for h in horizons], axis=1).ravel() for O in meta_origins]
+    )
+    q_meta = {
+        name: np.concatenate([q_by_origin[O][name].reshape(-1, len(QUANTILES))
+                              for O in meta_origins])
+        for name in meta.candidates
+    }
+    strata_meta = np.concatenate(
+        [np.repeat(pc, len(horizons)) for _ in meta_origins]
+    )
+    valid_meta = np.isfinite(y_meta)
+
+    stack_tbl, _ = comb.stacked_weights(
+        y_meta, q_meta, meta.candidates, valid_meta, strata_meta
+    )
+    W_stack = comb.weights_from_strata(pc, stack_tbl, len(meta.candidates))
+
+    def _meta_loss(Wm: np.ndarray) -> float:
+        tot, n = 0.0, 0
+        for O in meta_origins:
+            yy = np.stack([P.y[:, O + h] for h in horizons], axis=1)
+            cq = comb.combine_quantiles(q_by_origin[O], Wm, meta.candidates)
+            pl = comb.pinball(yy, cq)
+            v = np.isfinite(yy)
+            tot += float(np.nansum(np.where(v, pl, np.nan)))
+            n += int(v.sum())
+        return tot / max(n, 1)
+
+    l_ff, l_st = _meta_loss(W_fforma), _meta_loss(W_stack)
+    best_single = min(
+        (float(np.nanmean(comb.pinball(
+            np.stack([P.y[:, O + h] for h in horizons], axis=1), q_by_origin[O][c])))
+         for c in meta.candidates for O in [meta_origins[0]]),
+    )
+    log(f"  combined pinball on the meta origins (the weights' own objective):")
+    log(f"    FFORMA proxy weights   {l_ff:.5f}")
+    log(f"    convex stack weights   {l_st:.5f}")
+    log(f"    -> using {'stack' if l_st <= l_ff else 'fforma'} weights")
+
+    if cfg.enable_combination:
+        W = W_stack if (cfg.combine.method == "stack" and l_st <= l_ff) else W_fforma
+    else:
+        W = meta.select_weights(diag_aligned, losses)
         log("  ablation: selection instead of combination (one-hot argmin weights)")
     timings["stage4_combine"] = time.perf_counter() - t0
 
@@ -504,23 +555,40 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         shelf_life=items_bt.loc[it_bt, "shelf_life_days"].to_numpy().astype("float64"),
     )
 
-    bt_rows, bt_cov, bt_stages = [], [], []
+    bt_rows, bt_cov, bt_stages, bt_hier = [], [], [], []
     for O in sp.evals:
-        rows, cov, stage = bt.evaluate_origin(
-            O, P, vintages["eval"], tr, W, meta, rc, conformal, cp_bt,
+        # Diagnostics dated at *this* origin, not at the block start. Dating the
+        # whole block at its first origin is backward-looking and safe, but it also
+        # means an item that launches mid-block is never seen as young: the
+        # cold_start class was empty at every eval origin, so the lifecycle curves
+        # and the zero-shot prior — the two candidates that exist for exactly that
+        # case — were never actually exercised by the evaluation.
+        d_o, _ = diagnose.run(hist_panel, cfg, asof=P.dates[O])
+        P_o = P.with_series(series_frame(ids, d_o))
+        rows, cov, stage, hier = bt.evaluate_origin(
+            O, P, P_o, tr, W, meta, rc, conformal, cp_bt,
             tmat_all, hist_panel, horizons, ENSEMBLE, cfg,
         )
         bt_rows.extend(rows)
         bt_cov.append(cov)
         bt_stages.append(stage)
+        bt_hier.append(hier)
+        n_cold = int((d_o["planning_class"] == "cold_start").sum())
+        log(f"    classes at this origin: cold_start {n_cold}, "
+            f"terminal {int((d_o['planning_class'] == 'terminal').sum())}")
         log(f"  origin {P.dates[O].date()}  "
             f"system WSPL {[r for r in rows if r['method'] == bt.SYSTEM][0]['wspl']:.4f}")
 
     per_origin = pd.DataFrame(bt_rows)
+    hier_all = pd.concat(bt_hier, ignore_index=True)
     bt_summary = bt.summarise(per_origin, pd.DataFrame(bt_stages))
+    bt_summary["hierarchy"] = bt.summarise_hierarchy(hier_all)
     log("")
     bt.report(per_origin, bt_summary, log=log)
+    log("\n  --- Stage 5 judged across the hierarchy, not only at the leaves ---")
+    bt.report_hierarchy(bt_summary["hierarchy"], log=log)
     bt.persist(per_origin, bt_summary)
+    hier_all.to_csv(ARTIFACTS / "backtest_hierarchical.csv", index=False)
     pd.concat(bt_cov, ignore_index=True).to_csv(
         ARTIFACTS / "backtest_coverage.csv", index=False)
     timings["backtest"] = time.perf_counter() - t0
@@ -611,6 +679,15 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         log("  no rank inversions at this origin")
     timings["stage7_decide"] = time.perf_counter() - t0
 
+    # ---------------------------------------------------------- cost sensitivity
+    section("COST SENSITIVITY — is the critical fractile robust to its assumptions?")
+    t0 = time.perf_counter()
+    sens_tbl = sens.sweep(calib_e, demand_eval, cp, sids, eval_dates, cfg)
+    sens_sum = sens.summarise(sens_tbl)
+    sens.report(sens_tbl, sens_sum, log=log)
+    sens.persist(sens_tbl, sens_sum)
+    timings["sensitivity"] = time.perf_counter() - t0
+
     # ---------------------------------------------------------- live origin
     section("LIVE FORECAST — final origin, served to the UI")
     t0 = time.perf_counter()
@@ -682,6 +759,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         "mint_projection_error": rc.projection_error,
         "simulator_totals": res_full.totals,
         "backtest": bt_summary,
+        "cost_sensitivity": sens_sum,
         "timings_seconds": {k: round(v, 2) for k, v in timings.items()},
         "config": {
             "enable_censor_masking": cfg.enable_censor_masking,

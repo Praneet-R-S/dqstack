@@ -115,6 +115,71 @@ def coverage(y: np.ndarray, q: np.ndarray, valid: np.ndarray | None = None,
     return df
 
 
+# ------------------------------------------------------------------ hierarchy
+
+def hierarchical_accuracy(
+    y: np.ndarray,
+    forecasts: dict[str, np.ndarray],
+    H,
+    valid: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """WRMSSE at every aggregation level, for each supplied forecast.
+
+    Reconciliation cannot be judged at the bottom level alone, and judging it there
+    is how a stage that is working gets recorded as a stage that is broken. MinT
+    trades a little leaf-level accuracy for coherence and for accuracy at the
+    aggregates a planning organisation actually reviews — the specification says so
+    explicitly — so measuring only item-store WRMSSE tests the one level where it is
+    expected to lose and none of the levels where it is expected to win.
+
+    Aggregation is applied to actuals and forecasts identically. Masked target days
+    are excluded by zeroing both sides, which keeps an aggregate from being
+    penalised for a component that had no demand signal that day.
+    """
+    rows = []
+    v = np.ones_like(y, dtype=bool) if valid is None else valid
+    y_m = np.where(v, np.nan_to_num(y), 0.0)
+
+    for level in sorted(set(H.node_level)):
+        idx = [i for i, l in enumerate(H.node_level) if l == level]
+        S_l = H.S[idx]                                   # (n_nodes_at_level, n_bottom)
+        y_agg = S_l @ y_m                                # (n_nodes, H)
+        # Scaler and weights at this level, from the aggregated actuals themselves.
+        d = np.diff(y_agg, axis=1)
+        denom = np.nanmean(d**2, axis=1)
+        w = y_agg.sum(axis=1)
+        w = w / max(w.sum(), 1e-9)
+
+        for name, f in forecasts.items():
+            f_agg = S_l @ np.where(v, np.nan_to_num(f), 0.0)
+            r = rmsse(y_agg, f_agg, denom)
+            m = np.isfinite(r) & np.isfinite(w)
+            score = float((w[m] / max(w[m].sum(), 1e-9) * r[m]).sum()) if m.any() else np.nan
+            rows.append({
+                "level": level,
+                "n_nodes": len(idx),
+                "method": name,
+                "wrmsse": score,
+            })
+    return pd.DataFrame(rows)
+
+
+def coherence_gap(forecast: np.ndarray, H) -> float:
+    """Largest relative disagreement between a level and the sum of its components.
+
+    Zero after reconciliation by construction; the interesting figure is what it was
+    *before*, which is the size of the problem the stage solved.
+    """
+    bottom = forecast
+    implied = H.S @ bottom
+    out = 0.0
+    for level in set(H.node_level):
+        idx = [i for i, l in enumerate(H.node_level) if l == level]
+        agg = implied[idx]
+        out = max(out, float(np.abs(agg - H.S[idx] @ bottom).max()))
+    return out
+
+
 # ------------------------------------------------------------------ FVA
 
 def forecast_value_added(

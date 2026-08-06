@@ -154,6 +154,13 @@ class CombineConfig:
     meta_rounds: int = 150
     meta_leaves: int = 31
     meta_lr: float = 0.06
+    # "stack" minimises the pinball loss of the combined forecast (convex in the
+    # weights, interior optimum when averaging helps). "fforma" minimises the
+    # feature-based proxy sum(p_k L_k), which is linear in the weights and whose
+    # optimum is therefore pure selection. Both are runnable; the proxy is retained
+    # because it is what the FFORMA literature specifies and the difference is a
+    # reportable result.
+    method: str = "stack"        # "stack" | "fforma"
 
 
 # ---------------------------------------------------------------- stage 5
