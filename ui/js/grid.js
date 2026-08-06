@@ -34,6 +34,13 @@ const Grid = (() => {
   let overrides = new Map();
   let futureDates = [];
   let sortKey = "priority", sortDir = -1;
+
+  // Selection is a rectangle, not a row. The spec's keyboard model is Excel's, and
+  // fill-down, range paste and range undo are all defined over a rectangle — so the
+  // anchor/focus pair is the primitive everything else is built on.
+  let anchor = { row: 0, col: 0 };   // where the selection started
+  let focus = { row: 0, col: 0 };    // where it currently extends to
+  let editCol = 0;                   // which week column has keyboard focus
   // Held at module scope on purpose. A ResizeObserver created inline as
   // `new ResizeObserver(cb).observe(el)` has no strong reference and can be
   // garbage-collected, after which it silently never fires again — the canvas
@@ -62,6 +69,22 @@ const Grid = (() => {
       { key: "lost", label: "LOST MGN", w: 86, kind: "lost", sort: "lostMargin", right: true },
     ];
   }
+
+  // Indices of the editable week columns, in display order.
+  const weekCols = () => cols.map((c, i) => (c.kind === "week" ? i : -1)).filter((i) => i >= 0);
+  const weekIdxOf = (colIndex) => (cols[colIndex] ? cols[colIndex].widx : null);
+
+  const selRect = () => ({
+    r0: Math.min(anchor.row, focus.row),
+    r1: Math.max(anchor.row, focus.row),
+    c0: Math.min(anchor.col, focus.col),
+    c1: Math.max(anchor.col, focus.col),
+  });
+
+  const inSelection = (rowIdx, colIndex) => {
+    const s = selRect();
+    return rowIdx >= s.r0 && rowIdx <= s.r1 && colIndex >= s.c0 && colIndex <= s.c1;
+  };
 
   const frozenW = () => cols.filter((c) => c.frozen).reduce((a, c) => a + c.w, 0);
   const totalW = () => cols.reduce((a, c) => a + c.w, 0);
@@ -210,7 +233,10 @@ const Grid = (() => {
     ctx.restore();
   }
 
+  let rowIdxBeingPainted = -1;
+
   function paintRow(i, frozen, rh, fs) {
+    rowIdxBeingPainted = i;
     const r = rows[i];
     const y = HEADER_H + i * rh - scrollTop;
     if (y + rh < HEADER_H || y > vh) return;
@@ -281,6 +307,17 @@ const Grid = (() => {
         const wIdx = c.widx;
         const wk = r.weekly[wIdx];
         if (!wk) break;
+        const myCol = cols.indexOf(c);
+        if (inSelection(rowIdxBeingPainted, myCol)) {
+          ctx.fillStyle = U.rgba(U.tk("--series-forecast"), 0.16);
+          ctx.fillRect(x, y, c.w, rowH() - 1);
+          // Focus cell gets a ring so the caret position is unambiguous inside a range.
+          if (rowIdxBeingPainted === focus.row && myCol === focus.col) {
+            ctx.strokeStyle = U.tk("--series-forecast");
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x + 0.75, y + 0.75, c.w - 1.5, rowH() - 2.5);
+          }
+        }
         const rel = r.priorWeekly && r.priorWeekly[wIdx] > 0
           ? (wk[3] - r.priorWeekly[wIdx]) / r.priorWeekly[wIdx] : null;
         const tint = U.varianceTint(rel);
@@ -398,9 +435,11 @@ const Grid = (() => {
     return null;
   }
 
-  function select(i, scroll = true) {
+  function select(i, scroll = true, extend = false) {
     if (!rows.length) return;
     sel = U.clamp(i, 0, rows.length - 1);
+    focus.row = sel;
+    if (!extend) { anchor.row = sel; anchor.col = focus.col; }
     if (scroll) {
       const rh = rowH();
       const top = sel * rh;
@@ -485,6 +524,140 @@ const Grid = (() => {
     if (rows.length) onSelect(rows[0], 0);
   }
 
+  /* ---- Excel-semantics editing ---------------------------------------------
+
+     The spec adopts spreadsheet conventions wholesale, and deliberately: these
+     users came from Excel and are fast in it, so a tool that cannot fill down or
+     paste a column is slower than the thing it replaced. Undo in particular is
+     defined over the whole pending set, because "a planner who pastes a column and
+     realizes it was the wrong column needs one keystroke, not forty".
+  ------------------------------------------------------------------------- */
+
+  const undoStack = [];
+  const redoStack = [];
+  let onEdits = () => {};
+
+  const keyOf = (rowIdx, wIdx) => rows[rowIdx].id + ":" + wIdx;
+
+  function snapshot() {
+    return new Map(overrides);
+  }
+
+  function restore(snap) {
+    overrides = new Map(snap);
+    paint();
+    onEdits();
+  }
+
+  function commitTransaction(mutate, label) {
+    const before = snapshot();
+    mutate();
+    // Only record a step if something actually changed, so undo never burns a
+    // keystroke on a no-op.
+    let changed = before.size !== overrides.size;
+    if (!changed) {
+      for (const [k, v] of overrides) if (before.get(k) !== v) { changed = true; break; }
+    }
+    if (changed) {
+      undoStack.push({ snap: before, label: label || "edit" });
+      redoStack.length = 0;
+    }
+    paint();
+    onEdits();
+    return changed;
+  }
+
+  function setCell(rowIdx, wIdx, value) {
+    const r = rows[rowIdx];
+    if (!r) return;
+    const model = Math.round(r.weekly[wIdx][3]);
+    const k = keyOf(rowIdx, wIdx);
+    if (value === null || !Number.isFinite(value) || Math.abs(value - model) < 0.5) {
+      overrides.delete(k);
+    } else {
+      overrides.set(k, Math.max(0, Math.round(value)));
+    }
+  }
+
+  function cellValue(rowIdx, wIdx) {
+    const k = keyOf(rowIdx, wIdx);
+    const ov = overrides.get(k);
+    return ov !== undefined ? ov : Math.round(rows[rowIdx].weekly[wIdx][3]);
+  }
+
+  /** Cmd-D: copy the top row of the selection down through the rest of it. */
+  function fillDown() {
+    const s = selRect();
+    const wcols = [];
+    for (let c = s.c0; c <= s.c1; c++) if (cols[c] && cols[c].kind === "week") wcols.push(c);
+    if (!wcols.length || s.r1 <= s.r0) return false;
+    return commitTransaction(() => {
+      for (const c of wcols) {
+        const w = cols[c].widx;
+        const src = cellValue(s.r0, w);
+        for (let r = s.r0 + 1; r <= s.r1; r++) setCell(r, w, src);
+      }
+    }, `fill down ${s.r1 - s.r0} rows`);
+  }
+
+  /** Cmd-C: the selection as Excel-compatible TSV. */
+  function copyTSV() {
+    const s = selRect();
+    const wcols = [];
+    for (let c = s.c0; c <= s.c1; c++) if (cols[c] && cols[c].kind === "week") wcols.push(c);
+    if (!wcols.length) return "";
+    const lines = [];
+    for (let r = s.r0; r <= s.r1; r++) {
+      lines.push(wcols.map((c) => cellValue(r, cols[c].widx)).join("\t"));
+    }
+    return lines.join("\n");
+  }
+
+  /** Cmd-V: paste TSV, anchored at the focus cell, clipped to the grid. */
+  function pasteTSV(text) {
+    const grid = String(text || "")
+      .replace(/\r/g, "")
+      .split("\n")
+      .filter((l) => l.length)
+      .map((l) => l.split("\t").map((v) => parseFloat(v.replace(/[^0-9.\-]/g, ""))));
+    if (!grid.length) return false;
+
+    const s = selRect();
+    const startRow = s.r0;
+    const startColIdx = cols[s.c0] && cols[s.c0].kind === "week" ? s.c0 : weekCols()[0];
+    const wcols = weekCols();
+    const startPos = wcols.indexOf(startColIdx);
+    if (startPos < 0) return false;
+
+    return commitTransaction(() => {
+      grid.forEach((line, dr) => {
+        const rowIdx = startRow + dr;
+        if (rowIdx >= rows.length) return;
+        line.forEach((val, dc) => {
+          const colIdx = wcols[startPos + dc];
+          if (colIdx === undefined) return;      // clip, do not wrap
+          setCell(rowIdx, cols[colIdx].widx, val);
+        });
+      });
+    }, `paste ${grid.length}x${grid[0].length}`);
+  }
+
+  function undo() {
+    if (!undoStack.length) return false;
+    const step = undoStack.pop();
+    redoStack.push({ snap: snapshot(), label: step.label });
+    restore(step.snap);
+    return step.label;
+  }
+
+  function redo() {
+    if (!redoStack.length) return false;
+    const step = redoStack.pop();
+    undoStack.push({ snap: snapshot(), label: step.label });
+    restore(step.snap);
+    return step.label;
+  }
+
   const api = {
     init, setRows, select, sortBy, paint, resize,
     get rows() { return rows; },
@@ -492,9 +665,51 @@ const Grid = (() => {
     get selectedIndex() { return sel; },
     move(d) { select(sel + d); },
     setOverride(id, wIdx, val) {
-      const k = id + ":" + wIdx;
-      if (val === null) overrides.delete(k); else overrides.set(k, val);
+      commitTransaction(() => {
+        const k = id + ":" + wIdx;
+        if (val === null) overrides.delete(k); else overrides.set(k, val);
+      }, "cell edit");
+    },
+    // range selection
+    extendSelection(dRow, dCol) {
+      focus.row = U.clamp(focus.row + dRow, 0, rows.length - 1);
+      const wcols = weekCols();
+      if (dCol) {
+        const cur = wcols.indexOf(focus.col) >= 0 ? wcols.indexOf(focus.col) : 0;
+        focus.col = wcols[U.clamp(cur + dCol, 0, wcols.length - 1)];
+      }
+      sel = focus.row;
+      select(focus.row, true, true);
+    },
+    moveFocusCol(d) {
+      const wcols = weekCols();
+      const cur = wcols.indexOf(focus.col);
+      focus.col = wcols[U.clamp((cur < 0 ? 0 : cur) + d, 0, wcols.length - 1)];
+      anchor.col = focus.col;
       paint();
+    },
+    get selection() { return selRect(); },
+    get focusWeek() { return weekIdxOf(focus.col); },
+    setSelection(r0, r1, cIdx) {
+      anchor.row = U.clamp(r0, 0, rows.length - 1);
+      focus.row = U.clamp(r1, 0, rows.length - 1);
+      const wcols = weekCols();
+      anchor.col = focus.col = cIdx !== undefined ? cIdx : (wcols[0] ?? 0);
+      paint();
+    },
+    fillDown, copyTSV, pasteTSV, undo, redo,
+    get canUndo() { return undoStack.length; },
+    get canRedo() { return redoStack.length; },
+    get pendingMap() { return overrides; },
+    onEdits(fn) { onEdits = fn; },
+    // Discarding is itself a transaction, so Cmd-Z brings the edits back. A planner
+    // who hits Escape by accident should not lose an afternoon's work.
+    discardAll() { commitTransaction(() => overrides.clear(), "discard all"); },
+    commitAll() { undoStack.length = 0; redoStack.length = 0; overrides.clear(); paint(); onEdits(); },
+    resetSeries(id) {
+      commitTransaction(() => {
+        for (const k of [...overrides.keys()]) if (k.startsWith(id + ":")) overrides.delete(k);
+      }, "reset series");
     },
     getOverride(id, wIdx) { return overrides.get(id + ":" + wIdx); },
     get overrideCount() { return overrides.size; },

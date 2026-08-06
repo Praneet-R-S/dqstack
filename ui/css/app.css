@@ -504,3 +504,13 @@ table.data tr[data-hero="true"] td:first-child { box-shadow: inset 2px 0 0 var(-
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 ::-webkit-scrollbar-corner { background: var(--bg-base); }
+
+/* ---- pending-edit controls --------------------------------------------- */
+.ov-total {
+  margin-left: auto; font-family: var(--font-num); font-size: var(--fs-11);
+  color: var(--text-secondary);
+}
+.ov-total[data-sign="neg"] { color: var(--state-risk); }
+.ov-total[data-sign="pos"] { color: var(--state-excess); }
+#undoBtn, #redoBtn { padding: 2px var(--s4); font-size: var(--fs-14); line-height: 1; }
+#pendingCount { color: var(--series-override); }

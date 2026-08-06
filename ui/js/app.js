@@ -308,7 +308,7 @@
     const r = Grid.selected;
     if (!r) return;
     const w = currentWeek();
-    const pend = state.pending.get(r.id + ":" + w);
+    const pend = Grid.pendingMap.get(r.id + ":" + w);
     const modelVal = Math.round(r.weekly[w][Q50]);
     $("ovValue").value = pend !== undefined ? pend : modelVal;
     $("ovValue").placeholder = modelVal;
@@ -321,8 +321,18 @@
     el.textContent = changed ? (impact >= 0 ? "+" : "") + U.money(impact) : "—";
     el.dataset.sign = !changed ? "flat" : impact >= 0 ? "pos" : "neg";
     $("ovCommit").disabled = !changed || !$("ovReason").value;
-    $("ovCommit").textContent =
-      state.pending.size > 0 ? `Commit ${state.pending.size} edit${state.pending.size > 1 ? "s" : ""}` : "Commit";
+    const nPend = Grid.pendingMap.size;
+    $("ovCommit").textContent = nPend > 0
+      ? `Commit ${nPend} edit${nPend > 1 ? "s" : ""}`
+      : "Commit";
+    if (nPend > 1) {
+      const tot = totalPendingImpact();
+      $("ovTotal").textContent = `${nPend} pending · ${U.money(tot)} total`;
+      $("ovTotal").dataset.sign = tot >= 0 ? "pos" : "neg";
+    } else {
+      $("ovTotal").textContent = "";
+      $("ovTotal").dataset.sign = "flat";
+    }
   }
 
   function stageOverride() {
@@ -331,15 +341,33 @@
     const w = currentWeek();
     const v = parseFloat($("ovValue").value);
     const modelVal = Math.round(r.weekly[w][Q50]);
-    if (!Number.isFinite(v) || Math.abs(v - modelVal) < 0.5) {
-      state.pending.delete(r.id + ":" + w);
-      Grid.setOverride(r.id, w, null);
-    } else {
-      state.pending.set(r.id + ":" + w, v);
-      Grid.setOverride(r.id, w, v);
-    }
+    // Grid owns the pending set so that fill-down, paste and undo all move the same
+    // state. Keeping a second copy here is how the two drift apart.
+    Grid.setOverride(r.id, w, Number.isFinite(v) && Math.abs(v - modelVal) >= 0.5 ? v : null);
     applyOverrideToChart(r);
     refreshOverrideUI();
+  }
+
+  /* ---- pending-edit summary, shared by every editing path ---------------- */
+
+  function syncPending() {
+    state.pending = Grid.pendingMap;
+    const n = state.pending.size;
+    $("pendingCount").textContent = n ? `${n} pending` : "";
+    $("undoBtn").disabled = !Grid.canUndo;
+    $("redoBtn").disabled = !Grid.canRedo;
+    const r = Grid.selected;
+    if (r) { applyOverrideToChart(r); refreshOverrideUI(); }
+  }
+
+  function totalPendingImpact() {
+    let sum = 0;
+    for (const [k, v] of Grid.pendingMap) {
+      const [id, wStr] = k.split(":");
+      const row = BY_ID.get(id);
+      if (row) sum += overrideImpact(row, parseInt(wStr, 10), v);
+    }
+    return sum;
   }
 
   function applyOverrideToChart(r) {
@@ -347,7 +375,7 @@
     const daily = new Array(D.run.horizon).fill(null);
     let any = false;
     for (let w = 0; w < 4; w++) {
-      const p = state.pending.get(r.id + ":" + w);
+      const p = Grid.pendingMap.get(r.id + ":" + w);
       if (p === undefined) continue;
       any = true;
       const base = s.weekly[w][Q50] || 1;
@@ -358,17 +386,57 @@
   }
 
   function commitOverrides() {
-    const n = state.pending.size;
+    const n = Grid.pendingMap.size;
     if (!n) return;
     // A prototype: commits are announced and cleared rather than persisted,
     // because there is no write path to a system of record here.
-    toast(`${n} override${n > 1 ? "s" : ""} committed · reason "${$("ovReason").value}" · logged to the override ledger`);
-    announce(`${n} overrides committed`);
-    state.pending.clear();
-    Grid.clearOverrides();
-    const r = Grid.selected;
-    if (r) { r._s._override = null; applyOverrideToChart(r); }
-    refreshOverrideUI();
+    const impact = totalPendingImpact();
+    toast(`${n} override${n > 1 ? "s" : ""} committed · ${U.money(impact)} expected impact · ` +
+          `reason "${$("ovReason").value}" · logged to the override ledger`);
+    announce(`${n} overrides committed, expected impact ${U.money(impact)}`);
+    Grid.commitAll();
+    ALL_ROWS.forEach((r) => (r._s._override = null));
+    syncPending();
+  }
+
+  /* ---- clipboard. navigator.clipboard is unavailable on file:// in some
+     browsers, so fall back to a hidden textarea and execCommand. ----------- */
+
+  async function readClipboard() {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        return await navigator.clipboard.readText();
+      }
+    } catch (_) { /* permission denied or insecure context */ }
+    return window.prompt("Paste TSV here (clipboard access unavailable on file://)") || "";
+  }
+
+  function writeClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+    } else {
+      legacyCopy(text);
+    }
+  }
+
+  function legacyCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (_) {}
+    ta.remove();
+  }
+
+  function syncWeekSelector() {
+    const w = Grid.focusWeek;
+    if (w !== null && w !== undefined) {
+      $("ovWeek").value = String(w);
+      refreshOverrideUI();
+    }
   }
 
   /* ============================================================ selection */
@@ -542,7 +610,54 @@
     }
     if (state.view !== "workspace") return;
 
+    // ---- Excel bindings. The spec adopts spreadsheet conventions wholesale
+    // rather than inventing a keyboard language these users would have to learn.
+    if (mod && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      const s = Grid.selection;
+      toast(Grid.fillDown()
+        ? `Filled down ${s.r1 - s.r0} row${s.r1 - s.r0 > 1 ? "s" : ""}`
+        : "Select a range spanning more than one row to fill down");
+      syncPending();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "c") {
+      const tsv = Grid.copyTSV();
+      if (tsv) {
+        writeClipboard(tsv);
+        const n = tsv.split("\n").length;
+        toast(`Copied ${n} row${n > 1 ? "s" : ""} as TSV`);
+      }
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "v") {
+      e.preventDefault();
+      readClipboard().then((txt) => {
+        if (!txt) { toast("Nothing on the clipboard"); return; }
+        const okPaste = Grid.pasteTSV(txt);
+        toast(okPaste ? "Pasted" : "Clipboard did not parse as numeric TSV");
+        syncPending();
+      });
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      const label = e.shiftKey ? Grid.redo() : Grid.undo();
+      toast(label ? `${e.shiftKey ? "Redid" : "Undid"}: ${label}` : "Nothing to undo");
+      syncPending();
+      return;
+    }
+    if (e.shiftKey && /^Arrow(Up|Down|Left|Right)$/.test(e.key)) {
+      e.preventDefault();
+      const dr = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+      const dc = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      Grid.extendSelection(dr, dc);
+      return;
+    }
+
     switch (e.key) {
+      case "ArrowRight": e.preventDefault(); Grid.moveFocusCol(1); syncWeekSelector(); break;
+      case "ArrowLeft": e.preventDefault(); Grid.moveFocusCol(-1); syncWeekSelector(); break;
       case "ArrowDown": e.preventDefault(); Grid.move(1); break;
       case "ArrowUp": e.preventDefault(); Grid.move(-1); break;
       case "PageDown": e.preventDefault(); Grid.move(20); break;
@@ -557,13 +672,11 @@
         break;
       case "Enter": e.preventDefault(); $("ovValue").focus(); $("ovValue").select(); break;
       case "Escape":
-        if (state.pending.size) {
-          state.pending.clear();
-          Grid.clearOverrides();
-          const r = Grid.selected;
-          if (r) { r._s._override = null; applyOverrideToChart(r); }
-          refreshOverrideUI();
-          toast("Pending edits discarded");
+        if (Grid.pendingMap.size) {
+          Grid.discardAll();
+          ALL_ROWS.forEach((r) => (r._s._override = null));
+          syncPending();
+          toast("Pending edits discarded (Cmd-Z restores them)");
         }
         break;
     }
@@ -626,13 +739,37 @@
     $("ovReset").addEventListener("click", () => {
       const r = Grid.selected;
       if (!r) return;
-      [0, 1, 2, 3].forEach((w) => {
-        state.pending.delete(r.id + ":" + w);
-        Grid.setOverride(r.id, w, null);
-      });
+      Grid.resetSeries(r.id);
       r._s._override = null;
-      applyOverrideToChart(r);
-      refreshOverrideUI();
+      syncPending();
+    });
+    $("undoBtn").addEventListener("click", () => {
+      const l = Grid.undo();
+      toast(l ? `Undid: ${l}` : "Nothing to undo");
+      syncPending();
+    });
+    $("redoBtn").addEventListener("click", () => {
+      const l = Grid.redo();
+      toast(l ? `Redid: ${l}` : "Nothing to redo");
+      syncPending();
+    });
+    Grid.onEdits(() => {
+      $("pendingCount").textContent = Grid.pendingMap.size
+        ? `${Grid.pendingMap.size} pending` : "";
+      $("undoBtn").disabled = !Grid.canUndo;
+      $("redoBtn").disabled = !Grid.canRedo;
+    });
+    const toggleKeys = (open) => {
+      $("keysSheet").dataset.open = String(open);
+      $("keysBackdrop").dataset.open = String(open);
+    };
+    $("keysBtn").addEventListener("click", () => toggleKeys(true));
+    $("keysBackdrop").addEventListener("click", () => toggleKeys(false));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") toggleKeys(false);
+      if (e.key === "?" && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) {
+        toggleKeys(true);
+      }
     });
     $("searchInput").addEventListener("focus", openPalette);
     $("paletteInput").addEventListener("input", (e) => palSearch(e.target.value));
