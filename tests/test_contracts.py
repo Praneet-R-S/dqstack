@@ -414,6 +414,35 @@ def test_thin_strata_fall_back_to_global():
     assert out.shape == q.shape
 
 
+def test_pit_handles_count_data_with_tied_quantiles():
+    """On counts the quantile vector is heavily tied and the CDF jumps.
+
+    With 43% zeros, many series have q05 = q10 = q25 = 0, so every zero actual maps
+    to the same tau and a correctly calibrated forecast shows a large spike. The
+    randomised PIT draws inside the probability interval the observation actually
+    occupies, which is the standard treatment for a discrete predictand.
+    """
+    from scipy import stats as sstats
+
+    rng = np.random.default_rng(3)
+    n, mu, r = 20_000, 6.0, 4.0
+    y = rng.negative_binomial(r, r / (r + mu), size=n).astype("float64")
+    q = np.repeat(sstats.nbinom.ppf(np.asarray(QUANTILES), r, r / (r + mu))[None, :], n, axis=0)
+
+    cal = ConformalCalibrator()
+    pit_rand = cal.pit_values(y, q)
+    pit_raw = cal.pit_values(y, q, randomised=False)
+
+    assert (pit_rand >= 0).all() and (pit_rand <= 1).all()
+    ks_rand = sstats.kstest(pit_rand, "uniform").statistic
+    ks_raw = sstats.kstest(pit_raw, "uniform").statistic
+    assert ks_rand <= ks_raw + 1e-9, (
+        f"randomisation made PIT less uniform on count data ({ks_rand:.4f} vs {ks_raw:.4f})"
+    )
+    # The raw transform must be reproducible and the randomised one seeded.
+    assert np.array_equal(cal.pit_values(y, q), pit_rand)
+
+
 def test_pit_is_uniform_for_a_calibrated_forecast():
     from scipy import stats as sstats
 

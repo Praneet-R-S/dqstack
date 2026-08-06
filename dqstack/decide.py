@@ -176,10 +176,20 @@ def simulate(
     if oup.shape == (S,):
         oup = oup.reshape(S, 1)
 
+    # Opening stock must not be derived from the demand about to be realised.
+    # Seeding it from demand[:, :7] is a seven-day look-ahead in the initial
+    # condition, which flatters every policy equally but is still information the
+    # planner does not have at t=0. The order-up-to level is forecast-derived and is
+    # what a system in steady state would actually be holding.
+    _oup0 = np.atleast_2d(np.asarray(order_up_to, dtype="float64"))
+    _lvl0 = _oup0[:, 0] if _oup0.shape[0] == demand.shape[0] else _oup0.reshape(-1)[: demand.shape[0]]
     on_hand = (
         initial_stock
         if initial_stock is not None
-        else np.round(demand[:, :7].mean(axis=1) * cfg.decision.initial_stock_cover_days)
+        else np.round(
+            _lvl0 * (cfg.decision.initial_stock_cover_days
+                     / max(cfg.decision.review_period + cfg.decision.lead_time, 1))
+        )
     ).astype("float64")
     opening_initial = on_hand.copy()
 
@@ -195,7 +205,9 @@ def simulate(
     # stated as an approximation.
     perishable = cp.shelf_life < 60
     shelf = np.maximum(cp.shelf_life, 1.0)
-    rate = np.maximum(demand[:, :7].mean(axis=1), 0.05)   # EWMA seeded on early demand
+    # Seeded from the forecast-derived order-up-to level rather than realised
+    # demand, for the same no-look-ahead reason as opening stock.
+    rate = np.maximum(_lvl0 / max(R + L, 1), 0.05)
 
     rec = {k: np.zeros((S, H)) for k in
            ("opening", "arrivals", "demand", "sales", "lost", "waste", "closing", "orders")}
@@ -219,7 +231,12 @@ def simulate(
             level_now = oup[:, p_idx]
             order = np.maximum(level_now - on_hand - in_transit, 0.0)
             order = np.round(order)
-            if t + L < pipeline.shape[1]:
+            # With L = 0 an order placed at t must be receivable at t, but column t
+            # has already been read this iteration, so it would never arrive. Credit
+            # it to on-hand directly instead of into a dead pipeline column.
+            if L == 0:
+                on_hand += order
+            elif t + L < pipeline.shape[1]:
                 pipeline[:, t + L] += order
             total_ordered += order
 
@@ -313,7 +330,17 @@ def simulate(
         "lost_sales": float(rec["lost"].sum()),
         "waste": float(rec["waste"].sum()),
         "fill_rate": float(sales_tot.sum() / max(demand_tot.sum(), 1e-9)),
-        "cycle_service_level": float((rec["lost"].sum(axis=1) == 0).mean()),
+        # Cycle service level is the probability of no stockout *within a
+        # replenishment cycle*. Measured across the whole 28-day horizon it demands
+        # four consecutive clean cycles, which is a far harsher quantity, and
+        # reporting it under this name understates achieved service.
+        "cycle_service_level": float(
+            np.mean([
+                (rec["lost"][:, t0 : min(t0 + R, H)].sum(axis=1) == 0).mean()
+                for t0 in review_days
+            ])
+        ),
+        "horizon_service_level": float((rec["lost"].sum(axis=1) == 0).mean()),
         "gross_margin": float(gross_margin.sum()),
         "holding_cost": float(holding_cost.sum()),
         "waste_cost": float(waste_cost.sum()),

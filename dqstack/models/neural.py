@@ -74,8 +74,14 @@ def _windows(
     P: Panel, max_origin: int, horizon: int, input_size: int, n_samples: int, rng
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sample (context, target) windows strictly inside the training region."""
-    y = np.nan_to_num(P.y[:, : max_origin + 1], nan=0.0).astype("float32")
-    valid = ~np.isnan(P.y[:, : max_origin + 1])
+    # Censored and out-of-assortment cells are ~18% of history. Feeding them to
+    # the network as literal zeros teaches exactly the under-forecasting bias Stage 1
+    # exists to remove, so the *context* window is filled with each series' observed
+    # mean; the *target* window keeps its mask and is excluded from the loss.
+    raw = P.y[:, : max_origin + 1]
+    valid = ~np.isnan(raw)
+    _rm = np.nanmean(np.where(valid, raw, np.nan), axis=1, keepdims=True)
+    y = np.where(valid, raw, np.nan_to_num(_rm)).astype("float32")
     S, T = y.shape
     lo, hi = input_size, T - horizon
     if hi <= lo:
@@ -128,6 +134,15 @@ class NeuralCandidate:
                 pred = self.model(X[idx])
                 # Masked L1 on the normalised scale: robust to the spikes that
                 # dominate lumpy series, and it ignores censored target days.
+                #
+                # Stated plainly because it shows up in the results: an L1 loss
+                # estimates the conditional *median*, while Stage 3's contract is a
+                # conditional *mean* for the NB lift in dist.py. Retail demand is
+                # right-skewed, so the median sits below the mean and this candidate
+                # under-forecasts systematically — it carries the most negative bias
+                # in the leaderboard, which is this and not a training failure. L1 is
+                # kept anyway: an L2 loss on lumpy series chases spikes and was
+                # worse overall, and Stage 4 discounts the candidate accordingly.
                 w = M[idx]
                 loss = (torch.abs(pred - Y[idx]) * w).sum() / w.sum().clamp(min=1.0)
                 loss.backward()
@@ -145,7 +160,13 @@ class NeuralCandidate:
     def predict(self, P: Panel, O: int, horizons: tuple[int, ...] | range) -> np.ndarray:
         assert self.model is not None, "call fit() first"
         self.model.eval()
-        y = np.nan_to_num(P.y[:, : O + 1], nan=0.0).astype("float32")
+        # Must fill the context exactly as _windows does at fit time. Zero-filling
+        # here while mean-filling during training is a train/serve skew: the network
+        # would see a different representation of a censored day than it learned on.
+        raw = P.y[:, : O + 1]
+        ok = ~np.isnan(raw)
+        rm = np.nanmean(np.where(ok, raw, np.nan), axis=1, keepdims=True)
+        y = np.where(ok, raw, np.nan_to_num(rm)).astype("float32")
         ctx = y[:, -self.input_size :]
         if ctx.shape[1] < self.input_size:
             ctx = np.pad(ctx, ((0, 0), (self.input_size - ctx.shape[1], 0)))

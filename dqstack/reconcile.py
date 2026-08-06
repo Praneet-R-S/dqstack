@@ -109,7 +109,11 @@ def shrink_covariance(residuals: np.ndarray) -> np.ndarray:
     m1 = (Z.T @ Z) / n
     Z2 = Z * Z
     m2 = (Z2.T @ Z2) / n
-    var_r = np.clip(m2 - m1**2, 0.0, None) * n / max((n - 1) ** 2, 1)
+    # Schafer-Strimmer: Var_hat(r_ij) = n/(n-1)^3 * sum_t (w_tij - wbar_ij)^2.
+    # (m2 - m1^2) is the population variance, i.e. that sum divided by n, so the
+    # factor is n^2/(n-1)^3. Using n/(n-1)^2 leaves the estimate short by n/(n-1)
+    # and biases the reported shrinkage intensity low.
+    var_r = np.clip(m2 - m1**2, 0.0, None) * (n**2) / max((n - 1) ** 3, 1)
 
     off = ~np.eye(p, dtype=bool)
     num = float(var_r[off].sum())

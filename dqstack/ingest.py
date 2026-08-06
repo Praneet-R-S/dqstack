@@ -262,7 +262,15 @@ def run(strict: bool | None = None) -> IngestResult:
     )
     panel = series_keys.merge(cal[["date"]], how="cross")
     panel = panel.merge(hist, on=["item_id", "store_id", "date"], how="left")
-    panel["is_future"] = panel["sales"].isna()
+    # A row is "future" because it lies past the last observed sales date, not
+    # merely because the feed had no row for it. Conflating the two would label a
+    # genuine mid-history gap as future and silently exclude it from Stage 1.
+    last_observed = hist["date"].max()
+    panel["is_future"] = panel["date"] > last_observed
+    n_gap = int(panel["sales"].isna().sum() - panel["is_future"].sum())
+    if n_gap > 0:
+        print(f"  note: {n_gap:,} in-history rows absent from the sales feed "
+              f"(treated as missing, not future)", flush=True)
 
     panel = panel.merge(cal[["date", "wm_yr_wk"]], on="date", how="left")
     panel = panel.merge(

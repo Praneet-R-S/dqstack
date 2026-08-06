@@ -61,7 +61,14 @@ def wrmsse(y, yhat, denom, weights, valid=None) -> float:
     m = np.isfinite(r) & np.isfinite(weights)
     if not m.any():
         return float("nan")
-    w = weights[m] / weights[m].sum()
+    total = float(weights[m].sum())
+    if total <= 0:
+        # A subgroup whose series all had zero revenue in the weighting window —
+        # a whole department out of assortment, say. Dividing by zero would return
+        # nan or inf and quietly poison an aggregate; an unweighted mean is the
+        # meaningful answer and is what a reader would assume.
+        return float(np.nanmean(r[m]))
+    w = weights[m] / total
     return float((w * r[m]).sum())
 
 

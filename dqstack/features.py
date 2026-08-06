@@ -313,7 +313,12 @@ def origin_features(P: Panel, O: int) -> tuple[np.ndarray, list[str]]:
         p_prev_wk = pr[:, O - 7] if O >= 7 else np.full(S, np.nan)
         add("price_chg_wk", p_now - p_prev_wk)
         add("price_pct_wk", (p_now - p_prev_wk) / np.where(p_prev_wk > 0, p_prev_wk, np.nan))
-        chg = np.abs(np.diff(np.nan_to_num(pr, nan=0.0), axis=1)) > 1e-6
+        # A price *record* appearing or disappearing is an assortment event, not a
+        # price change. Treating NaN as 0.0 manufactures a large jump at every
+        # entry to and exit from the assortment, so this feature previously read
+        # "price changed today" on the first day back in stock.
+        both_known = np.isfinite(pr[:, 1:]) & np.isfinite(pr[:, :-1])
+        chg = both_known & (np.abs(np.diff(pr, axis=1)) > 1e-6)
         ci = np.where(chg, np.arange(1, O + 1)[None, :], -1)
         last_chg = np.maximum.accumulate(ci, axis=1)[:, -1] if O >= 1 else np.full(S, -1)
         add("days_since_price_chg", np.where(last_chg >= 0, O - last_chg, 999))
@@ -325,7 +330,13 @@ def origin_features(P: Panel, O: int) -> tuple[np.ndarray, list[str]]:
     # --- cross-series: aggregate strength borrowed from the hierarchy
     dept_store = (P.series["dept_id"].astype(str) + "|" + P.series["store_id"].astype(str)).to_numpy()
     store = P.series["store_id"].astype(str).to_numpy()
-    y0 = np.nan_to_num(y, nan=0.0)
+    # Masked cells are censored or out-of-assortment days, not zero demand. Summing
+    # them as zeros into a department or store aggregate pushes that aggregate below
+    # true demand, and hardest for the most-censored groups — the opposite of what a
+    # borrowed-strength feature is for. Fill each series with its own observed mean
+    # so a missing day reads as an average day.
+    _row_mean = np.nanmean(y, axis=1, keepdims=True)
+    y0 = np.where(np.isfinite(y), y, np.nan_to_num(_row_mean))
     for name, key in (("dept_store", dept_store), ("store", store)):
         codes, inv = np.unique(key, return_inverse=True)
         agg = np.zeros((len(codes), y0.shape[1]), dtype="float32")

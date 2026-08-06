@@ -229,7 +229,11 @@ def detect_censoring(
     for i in range(n):
         c = c + 1.0 if conf[i] > 0.15 else 0.0
         run[i] = c
-    conf = np.clip(conf * (1.0 + 0.22 * np.minimum(run, 4.0)), 0.0, 0.99)
+    # An isolated zero is a run of length one and earns no boost: the escalation
+    # starts on the *second* consecutive suspicious day. Boosting a single zero by
+    # 22% treats "it happens" as evidence of a stockout, and single zeros are the
+    # overwhelming majority of zeros on an intermittent series.
+    conf = np.clip(conf * (1.0 + 0.22 * np.clip(run - 1.0, 0.0, 4.0)), 0.0, 0.99)
     return structural, conf
 
 
@@ -338,7 +342,11 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
         adi = float(n_valid / n_nz) if n_nz else float(n_valid)
         cv2 = float((nz.std() / nz.mean()) ** 2) if n_nz > 1 and nz.mean() > 0 else 0.0
         zero_share = float((valid == 0).mean())
-        longest_zero = _longest_run(valid == 0)
+        # `valid` drops masked days, so a run measured on it is a run in
+        # compressed index space: two zeros separated by a fortnight out of
+        # assortment would count as consecutive. Measure on the calendar series,
+        # where a gap is a gap.
+        longest_zero = _longest_run(np.nan_to_num(obs, nan=-1.0) == 0)
 
         mean_d = float(valid.mean())
         cv = float(valid.std() / mean_d) if mean_d > 0 else 0.0
@@ -364,11 +372,17 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
                 penalty=cfg.diagnosis.pelt_penalty,
                 min_size=cfg.diagnosis.pelt_min_segment,
             )
-            if cps:
-                cand = first_i + cps[-1]
+            # Walk the changepoints from most recent backwards and take the first
+            # that leaves enough training history. Testing only the last one and
+            # otherwise falling back to the whole series discards a perfectly usable
+            # earlier break, reverting a multi-regime series to a training window
+            # that spans all of its regimes.
+            for cp in reversed(cps):
+                cand = first_i + cp
                 keep_days = int((asof - pd.Timestamp(dates_all[lo + cand])).days)
                 if keep_days >= cfg.diagnosis.min_train_days:
                     regime_start = pd.Timestamp(dates_all[lo + cand])
+                    break
         weeks_since_break = float((asof - regime_start).days) / 7.0
 
         # --- terminal test: recent level collapsed, or a trailing zero run
@@ -423,7 +437,13 @@ def run(panel: pd.DataFrame | None = None, cfg=CFG, asof=None
         censored_rate = float(suspected[window].mean())
         ooa_rate = float((~carried[window]).mean())
         price_completeness = float(np.isfinite(price[window]).mean())
-        last_sale_gap = int((asof - pd.Timestamp(dts[last_i])).days)
+        # last_i is the last day the item was *carried*. Freshness is about
+        # whether the series is still transacting, so measure from the last non-zero
+        # sale; an item sitting on the shelf selling nothing for a month is not
+        # fresh data, however current its price record is.
+        nz_idx = np.flatnonzero(np.nan_to_num(obs, nan=0.0) > 0)
+        last_sale_i = (first_i + int(nz_idx[-1])) if len(nz_idx) else last_i
+        last_sale_gap = int((asof - pd.Timestamp(dates_all[lo + last_sale_i])).days)
         freshness = float(np.clip(1.0 - last_sale_gap / 14.0, 0.0, 1.0))
 
         # `price_completeness` is 1 - ooa_rate by construction here: FR-07 defines
@@ -534,7 +554,11 @@ def score_censoring(masks: pd.DataFrame, truth: pd.DataFrame) -> dict[str, float
         return prec, rec, f1, tp, fp, fn
 
     p1, r1, f1, tp, fp, fn = prf(pred, actual)
-    p2, r2, f2, *_ = prf(pred, full_zero)
+    # Restrict to the full-zero subset on BOTH sides. Scoring predictions against
+    # `full_zero` while still counting hits on partial-censoring days as false
+    # positives penalises the detector for being right about a day this metric
+    # excludes by construction.
+    p2, r2, f2, *_ = prf(pred & (full_zero | ~actual), full_zero)
     return {
         "precision": p1, "recall": r1, "f1": f1,
         "tp": tp, "fp": fp, "fn": fn,

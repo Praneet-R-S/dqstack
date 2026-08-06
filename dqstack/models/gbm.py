@@ -192,11 +192,14 @@ class GBMPool:
                 bst = self.point.get((group, seg))
                 m = seg_vals == seg
                 if bst is None:
-                    # Unseen segment falls back to the group's largest model.
+                    # Unseen segment. Fall back to the model trained on the most
+                    # rows in this group — genuinely the largest, rather than
+                    # whichever happened to be inserted first, which is what the
+                    # previous comment claimed and the code did not do.
                     fallbacks = [k for k in self.point if k[0] == group]
                     if not fallbacks:
                         continue
-                    bst = self.point[fallbacks[0]]
+                    bst = self.point[max(fallbacks, key=lambda k: self.point[k].num_trees())]
                 point[ri[m], ci[m]] = np.maximum(bst.predict(X[m]), 0.0)
 
             for k, q in enumerate(QUANTILES):

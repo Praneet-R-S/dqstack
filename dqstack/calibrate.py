@@ -242,8 +242,11 @@ class ConformalCalibrator:
                     "nominal": tau,
                     "empirical_before": float((y[keep] <= q_before[keep, k]).mean()),
                     "empirical_after": float((y[keep] <= q_after[keep, k]).mean()),
-                    "mean_width_before": float(q_before[keep, k].mean()),
-                    "mean_width_after": float(q_after[keep, k].mean()),
+                    # The mean *level* of this quantile, not an interval width —
+                    # a width needs two levels. Named accurately because "width"
+                    # invites reading a P50 column as an interval.
+                    "mean_level_before": float(q_before[keep, k].mean()),
+                    "mean_level_after": float(q_after[keep, k].mean()),
                 }
             )
         df = pd.DataFrame(rows)
@@ -260,13 +263,64 @@ class ConformalCalibrator:
         keep = np.isfinite(y) if valid is None else (np.isfinite(y) & valid)
         return float(((y[keep] >= q[keep, i_lo]) & (y[keep] <= q[keep, i_hi])).mean())
 
-    def pit_values(self, y: np.ndarray, q: np.ndarray) -> np.ndarray:
-        """Probability Integral Transform via linear interpolation on the
-        predicted quantile function. A calibrated forecast gives uniform PIT;
-        the histogram shape names the failure mode — U-shaped means intervals
-        too narrow, hump-shaped means too wide."""
-        taus = np.asarray(self.quantiles)
+    def pit_values(
+        self, y: np.ndarray, q: np.ndarray, randomised: bool = True, seed: int = 0
+    ) -> np.ndarray:
+        """Probability Integral Transform on the predicted quantile function.
+
+        A calibrated forecast gives a uniform PIT, and the histogram shape names
+        the failure mode: U-shaped means intervals too narrow, hump-shaped too wide.
+
+        Randomisation is on by default because the data are counts. Demand is
+        integer and 43% of it is zero, so the predicted quantile vector is heavily
+        tied — many series have q05 = q10 = q25 = 0 — and `np.interp` on a tied
+        vector returns the *first* matching tau for every zero actual. That piles a
+        large spike at one end of the histogram and makes a perfectly calibrated
+        forecast look badly miscalibrated. The standard fix for discrete
+        predictands is the randomised PIT: draw uniformly within the probability
+        interval the observation actually occupies, which restores uniformity under
+        correct calibration. Pass randomised=False for the raw non-randomised
+        transform.
+        """
+        taus = np.asarray(self.quantiles, dtype="float64")
+        y = np.asarray(y, dtype="float64")
+        q = np.asarray(q, dtype="float64")
+        K = len(taus)
+        rng = np.random.default_rng(seed)
+
+        n_below = (q < y[:, None]).sum(axis=1)      # levels strictly below y
+        n_at = (q <= y[:, None]).sum(axis=1)        # levels at or below y
+
+        # F(y-) and F(y). Only 9 grid points are known, so the interval below the
+        # first level and above the last are open-ended and treated as such.
+        lo = np.where(n_below > 0, taus[np.clip(n_below - 1, 0, K - 1)], 0.0)
+        hi = np.where(n_at > 0, taus[np.clip(n_at - 1, 0, K - 1)], 0.0)
+        hi = np.where(n_at >= K, 1.0, np.where(n_at > 0, hi, taus[0]))
+
+        tied = n_at > n_below       # y coincides with one or more grid values
         out = np.empty(len(y))
-        for i in range(len(y)):
-            out[i] = float(np.interp(y[i], q[i], taus, left=0.0, right=1.0))
+
+        # Continuous case: y falls strictly between two grid levels, so the CDF
+        # value has to be interpolated — a 9-level grid cannot resolve it otherwise,
+        # and snapping to the nearest level would make a correctly specified
+        # continuous forecast look badly calibrated.
+        j = np.clip(n_below, 0, K - 1)
+        q_lo = np.where(n_below > 0, q[np.arange(len(y)), np.clip(n_below - 1, 0, K - 1)], q[:, 0])
+        q_hi = q[np.arange(len(y)), j]
+        t_lo = np.where(n_below > 0, taus[np.clip(n_below - 1, 0, K - 1)], 0.0)
+        t_hi = taus[j]
+        span = q_hi - q_lo
+        frac = np.where(np.abs(span) > 1e-12, (y - q_lo) / np.where(np.abs(span) > 1e-12, span, 1.0), 0.5)
+        interp = np.clip(t_lo + np.clip(frac, 0.0, 1.0) * (t_hi - t_lo), 0.0, 1.0)
+        interp = np.where(n_below >= K, 1.0, interp)
+        out[~tied] = interp[~tied]
+
+        # Discrete case: y lands exactly on tied grid values, so the CDF jumps and
+        # F(y) is an interval rather than a point. Drawing uniformly inside it is
+        # the randomised PIT, which is what restores uniformity for count data.
+        if tied.any():
+            if randomised:
+                out[tied] = lo[tied] + rng.random(int(tied.sum())) * (hi[tied] - lo[tied])
+            else:
+                out[tied] = hi[tied]
         return out

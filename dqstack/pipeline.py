@@ -331,7 +331,21 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     losses = losses.reindex(range(P.n_series))
     losses.index = P.series.index
 
-    diag_aligned = vintages["meta"].series.set_index(vintages["meta"].series.index)
+    # The meta-learner declares 19 features, but P.series carries only the subset
+    # build_panel copies across, so two of them (longest_zero_run, iqr_over_median)
+    # were silently absent and the learner trained on 17 while reporting 19. Join
+    # the missing columns from the diagnostics frame itself.
+    extra = [c for c in comb.META_FEATURES
+             if c not in vintages["meta"].series.columns and c in diag.columns]
+    diag_aligned = vintages["meta"].series.copy()
+    if extra:
+        d_meta, _ = diagnose.run(hist_panel, cfg, asof=P.dates[sp.meta[0]])
+        diag_aligned = diag_aligned.merge(
+            d_meta[["series_id", *extra]].assign(
+                series_id=lambda d: d["series_id"].astype(str)),
+            on="series_id", how="left",
+        )
+        log(f"  meta-features restored from diagnostics: {extra}")
     meta = comb.MetaLearner().fit(diag_aligned, losses, cfg)
     W = (meta.weights(diag_aligned, cfg) if cfg.enable_combination
          else meta.select_weights(diag_aligned, losses))
@@ -614,6 +628,16 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
     wk_base, mo_base = rc.temporal_base(P.y, Ol, HORIZON)
     temporal = reconcile.temporal_reconcile(med(calib_l), wk_base, mo_base)
     log(f"  {P.n_series:,} series x {HORIZON}-day horizon x {len(QUANTILES)} quantiles")
+    # A clamp that fires often means a candidate is broken, so it is reported
+    # rather than counted into a dict nobody reads. Silence here was how a
+    # 5,000x lifecycle forecast reached the ensemble in the first place.
+    if CLAMP_HITS:
+        tot = sum(CLAMP_HITS.values())
+        worst = sorted(CLAMP_HITS.items(), key=lambda kv: -kv[1])[:4]
+        log(f"  plausibility clamp bound {tot:,} quantile values across the run: "
+            + ", ".join(f"{k} {v:,}" for k, v in worst))
+    else:
+        log("  plausibility clamp never bound (no candidate produced an implausible value)")
     log(f"  temporal consistency: |sum(daily) - monthly| max "
         f"{np.abs(temporal['daily'].sum(axis=1) - temporal['monthly'][:, 0]).max():.2e}")
     log(f"  recommended order units {S_star_l.sum():,.0f}")
@@ -653,6 +677,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True) -
         "accuracy_vs_economics": {k: v for k, v in inv.items() if k != "table"},
         "ensemble_weights_by_class": wrep.to_dict("index"),
         "mean_effective_candidates": eff,
+        "plausibility_clamp_hits": dict(CLAMP_HITS),
         "mint_shrinkage": rc.shrinkage,
         "mint_projection_error": rc.projection_error,
         "simulator_totals": res_full.totals,

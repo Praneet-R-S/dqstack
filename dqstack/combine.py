@@ -101,6 +101,7 @@ class MetaLearner:
     features: list[str] = field(default_factory=list)
     fallback_weights: np.ndarray | None = None
     class_weights: dict[str, np.ndarray] = field(default_factory=dict)
+    feature_medians: dict[str, float] = field(default_factory=dict)
 
     def fit(
         self, diag: pd.DataFrame, losses: pd.DataFrame, cfg=CFG, verbose: bool = True
@@ -113,6 +114,7 @@ class MetaLearner:
         L = losses.to_numpy(dtype="float64")
         ok = np.isfinite(L).all(axis=1)
         X = diag.loc[ok, feats].astype("float64")
+        self.feature_medians = {c: float(v) for c, v in X.median().items()}
         L = L[ok]
 
         # Normalise each series' losses to its own best candidate. Without this a
@@ -203,7 +205,14 @@ class MetaLearner:
         construction (softmax), with an entropy floor guarding collapse."""
         K = len(self.candidates)
         n = len(diag)
-        X = diag[self.features].astype("float64").fillna(0.0).to_numpy()
+        # Impute with the medians observed at fit time. Filling with 0.0 places a
+        # series at an arbitrary point in feature space — zero ADI, zero health —
+        # rather than at the population centre, and fit() dropped exactly these
+        # rows, so predict was extrapolating into a region it never trained on.
+        Xdf = diag[self.features].astype("float64")
+        if self.feature_medians:
+            Xdf = Xdf.fillna(pd.Series(self.feature_medians))
+        X = Xdf.fillna(0.0).to_numpy()
 
         if getattr(self, "_trees", None):
             scores = np.zeros((n, K))
