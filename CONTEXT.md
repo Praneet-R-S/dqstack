@@ -72,8 +72,11 @@ ui/                planner workspace. No build step, no bundler, no framework.
   index.html       four views; the only markup
   css/tokens.css   design tokens. Canvas renderers read these at paint time.
   css/app.css      the shell
+  css/simple.css   the plain-language layer: review cards, More menu, glossary
   js/util.js       token cache, formatters, esc()
+  js/plain.js      every word a non-specialist reads; nothing else invents a phrase
   js/duck.js       DuckDB-WASM + the two-backend query resolver (Duck, Query)
+  js/review.js     the Today review flow — the front door
   js/grid.js       the canvas grid: selection, editing, undo, grouping, micro-fan
   js/chart.js      the canvas fan chart
   js/views.js      pipeline / evidence / decisions sheets
@@ -362,6 +365,122 @@ Three real defects found and fixed while verifying:
    the sheet past its track. `min-width: 0` on `.sheet`, `.two-col > *`, `.cards > *`,
    `.stage > *`.
 
+### C4. Usability rebuild — DONE
+
+The brief, given twice: the front end looked complex, a normal user could not
+understand it, every feature should be reachable in three clicks, and it should
+look good. The previous pass had improved the *craft* of an expert instrument
+without changing the fact that it was an expert instrument. This pass changed what
+the front door is.
+
+**The diagnosis.** Three things made it unusable by a non-specialist, and none of
+them was density.
+
+1. It opened on a spreadsheet of 848 flagged series with a canvas grid, a fan
+   chart, an attribution panel and an override form all live at once. "848 items
+   need attention" is not a to-do list, it is a reason to close the tab.
+2. It spoke the model's vocabulary — `relWidth`, `targetQ`, `orderUpTo`, WSPL,
+   conformal, intermittent — none of which a buyer can act on.
+3. Nothing told you what to do. Every control was equally weighted.
+
+**What replaced it.**
+
+`ui/js/review.js` — a card-based review flow, now the landing view. One question
+per card, one obvious answer: **Approve / Change / Skip**, plus *Why this number?*
+Each card carries an inline SVG history-and-fan sparkline and four figures
+(forecast, versus last week, stock-up-to, data quality). Exactly one filled button
+is on screen per card, which is what makes it answerable in one click.
+
+`ui/js/plain.js` — the single source of every word a non-specialist reads. Class
+labels ("Sells in bursts"), the seven reason codes as sentences with a *what to do*
+line, data-quality and confidence wording, service-level rationale, and a
+pattern-based translator turning model feature names into English
+(`rmean_180` to "Average sales over the last 180 days"). Every plain phrase keeps
+its technical term reachable on hover, so an analyst reading over a planner's
+shoulder is not lied to.
+
+`ui/css/simple.css` — light theme by default (a dense dark terminal is the single
+strongest signal that a tool is for specialists), generous card layout, one accent,
+one filled button, colour meaning exactly one thing.
+
+Navigation went from four architectural names to four plain ones — **Today · All
+products · How it's doing · How it works** — with everything an expert wants and a
+newcomer does not behind one **More** menu (glossary, ordering decisions, theme,
+row height, keyboard sheet, SQL console).
+
+**Navigation is a sidebar**, not top tabs plus a More menu. Six destinations and
+three tools do not fit in a horizontal bar, and the menu put everything two clicks
+deep. The sidebar names all of them at once: *Your work* (Today, with a live badge;
+All products), *Understand it* (How it's doing, Ordering decisions, How it works),
+*Tools* (glossary, SQL console with an engine-status dot, keyboard shortcuts), and a
+footer carrying theme, row height and the forecast date. It collapses to a 60px icon
+rail — remembered in `localStorage`, handing 188px back to the grid — and becomes an
+overlay below 1000px, where the workspace also drops its exception worklist (Today
+is the same queue, better presented).
+
+Sidebar nav buttons deliberately keep `class="tab"` and `data-view`, and tool
+buttons keep `data-menu`, so the existing view switcher and menu dispatcher work
+unchanged. The sidebar is a re-presentation of controls that already existed, not a
+second set of them.
+
+**Three clicks, verified in the browser rather than asserted:**
+
+| task | clicks |
+|---|---|
+| See what needs attention | 0 (landing) |
+| Approve a recommendation | **1** |
+| Understand why a number is what it is | **1** |
+| Skip an item | **1** |
+| Open the full products table | **1** |
+| Return to today's list | **1** |
+| Change a quantity | **2** + typing |
+| Any of the five destinations, from anywhere | **1** |
+| Glossary / shortcuts / theme / row height / collapse | **1** |
+| Run an analytical SQL query | **2** |
+
+Jargon audit on the Today view: **zero** of sixteen model terms appear, expanded
+or collapsed.
+
+**Four real defects found while verifying, all fixed:**
+
+1. **The headline relabelled the backlog.** It read "489 decisions need you today"
+   because it counted the whole urgent tier rather than the list on screen. Now it
+   reports the cohort, with the remainder honestly described as behind these.
+2. **The progress denominator grew as you worked.** The cohort was re-sliced on
+   every render, so clearing an item pulled the next in from a queue of 489 and the
+   readout went "1 of 25", "2 of 26" — a finish line that moves away is worse than
+   no progress bar. `pickCohort()` now fixes today's list at build time, and
+   clearing it reaches "24 of 24 done" and empty.
+3. **Every card said "confidence low".** The hardcoded cutoffs (0.55 / 1.1) were
+   guesses; the real `relWidth` distribution runs 0.30 to 1214 with terciles at
+   1.22 and 2.61. `Plain.calibrate()` now derives the words from the assortment's
+   own terciles, which also makes them comparative — "wider than two thirds of your
+   range". Result: confidence spreads 3 high / 13 moderate / 8 low, quality 8 / 5 /
+   9 / 2 across the 24 visible cards.
+4. **Collapsing the sidebar did nothing.** `transition: grid-template-columns` is
+   not reliably interpolable, and animating the track the canvas measures itself
+   against means the canvas resizes against a moving target. Removed; the width
+   simply changes.
+5. **The grid collapsed to zero height again.** Adding the orientation hint gave
+   `.main` a fourth child against three template rows, so the grid region fell into
+   the dock's row and the dock into an implicit fourth. Second occurrence of this
+   exact bug class in the project; a row is now declared for it.
+
+**Also corrected: a false alarm I raised and then disproved.** 427 of 1000 series
+have `orderUpTo` below the sum of their nine daily median forecasts, which looked
+like a Stage 7 bug. It is not. The order-up-to level is a Negative Binomial
+quantile fitted to the *moments of the nine-day total*, and the median of a sum is
+not the sum of the medians for a skewed count distribution. The empirical check
+settles it: achieved fill rate is **above** the target quantile in all four target
+bands and rises monotonically with it (94.2% unit-weighted against a 71.1% mean
+cycle-service target). What was real was the *display*: showing a 7-day median
+beside a 9-day order-up-to level invited exactly the wrong inference, so the card
+now states the window and the service level explicitly, and the glossary explains
+that the two are not comparable.
+
+Code size after all of this: **88.0 KB gzipped** against the 250 KB budget.
+The `file://` path still works with no server and no query engine.
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -398,6 +517,16 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **A progress denominator must not be recomputed from a live queue.** If the list
+  refills as you clear it, "1 of 25" becomes "2 of 26" and the goal recedes. Fix
+  the cohort once.
+- **Never hardcode thresholds for words like "low" or "poor".** Check the actual
+  distribution first; the guessed cutoffs put 24 of 24 cards in one bucket.
+- **`orderUpTo` covers review period + lead time (9 days) and is a quantile of the
+  *total*, not a sum of daily quantiles.** It is not comparable to a weekly median
+  and will look wrong beside one. Verified correct by achieved fill rate.
+- **Adding a child to `.main` or `#app` without adding a template row collapses a
+  region to zero height.** This has now happened twice.
 - **`new Worker(crossOriginUrl)` is illegal**, and `file://` cannot load DuckDB-WASM
   at all. Both are spec behaviour, not bugs to fix. See `duck.js`.
 - **A CSS `transition` on a property fed by a custom property can keep painting the

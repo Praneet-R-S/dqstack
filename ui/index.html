@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-density="default">
+<html lang="en" data-theme="light" data-density="default">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DQ-Stack — Planner Workspace</title>
+<title>DQ-Stack — Demand Planning</title>
 <meta name="description" content="Probabilistic demand forecasting and inventory decision platform. Uncertainty, data health, and economic consequence visible on every number.">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,47 +12,165 @@
 
 <link rel="stylesheet" href="css/tokens.css?v=eac8bed0">
 <link rel="stylesheet" href="css/app.css?v=e49a8cda">
+<link rel="stylesheet" href="css/simple.css?v=39b50bc0">
 </head>
 <body>
 <div id="app">
 
-  <!-- ============================================================ chrome -->
-  <header class="chrome">
-    <div class="brand">
+  <!-- =========================================================== sidebar
+
+       Everything reachable in one click. The previous top-tab plus More-menu
+       arrangement put six destinations behind two clicks each; a sidebar has room
+       to name all of them at once, which is the whole argument for it in an
+       application with this many surfaces.
+
+       Nav buttons deliberately keep `class="tab"` and `data-view`, so the existing
+       view switcher and its aria-selected bookkeeping work unchanged, and the
+       tool buttons keep `data-menu` so they reuse the same dispatcher. -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-brand">
       <span class="brand-mark">DQ<span>·</span>STACK</span>
-      <span class="brand-sub">demand planning</span>
+      <button class="sb-collapse" id="sbCollapse" aria-label="Collapse the sidebar"
+              aria-expanded="true">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6.5 4L3 8l3.5 4"/><path d="M12.5 4v8"/>
+        </svg>
+      </button>
     </div>
 
-    <nav class="tabs" role="tablist" aria-label="Portals">
-      <button class="tab" role="tab" data-view="workspace" aria-selected="true">Workspace</button>
-      <button class="tab" role="tab" data-view="pipeline" aria-selected="false">Pipeline</button>
-      <button class="tab" role="tab" data-view="evidence" aria-selected="false">Evidence</button>
-      <button class="tab" role="tab" data-view="decisions" aria-selected="false">Decisions</button>
+    <nav class="sb-nav" aria-label="Sections">
+      <p class="sb-group">Your work</p>
+      <button class="sb-item tab" role="tab" data-view="today" aria-selected="true">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v9h-11z"/><path d="M2.5 7.5h11"/><path d="M5.5 2.5v3M10.5 2.5v3"/><path d="M5 10.5l1.4 1.4 2.8-2.8"/></svg><span>Today</span>
+        <span class="sb-badge" id="sbTodayBadge">0</span>
+      </button>
+      <button class="sb-item tab" role="tab" data-view="workspace" aria-selected="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M2.5 6.5h11M2.5 9.5h11M6.5 3.5v9"/></svg><span>All products</span>
+      </button>
+
+      <p class="sb-group">Understand it</p>
+      <button class="sb-item tab" role="tab" data-view="evidence" aria-selected="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 13V3"/><path d="M2.5 13h11"/><path d="M5 10.5l2.5-3 2 2 3-4"/></svg><span>How it&rsquo;s doing</span>
+      </button>
+      <button class="sb-item tab" role="tab" data-view="decisions" aria-selected="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v11"/><path d="M10.5 5A2.2 2.2 0 0 0 8 4C6.6 4 5.5 4.7 5.5 5.9S6.8 7.6 8 7.9s2.5.8 2.5 2.1S9.4 12 8 12a2.4 2.4 0 0 1-2.5-1.3"/></svg><span>Ordering decisions</span>
+      </button>
+      <button class="sb-item tab" role="tab" data-view="pipeline" aria-selected="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg><span>How it works</span>
+      </button>
+
+      <p class="sb-group">Tools</p>
+      <button class="sb-item" data-menu="glossary">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.8h4.2c.6 0 1 .4 1 1v9.4c0-.6-.4-1-1-1H3z"/><path d="M13 2.8H8.8c-.6 0-1 .4-1 1v9.4c0-.6.4-1 1-1H13z"/></svg><span>What the words mean</span>
+      </button>
+      <button class="sb-item" data-menu="sql">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="4" rx="4.6" ry="1.8"/><path d="M3.4 4v8c0 1 2 1.8 4.6 1.8s4.6-.8 4.6-1.8V4"/><path d="M3.4 8c0 1 2 1.8 4.6 1.8S12.6 9 12.6 8"/></svg><span>Query the data</span>
+        <span class="sb-dot" id="sbEngineDot" data-status="idle"
+              aria-hidden="true"></span>
+      </button>
+      <button class="sb-item" data-menu="keys">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v7h-11z"/><path d="M4.6 6.7h.01M6.8 6.7h.01M9 6.7h.01M11.2 6.7h.01M4.6 9.3h6.8"/></svg><span>Keyboard shortcuts</span>
+      </button>
     </nav>
 
+    <div class="sb-foot">
+      <button class="sb-item sb-small" data-menu="theme">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.4M8 13v1.4M1.6 8h1.4M13 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1"/></svg><span id="sbThemeLabel">Dark mode</span>
+      </button>
+      <button class="sb-item sb-small" data-menu="density">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h11"/></svg><span>Row height: <b id="densityLabel">Default</b></span>
+      </button>
+      <p class="sb-stamp">
+        Forecast made<br><b id="originLabel">&mdash;</b>
+      </p>
+      <p class="sb-engine" id="menuSqlSub">SQL console &mdash; for analysts</p>
+    </div>
+  </aside>
+
+  <!-- ============================================================ chrome
+
+       Four destinations, named for what a planner wants rather than for the
+       architecture behind them. "Pipeline" and "Evidence" told a reader nothing;
+       "How it works" and "How it's doing" tell them whether to click.
+
+       Everything an expert needs but a newcomer does not — the SQL console, row
+       density, the keyboard sheet, the theme — moved behind one More menu. That
+       keeps every feature within three clicks while leaving one obvious path
+       through the middle of the screen. -->
+  <header class="chrome">
+    <button class="icon-btn sb-open" id="sbOpen" aria-label="Show the sidebar"
+            aria-controls="sidebar">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round">
+        <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+      </svg>
+    </button>
+
+    <h2 class="chrome-title" id="chromeTitle">Today</h2>
+
     <div class="cmd" role="search">
-      <input id="searchInput" type="search" placeholder="Search item or location…"
-             aria-label="Search items and locations" autocomplete="off">
+      <input id="searchInput" type="search" placeholder="Search for a product&hellip;"
+             aria-label="Search products and stores" autocomplete="off">
       <span class="kbd">⌘K</span>
     </div>
 
     <div class="chrome-right">
-      <div class="origin-chip">
-        <span>origin</span><b id="originLabel">—</b>
-      </div>
-      <div class="origin-chip">
-        <span>horizon</span><b id="horizonLabel">—</b>
-      </div>
-      <!-- The query engine is stated, not hidden. It can genuinely fail to load,
-           and a planner who sees a slower interaction deserves to know why. -->
-      <button class="engine-pill" id="enginePill" data-status="idle"
-              aria-label="Query engine status. Opens the SQL console.">
-        <span class="led"></span><b>JS fallback</b><span class="t"></span>
+      <button class="icon-btn" id="helpBtn" data-menu="glossary">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="6"/><path d="M6.3 6.2a1.75 1.75 0 1 1 2.5 1.6c-.5.3-.8.7-.8 1.3"/>
+          <path d="M8 11.6h.01"/>
+        </svg>
+        Help
       </button>
-      <button class="icon-btn" id="themeBtn" aria-label="Toggle colour theme">◐ theme</button>
-      <button class="icon-btn" id="densityBtn" aria-label="Cycle row density">≡ default</button>
     </div>
   </header>
+
+  <!-- ============================================================= today
+
+       The front door. One question per card, one obvious answer, and a list
+       short enough to finish. See ui/js/review.js for why this replaced the
+       spreadsheet as the landing view. -->
+  <section id="view-today" class="view" data-active="true" role="tabpanel"
+           aria-label="Today's decisions">
+    <div class="rv">
+      <header class="rv-head">
+        <div class="rv-head-main">
+          <h1 id="rvHeadline">Loading&hellip;</h1>
+          <p id="rvSub"></p>
+        </div>
+        <div class="rv-head-money">
+          <span class="rv-money-amt" id="rvMoney">—</span>
+          <span class="rv-money-cap">profit at risk in this list</span>
+        </div>
+      </header>
+
+      <div class="rv-progress" role="group" aria-label="Review progress">
+        <div class="rv-progress-track">
+          <div class="rv-progress-bar" id="rvProgressBar"></div>
+        </div>
+        <span class="rv-progress-text" id="rvProgressText">0 reviewed</span>
+      </div>
+
+      <div class="rv-tabs" role="tablist" aria-label="Which items to show">
+        <button class="rv-tab" role="tab" data-tab="urgent" aria-selected="true">
+          Needs a decision <span class="n">0</span>
+        </button>
+        <button class="rv-tab" role="tab" data-tab="check" aria-selected="false">
+          Worth checking <span class="n">0</span>
+        </button>
+        <button class="rv-tab" role="tab" data-tab="later" aria-selected="false">
+          Low priority <span class="n">0</span>
+        </button>
+        <button class="rv-tab" role="tab" data-tab="done" aria-selected="false" hidden>
+          Reviewed <span class="n">0</span>
+        </button>
+      </div>
+
+      <div class="rv-list" id="rvList" aria-live="polite"></div>
+    </div>
+  </section>
 
   <!-- ========================================================= workspace -->
   <section id="view-workspace" class="view" data-active="true" role="tabpanel" aria-label="Planner workspace">
@@ -82,19 +200,19 @@
         <span>sorted by <b id="crumbSort">priority</b></span>
 
         <div class="crumbs-right">
-          <div class="seg" role="group" aria-label="Scope">
-            <button data-scope="queue" aria-pressed="true">Queue</button>
-            <button data-scope="all" aria-pressed="false">All series</button>
+          <div class="seg" role="group" aria-label="Which products to show">
+            <button data-scope="queue" aria-pressed="true">Flagged only</button>
+            <button data-scope="all" aria-pressed="false">Everything</button>
           </div>
 
           <label class="field">
             <span>order</span>
             <select class="sel" id="sortBy" aria-label="Order rows by">
-              <option value="priority">priority</option>
-              <option value="health">health, worst first</option>
-              <option value="swing">swing vs prior</option>
-              <option value="width">interval width</option>
-              <option value="revenue">revenue</option>
+              <option value="priority">most important first</option>
+              <option value="health">worst data first</option>
+              <option value="swing">biggest change first</option>
+              <option value="width">least certain first</option>
+              <option value="revenue">biggest sellers first</option>
             </select>
           </label>
 
@@ -106,7 +224,7 @@
               <option value="dept">department</option>
               <option value="store">store</option>
               <option value="state">state</option>
-              <option value="cls">planning class</option>
+              <option value="cls">how it sells</option>
             </select>
           </label>
 
@@ -123,6 +241,13 @@
         </div>
       </div>
 
+      <p class="grid-hint">
+        Every product, editable like a spreadsheet. Click a row to see its forecast
+        below. <b>Tab through cells and type</b> to change a number — nothing is saved
+        until you press Commit.
+        <button class="link-btn" id="hintKeys">See the shortcuts</button>
+      </p>
+
       <div class="grid-wrap">
         <div class="grid-scroll" id="gridScroll" tabindex="0" role="application"
              aria-label="Forecast grid. Use arrow keys to move, E to explain, Enter to edit.">
@@ -132,7 +257,7 @@
         <!-- Canvas is invisible to assistive technology, so a parallel table of
              the visible window is maintained here. -->
         <div id="gridAria" class="sr-only" aria-live="polite"></div>
-        <div class="grid-empty" id="gridEmpty" hidden>No series match the current filters.</div>
+        <div class="grid-empty" id="gridEmpty" hidden>No products match these filters. Try &ldquo;Everything&rdquo; instead of &ldquo;Flagged only&rdquo;.</div>
       </div>
 
       <div class="dock">
@@ -200,7 +325,16 @@
   <!-- ========================================================== pipeline -->
   <section id="view-pipeline" class="view" role="tabpanel" aria-label="Pipeline">
     <div class="sheet">
-      <h1 class="sheet-title">The pipeline</h1>
+      <h1 class="sheet-title">How it works</h1>
+      <div class="sheet-intro">
+        <p><b>In one sentence:</b> sales history goes in, the system checks whether the
+        data can be trusted, learns each product&rsquo;s own pattern, predicts a
+        <b>range</b> rather than a single number, and then turns that range into a
+        stocking decision using what mistakes actually cost.</p>
+        <p>The eight steps below are that process. Every number on this page came from
+        the run that produced the forecasts you are reviewing &mdash; nothing here is
+        illustrative.</p>
+      </div>
       <p class="sheet-lede">
         Seven stages, each with a single responsibility and a typed interface. Stages three through
         seven all speak in <em>predictive distributions</em> — nothing downstream ever sees a point
@@ -216,7 +350,15 @@
   <!-- ========================================================== evidence -->
   <section id="view-evidence" class="view" role="tabpanel" aria-label="Evidence">
     <div class="sheet">
-      <h1 class="sheet-title">Evidence</h1>
+      <h1 class="sheet-title">How it&rsquo;s doing</h1>
+      <div class="sheet-intro">
+        <p><b>The question this page answers:</b> is the system actually any good, and
+        would you make more money using it than using the simple alternatives?</p>
+        <p>Two things are measured separately, because they are not the same thing.
+        <b>Accuracy</b> is how close the forecasts land. <b>Economics</b> is how much
+        profit the resulting orders earn. A more accurate forecast does not always earn
+        more, and where they disagree this system follows the money.</p>
+      </div>
       <p class="sheet-lede">
         Three metric tiers — point accuracy, distributional quality, realised economics — and the two
         comparisons <em>between</em> tiers that the argument rests on: whether each stage adds value,
@@ -292,7 +434,17 @@
   <!-- ========================================================= decisions -->
   <section id="view-decisions" class="view" role="tabpanel" aria-label="Decisions">
     <div class="sheet">
-      <h1 class="sheet-title">Decisions</h1>
+      <h1 class="sheet-title">Ordering decisions</h1>
+      <div class="sheet-intro">
+        <p><b>Why two products with the same forecast get different orders.</b> Fresh
+        milk spoils in days on a thin margin, so running out costs less than throwing
+        stock away &mdash; order light. An expensive durable never spoils and earns
+        well, so a lost sale costs far more than a few weeks of storage &mdash; order
+        generously.</p>
+        <p>The system works this out for every product from its own price, cost, shelf
+        life and holding cost, instead of applying one blanket service target to
+        everything.</p>
+      </div>
       <p class="sheet-lede">
         The link from forecast to money. The target service quantile is the critical fractile derived
         from cost asymmetry — underage over underage plus overage — which replaces the industry habit
@@ -359,6 +511,22 @@
   </div>
 </div>
 
+<!-- ============================================================ glossary
+     The one place jargon is allowed to appear, because here it is being defined
+     rather than assumed. -->
+<div class="palette-backdrop" id="glossBackdrop" data-open="false"></div>
+<div class="sheet-modal" id="glossBox" data-open="false" role="dialog" aria-modal="true"
+     aria-labelledby="glossTitle">
+  <div class="sqlbox-head">
+    <div>
+      <div class="sqlbox-title" id="glossTitle">What do these words mean?</div>
+      <div class="sqlbox-sub">Six ideas the whole system rests on</div>
+    </div>
+    <button class="btn" id="glossClose">Close</button>
+  </div>
+  <div class="gloss-body" id="glossBody"></div>
+</div>
+
 <!-- ========================================================== SQL console -->
 <div class="palette-backdrop" id="sqlBackdrop" data-open="false"></div>
 <div class="sqlbox" id="sqlBox" data-open="false" role="dialog" aria-modal="true"
@@ -391,11 +559,13 @@ FROM series GROUP BY 1 ORDER BY series DESC</textarea>
 <div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
 
 <script src="data/bundle.js?v=7fe0fd9a"></script>
+<script src="js/plain.js?v=8dd06169"></script>
 <script src="js/duck.js?v=64beaf16"></script>
 <script src="js/util.js?v=251bf016"></script>
 <script src="js/grid.js?v=be833f18"></script>
 <script src="js/chart.js?v=9922be45"></script>
 <script src="js/views.js?v=75c048ff"></script>
-<script src="js/app.js?v=b4e09727"></script>
+<script src="js/review.js?v=8ddba281"></script>
+<script src="js/app.js?v=b11fd465"></script>
 </body>
 </html>

@@ -495,43 +495,39 @@
   /* ------------------------------------------------------ engine readout */
 
   function renderEngine() {
-    const el = $("enginePill");
-    if (!el) return;
-    const s = Duck.state;
-    const n = s.rows || ALL_ROWS.length;
+    const sub = $("menuSqlSub");
+    const dot = $("sbEngineDot");
+    if (dot) dot.dataset.status = Duck.state.status;
+    if (!sub) return;
+    const st = Duck.state;
+    const n = st.rows || ALL_ROWS.length;
     const routed = Query.useSql(n, false);
+    const t = st.lastMs
+      ? `${st.lastMs < 1 ? st.lastMs.toFixed(2) : Math.round(st.lastMs)} ms`
+      : "";
 
     // Two facts, not one: whether the engine is up, and which backend answered the
     // last query. They differ by design — the engine can be ready and still not be
     // the right tool at this table size — and collapsing them into one label is how
     // a status line starts lying.
-    const label = {
-      ready: routed ? "SQL engine" : "SQL ready",
-      loading: "loading SQL",
-      unavailable: "JS engine",
-      idle: "JS engine",
-    }[s.status];
-    el.dataset.status = s.status;
-    el.querySelector("b").textContent = label;
-    const t = s.lastMs
-      ? `${s.lastMs < 1 ? s.lastMs.toFixed(2) : Math.round(s.lastMs)} ms · ${s.lastBackend}`
-      : "";
-    el.querySelector(".t").textContent = t;
+    sub.textContent = {
+      ready: routed
+        ? `SQL console · running in your browser${t ? ` · last query ${t}` : ""}`
+        : `SQL console · engine ready${t ? ` · last query ${t}` : ""}`,
+      loading: "SQL console · starting the query engine…",
+      unavailable: "SQL console · engine unavailable, see why",
+      idle: "SQL console · for analysts",
+    }[st.status];
 
-    el.title = s.status === "ready"
-      ? `DuckDB-WASM is loaded — ${s.detail}.
+    sub.parentElement.title = st.status === "ready"
+      ? `DuckDB-WASM is loaded — ${st.detail}.
 ` +
-        `Row selection routes to SQL above ` +
-        `${Query.CROSSOVER_ROWS.toLocaleString()} rows; this table has ` +
-        `${n.toLocaleString()}, so live queries run in ${routed ? "SQL" : "JavaScript"}, ` +
-        `which is the faster of the two at this size.
+        `Row selection routes to SQL above ${Query.CROSSOVER_ROWS.toLocaleString()} ` +
+        `rows; this table has ${n.toLocaleString()}, so live queries run in ` +
+        `${routed ? "SQL" : "JavaScript"}, which is faster at this size.`
+      : `${st.detail || "The query engine has not started."}
 ` +
-        `Click to open the SQL console.`
-      : `${label}: ${s.detail || "SQL engine not started"}
-` +
-        `Filtering, sorting and grouping still work — they run in JavaScript.
-` +
-        `Click for details.`;
+        `Filtering, sorting and grouping still work — they run in JavaScript.`;
   }
 
   /* ========================================================= SQL console
@@ -648,6 +644,57 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     }
   }
 
+  /* =========================================================== More menu
+
+     One menu holds everything that is powerful but not part of the main path:
+     the glossary, the ordering-decisions sheet, theme, row height, the keyboard
+     sheet and the SQL console. That is what allows the top-level navigation to be
+     four plain words while keeping every feature two clicks away. */
+
+  /* The sidebar replaced a More menu, so there is nothing left to open or close.
+     closeMenu survives as a no-op called from setView because the alternative is
+     scattering existence checks through the view switcher. On a narrow viewport the
+     sidebar itself is the overlay, and navigating dismisses it. */
+  function closeMenu() {
+    if (window.matchMedia("(max-width: 1000px)").matches) setSidebar(false);
+  }
+
+  /* Collapsed state is remembered: an expert who wants the width back for the grid
+     should not have to reclaim it on every reload. */
+  function setSidebar(open) {
+    document.documentElement.dataset.sidebar = open ? "open" : "closed";
+    $("sbCollapse")?.setAttribute("aria-expanded", String(open));
+    try { localStorage.setItem("dq.sidebar", open ? "open" : "closed"); } catch (_) {}
+    // The canvas grid sizes itself from its container, so a width change is a resize.
+    requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
+  }
+  const sidebarOpen = () => document.documentElement.dataset.sidebar !== "closed";
+
+  function renderGlossary() {
+    $("glossBody").innerHTML = Plain.GLOSSARY
+      .map(([h, body]) => `<div class="gloss-item"><h4>${U.esc(h)}</h4>` +
+                          `<p>${U.esc(body)}</p></div>`).join("");
+  }
+
+  const setModal = (box, backdrop, open) => {
+    $(box).dataset.open = String(open);
+    $(backdrop).dataset.open = String(open);
+  };
+  const openGlossary = () => { renderGlossary(); setModal("glossBox", "glossBackdrop", true); };
+  const closeGlossary = () => setModal("glossBox", "glossBackdrop", false);
+
+  function onMenu(action) {
+    closeMenu();
+    switch (action) {
+      case "glossary": return openGlossary();
+      case "decisions": return setView("decisions");
+      case "theme": return toggleTheme();
+      case "density": return cycleDensity();
+      case "keys": return toggleKeys(true);
+      case "sql": return openSql();
+    }
+  }
+
   /* ============================================================ palette */
 
   let palIdx = 0, palItems = [];
@@ -701,6 +748,11 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     if (idx >= 0) Grid.select(idx);
   }
 
+  const toggleKeys = (open) => {
+    $("keysSheet").dataset.open = String(open);
+    $("keysBackdrop").dataset.open = String(open);
+  };
+
   /* ============================================================ chrome */
 
   function toast(msg) {
@@ -719,25 +771,45 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     setTimeout(() => n.remove(), 1500);
   }
 
+  // Today is rendered by review.js and the three sheets by views.js, so setView
+  // dispatches rather than assuming everything that is not the workspace is a sheet.
+  const SHEETS = new Set(["pipeline", "evidence", "decisions"]);
+
+  const VIEW_TITLE = {
+    today: "Today", workspace: "All products", evidence: "How it's doing",
+    decisions: "Ordering decisions", pipeline: "How it works",
+  };
+
   function setView(v) {
     state.view = v;
+    const t = $("chromeTitle");
+    if (t) t.textContent = VIEW_TITLE[v] || v;
     document.querySelectorAll(".tab").forEach((t) =>
       t.setAttribute("aria-selected", t.dataset.view === v)
     );
     document.querySelectorAll(".view").forEach((s) => {
       s.dataset.active = s.id === "view-" + v;
     });
-    if (v !== "workspace") Views.render(v);
-    else requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
+    if (SHEETS.has(v)) Views.render(v);
+    else if (v === "workspace") requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
+    else if (v === "today") Review.render();
+    closeMenu();
   }
 
   const DENSITIES = ["dense", "default", "comfortable"];
+  const DENSITY_WORD = { dense: "Compact", default: "Default", comfortable: "Roomy" };
+
+  function paintDensityLabel() {
+    const el = $("densityLabel");
+    if (el) el.textContent = DENSITY_WORD[document.documentElement.dataset.density];
+  }
+
   function cycleDensity() {
     const cur = document.documentElement.dataset.density;
     const next = DENSITIES[(DENSITIES.indexOf(cur) + 1) % DENSITIES.length];
     document.documentElement.dataset.density = next;
     localStorage.setItem("dq.density", next);
-    $("densityBtn").textContent = "≡ " + next;
+    paintDensityLabel();
     window.dispatchEvent(new Event("dq:density"));
   }
   /* A theme flip must not be animated, for two independent reasons.
@@ -761,6 +833,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     root.classList.add("theme-switching");
     root.dataset.theme = next;
     localStorage.setItem("dq.theme", next);
+    setSidebar((localStorage.getItem("dq.sidebar") || "open") !== "closed");
     U.refresh();                        // the token cache the canvases read
     window.dispatchEvent(new Event("dq:theme"));
     Views.invalidate();
@@ -771,6 +844,13 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
   function toggleTheme() {
     setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    paintThemeLabel();
+  }
+
+  function paintThemeLabel() {
+    const el = $("sbThemeLabel");
+    if (el) el.textContent = document.documentElement.dataset.theme === "dark"
+      ? "Light mode" : "Dark mode";
   }
 
   /* ============================================================ keyboard */
@@ -884,11 +964,11 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     const savedDensity = localStorage.getItem("dq.density");
     if (savedTheme) document.documentElement.dataset.theme = savedTheme;
     if (savedDensity) document.documentElement.dataset.density = savedDensity;
-    $("densityBtn").textContent = "≡ " + document.documentElement.dataset.density;
     U.refresh();
 
     $("originLabel").textContent = D.run.origin;
-    $("horizonLabel").textContent = D.run.horizon + "d";
+    paintDensityLabel();
+    paintThemeLabel();
     $("crumbScope").textContent =
       `${U.nf(D.run.nSeries)} item-locations · ${U.nf(D.run.nPanelRows)} panel rows`;
 
@@ -917,7 +997,36 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     // reloaded tab can retain the previous session's tab state, and an attribute
     // that has drifted leaves every view hidden — which presents as a blank app
     // with no error in the console.
-    setView("workspace");
+    /* The review flow owns the landing view. Its two hooks keep it and the
+       spreadsheet on one shared pending-edit set: a number changed on a card is
+       the same pending override the grid shows, so a planner can start on a card
+       and finish in the table without losing work. */
+    Review.init(D, {
+      onToast: toast,
+      onCount: (n) => {
+        const b = $("sbTodayBadge");
+        if (!b) return;
+        b.textContent = n;
+        b.hidden = n === 0;
+      },
+      onChange: (s, value) => {
+        const row = BY_ID.get(s.id);
+        if (!row) return;
+        // Grid owns the pending set, so a card edit and a cell edit are the same
+        // state and share undo. Null when the change is a rounding no-op, which is
+        // what setOverride treats as "no longer overridden".
+        const modelVal = Math.round(row.weekly[0][Q50]);
+        Grid.setOverride(s.id, 0, Math.abs(value - modelVal) >= 0.5 ? value : null);
+        syncPending();
+      },
+      onUndo: (s) => {
+        Grid.resetSeries(s.id);
+        s._override = null;
+        syncPending();
+      },
+    });
+
+    setView("today");
     window.DQ = { state, Query, Duck, rows: ALL_ROWS, selftest: Query.selftest, setTheme };
 
     document.querySelectorAll(".tab").forEach((t) =>
@@ -942,12 +1051,22 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       Grid.resetColumns();
       toast("Column widths and order reset");
     });
+    // Delegated at the document, so the sidebar, the chrome Help button and any
+    // future host of a [data-menu] control all dispatch through one path.
+    document.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-menu]");
+      if (b) onMenu(b.dataset.menu);
+    });
+    $("sbCollapse").addEventListener("click", () => setSidebar(!sidebarOpen()));
+    $("sbOpen").addEventListener("click", () => setSidebar(true));
+    $("glossClose").addEventListener("click", closeGlossary);
+    $("glossBackdrop").addEventListener("click", closeGlossary);
+
     $("sortBy").addEventListener("change", (e) => {
       state.sort = e.target.value;
       $("crumbSort").textContent = e.target.selectedOptions[0].textContent;
       refresh();
     });
-    $("enginePill").addEventListener("click", openSql);
     $("sqlClose").addEventListener("click", closeSql);
     $("sqlBackdrop").addEventListener("click", closeSql);
     $("sqlRun").addEventListener("click", runSql);
@@ -962,8 +1081,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
         runSql();
       })
     );
-    $("themeBtn").addEventListener("click", toggleTheme);
-    $("densityBtn").addEventListener("click", cycleDensity);
+
     $("priorToggle").addEventListener("change", () => {
       const r = Grid.selected;
       if (r) applyOverrideToChart(r);
@@ -995,14 +1113,11 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       $("undoBtn").disabled = !Grid.canUndo;
       $("redoBtn").disabled = !Grid.canRedo;
     });
-    const toggleKeys = (open) => {
-      $("keysSheet").dataset.open = String(open);
-      $("keysBackdrop").dataset.open = String(open);
-    };
-    $("keysBtn").addEventListener("click", () => toggleKeys(true));
     $("keysBackdrop").addEventListener("click", () => toggleKeys(false));
+    $("hintKeys")?.addEventListener("click", () => toggleKeys(true));
+    $("keysBtn")?.addEventListener("click", () => toggleKeys(true));
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { toggleKeys(false); closeSql(); }
+      if (e.key === "Escape") { toggleKeys(false); closeSql(); closeGlossary(); closeMenu(); }
       if (e.key === "?" && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) {
         toggleKeys(true);
       }
