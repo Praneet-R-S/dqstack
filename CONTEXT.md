@@ -77,6 +77,7 @@ ui/                planner workspace. No build step, no bundler, no framework.
   js/plain.js      every word a non-specialist reads; nothing else invents a phrase
   js/duck.js       DuckDB-WASM + the two-backend query resolver (Duck, Query)
   js/review.js     the Today review flow — the front door
+  js/catalog.js    the Products view: browse, one-product detail, add/remove
   js/grid.js       the canvas grid: selection, editing, undo, grouping, micro-fan
   js/chart.js      the canvas fan chart
   js/views.js      pipeline / evidence / decisions sheets
@@ -481,6 +482,76 @@ that the two are not comparable.
 Code size after all of this: **88.0 KB gzipped** against the 250 KB budget.
 The `file://` path still works with no server and no query engine.
 
+### C5. Products view, search repair, and range editing — DONE
+
+Three complaints, one root cause: there was no screen whose job was *one product*.
+
+**Search was broken twice over.** `jumpTo()` set the spreadsheet's scope and
+selected a row in it — while the visible view was Today. Nothing appeared to
+happen because nothing did: the selection landed in a hidden grid. And the palette
+matched only raw identifiers, so a planner who read "Food 1-006" off a card and
+typed it got zero results, because `FOODS_1_001` does not contain "food 1-0". The
+displayed name is now the primary search key, terms match independently
+("food ca-4" works), a miss says so instead of showing an empty box, and a result
+opens the product in the new Products view.
+
+**`ui/js/catalog.js` — the Products view.** List beside detail: search, category
+chips, a needs-attention filter, 200 rows at a time. The detail pane gives one
+product a full-width SVG chart with axis labels, four figures, its flags in plain
+words, an inline forecast edit sharing Grid's draft set, and the model's own
+drivers. This is where search results land and where the range is changed.
+
+**Add and remove products** — previously absent entirely. Both are session-local
+drafts with a pending bar, like forecast overrides, because there is no write path
+to a system of record. Removal shows what the product currently earns before you
+confirm and is undoable.
+
+Adding was the interesting one. Two numbers a new product needs behave completely
+differently, and conflating them was the first version's bug:
+
+- **The service level *is* computable now.** It falls out of the price, cost and
+  shelf life the planner just typed. `Catalog.fractile()` mirrors
+  `critical_fractile()` in decide.py, including the spoilage term being excess
+  cover beyond shelf life rather than a flat fraction — otherwise the bug fixed in
+  Stage 7 would be reintroduced in the browser. The constants come from
+  `D.run.holdingRate / markdownRisk / minQuantile / maxQuantile`, newly exported by
+  `export.py`, **not** from JS literals that would drift from config.py. The dialog
+  previews it live as you type, which turns out to demonstrate the thesis better
+  than any chart does:
+
+  | product | margin | shelf | target |
+  |---|---|---|---|
+  | fresh, thin margin (milk) | 17% | 5 d | **50%** (floored) |
+  | fresh, fat margin | 67% | 5 d | **78%** |
+  | durable, fat margin | 70% | 730 d | **93%** |
+  | durable, thin margin | 8% | 730 d | **50%** |
+
+- **The stock level is *not* computable now**, because an order-up-to level is a
+  predictive quantile of demand over the risk period and a new product has no
+  predictive distribution. The first version inherited the prototype's
+  `orderUpTo`, which had been computed at the *prototype's* target quantile — so
+  the card showed a stock level that contradicted the service level beside it.
+  It is now `null`, rendered as "Not yet — needs a forecast first, aiming at 50%
+  service". A missing number that explains itself beats a confident wrong one.
+
+Everything else a new product shows is an estimate from the median of comparable
+products in the same category and store, labelled as one. That is in substance what
+the cold-start model does; inventing a forecast in the browser would violate CON-3
+and be dishonest besides.
+
+**The spreadsheet is no longer the default.** "All products" was the second nav
+item and the only way to browse, which is why it read as too complicated — it is a
+bulk-editing instrument, thirty columns and keyboard-driven, and a poor answer to
+"show me that product". It moved to **Tools → Spreadsheet**, and its header now
+says what it is for and links to Products for lookups.
+
+Navigation is now: *Your work* — Today, Products · *Understand it* — How it's
+doing, Ordering decisions, How it works · *Tools* — glossary, query the data,
+spreadsheet, shortcuts. Six destinations, all one click.
+
+App code 102.9 KB gzipped against the 250 KB budget; 94 tests pass; zero
+horizontal overflow across all six views.
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -517,6 +588,13 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **Search must match what is on the screen**, not the internal identifier. The
+  bundle's item codes (`FOODS_1_001`) are never shown to a user.
+- **Never copy a derived number from a prototype product.** `orderUpTo` is a
+  quantile at the *source* product's target level; reusing it contradicts any newly
+  derived service level. Withhold it instead.
+- **Fractile constants live in `D.run`**, exported from `CFG.decision`. Do not
+  re-type them into JavaScript.
 - **A progress denominator must not be recomputed from a live queue.** If the list
   refills as you clear it, "1 of 25" becomes "2 of 26" and the goal recedes. Fix
   the cohort once.

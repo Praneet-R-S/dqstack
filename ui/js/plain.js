@@ -42,6 +42,11 @@ window.Plain = (() => {
                     term: "terminal decline" },
   };
 
+  /* Category names. The raw values are M5's shouty identifiers and were leaking
+     into the product page as "HOBBIES". One mapping, used everywhere. */
+  const CAT = { FOODS: "Food", HOUSEHOLD: "Household", HOBBIES: "Hobbies" };
+  const catWord = (c) => CAT[c] || c;
+
   /* ---- why is this item in front of me? --------------------------------
      Ordered by how much a planner should care. The first matching reason is the
      headline; the rest become secondary notes. */
@@ -259,7 +264,7 @@ window.Plain = (() => {
      "The forecast is not a black box. Each product shows which patterns in its own history pushed the number up or down, and by how much."],
   ];
 
-  return { CLASS, REASONS, REASON_BY_KEY, headline, others, quality, confidence,
+  return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, quality, confidence,
            service, feature, money, units, change, calibrate, GLOSSARY,
            get CUT() { return CUT; } };
 })();

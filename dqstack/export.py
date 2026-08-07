@@ -403,6 +403,16 @@ def export_bundle(state: dict, out_dir: Path = UI_DATA, explain_top: int = 160) 
             "historyDays": HISTORY_DAYS,
             "reviewPeriod": CFG.decision.review_period,
             "leadTime": CFG.decision.lead_time,
+            # The critical-fractile constants. Exported rather than duplicated in
+            # JavaScript because the Products page derives a service level for a
+            # newly added product from the price, cost and shelf life the planner
+            # types, and it has to be the same formula Stage 7 uses. A hardcoded
+            # copy in the browser is a copy that silently goes stale the first time
+            # a cost assumption is retuned here.
+            "holdingRate": CFG.decision.holding_cost_rate,
+            "markdownRisk": CFG.decision.markdown_risk,
+            "minQuantile": CFG.decision.min_quantile,
+            "maxQuantile": CFG.decision.max_quantile,
             "timings": metrics["timings_seconds"],
             "origins": metrics["origins"],
         },

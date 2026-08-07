@@ -709,16 +709,23 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     $("palette").dataset.open = "false";
     $("paletteBackdrop").dataset.open = "false";
   }
+  /* Search has to match what is on the screen.
+
+     The list previously matched only the raw identifiers, so a planner who read
+     "Food 1-006" on a card and typed it got no results at all — `FOODS_1_001` does
+     not contain "food 1-0". The displayed name is now the primary search key, with
+     the raw id and the plain-English class kept as alternatives so both audiences
+     can search in their own vocabulary. Terms are matched independently, so
+     "food ca-4" finds a product whose name and store each match one word. */
   function palSearch(q) {
-    q = q.trim().toLowerCase();
-    palItems = (q
-      ? ALL_ROWS.filter(
-          (r) =>
-            r.item.toLowerCase().includes(q) ||
-            r.store.toLowerCase().includes(q) ||
-            r.cls.includes(q) ||
-            r.dept.toLowerCase().includes(q)
-        )
+    const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const haystack = (r) => [
+      Review.prettyItem(r.item), Review.prettyStore(r.store), r.item, r.store, r.id,
+      r.dept, r.cat, Plain.CLASS[r.cls]?.label || r.cls,
+    ].join(" ").toLowerCase();
+
+    palItems = (terms.length
+      ? ALL_ROWS.filter((r) => { const h = haystack(r); return terms.every((t) => h.includes(t)); })
       : ALL_ROWS.slice().sort((a, b) => b.priority - a.priority)
     ).slice(0, 40);
     palIdx = 0;
@@ -726,26 +733,32 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       .map(
         (r, i) =>
           `<div class="palette-item" role="option" aria-selected="${i === 0}" data-id="${r.id}">
-             <span class="p-id">${r.item} · ${r.store}</span>
-             <span class="p-meta">${U.CLASS_SHORT[r.cls] || r.cls} · health ${r.health.toFixed(2)} · ${U.nf(Math.round(r.total))}u</span>
+             <span class="p-id">${U.esc(Review.prettyItem(r.item))} · ${U.esc(Review.prettyStore(r.store))}</span>
+             <span class="p-meta">${U.esc(Plain.CLASS[r.cls]?.label || r.cls)} · ${U.nf(Math.round(r.total))} units next 28d</span>
            </div>`
       )
       .join("");
+    if (!palItems.length) {
+      $("paletteList").innerHTML =
+        `<p class="palette-none">Nothing matches &ldquo;${U.esc(q)}&rdquo;. ` +
+        `Try a product name like &ldquo;Food 1-006&rdquo;, a store like &ldquo;CA-4&rdquo;, ` +
+        `or a category.</p>`;
+    }
     $("paletteList").querySelectorAll(".palette-item").forEach((n) =>
       n.addEventListener("click", () => jumpTo(n.dataset.id))
     );
   }
-  async function jumpTo(id) {
+  /* Picking a search result has to *show* the product.
+
+     The previous version set the spreadsheet's scope and selected a row in it —
+     while the visible view was Today. Nothing appeared to happen, because nothing
+     did: the selection landed in a hidden grid. A search result now opens the
+     Products view on that product, which is a screen built to show one product,
+     and Catalog.reveal clears any filter that would hide the row. */
+  function jumpTo(id) {
     closePalette();
-    state.scope = "all";
-    state.filters.clear();
-    document.querySelectorAll("[data-scope]").forEach((b) =>
-      b.setAttribute("aria-pressed", b.dataset.scope === "all")
-    );
-    renderFilters();
-    await refresh();                 // the grid must hold the row before selecting it
-    const idx = Grid.rows.findIndex((r) => r.id === id);
-    if (idx >= 0) Grid.select(idx);
+    setView("products");
+    if (!Catalog.reveal(id)) toast("That product is no longer in the range");
   }
 
   const toggleKeys = (open) => {
@@ -776,8 +789,9 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
   const SHEETS = new Set(["pipeline", "evidence", "decisions"]);
 
   const VIEW_TITLE = {
-    today: "Today", workspace: "All products", evidence: "How it's doing",
-    decisions: "Ordering decisions", pipeline: "How it works",
+    today: "Today", products: "Products", workspace: "Spreadsheet",
+    evidence: "How it's doing", decisions: "Ordering decisions",
+    pipeline: "How it works",
   };
 
   function setView(v) {
@@ -793,6 +807,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     if (SHEETS.has(v)) Views.render(v);
     else if (v === "workspace") requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
     else if (v === "today") Review.render();
+    else if (v === "products") Catalog.renderDetail();
     closeMenu();
   }
 
@@ -1026,6 +1041,23 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       },
     });
 
+    /* Catalog shares Grid's pending set, like Review does, so a number changed on
+       a product page is the same draft edit the spreadsheet shows. */
+    Catalog.init(D, {
+      onToast: toast,
+      onChange: (s, value) => {
+        const row = BY_ID.get(s.id);
+        if (!row) {                 // a session-added product has no grid row yet
+          s._override = { week: 0, value };
+          toast(`Saved ${U.nf(value)} units — this product joins the grid after the next run`);
+          return;
+        }
+        const modelVal = Math.round(row.weekly[0][Q50]);
+        Grid.setOverride(s.id, 0, Math.abs(value - modelVal) >= 0.5 ? value : null);
+        syncPending();
+      },
+    });
+
     setView("today");
     window.DQ = { state, Query, Duck, rows: ALL_ROWS, selftest: Query.selftest, setTheme };
 
@@ -1115,6 +1147,12 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     });
     $("keysBackdrop").addEventListener("click", () => toggleKeys(false));
     $("hintKeys")?.addEventListener("click", () => toggleKeys(true));
+    // In-prose links to another view, so the spreadsheet can point at the simpler
+    // tool without the reader having to find it in the sidebar.
+    document.addEventListener("click", (e) => {
+      const l = e.target.closest("[data-view-link]");
+      if (l) setView(l.dataset.viewLink);
+    });
     $("keysBtn")?.addEventListener("click", () => toggleKeys(true));
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { toggleKeys(false); closeSql(); closeGlossary(); closeMenu(); }
