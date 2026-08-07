@@ -155,8 +155,10 @@ window.Catalog = (() => {
     for (const v of hist) hi = Math.max(hi, v);
     for (const f of fan) hi = Math.max(hi, f[5]);
     hi = Math.max(hi, 1);
-    const nice = Math.pow(10, Math.floor(Math.log10(hi)));
-    const top = Math.ceil(hi / nice) * nice;
+    // A 1/2/5 ladder rather than pure powers of ten: the latter rounds a peak of
+    // 210 up to 300 and throws away a third of the plot height.
+    const mag = Math.pow(10, Math.floor(Math.log10(hi)));
+    const top = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= hi) || 10 * mag;
 
     const iw = w - PAD.l - PAD.r, ih = h - PAD.t - PAD.b;
     const x = (i) => PAD.l + (iw * i) / (n - 1);
@@ -170,22 +172,49 @@ window.Catalog = (() => {
       `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
 
     const j0 = hist.length - 1;
-    const up = [`M${x(j0).toFixed(1)},${y(hist[j0] ?? 0).toFixed(1)}`], down = [], mid = [];
-    fan.forEach((f, k) => {
+    const anchorY = y(hist[j0] ?? 0);
+
+    // Same three nested levels as review.js and chart.js. One statistical object,
+    // one rendering, on every surface that draws it.
+    const LEVELS = [[0, 6, "cc-98"], [1, 5, "cc-80"], [2, 4, "cc-50"]];
+    const bands = !fan.length ? "" : LEVELS.map(([lo, hiQ, cls]) => {
+      const top = [`M${x(j0).toFixed(1)},${anchorY.toFixed(1)}`];
+      const bot = [];
+      fan.forEach((f, k) => {
+        const xi = x(j0 + 1 + k);
+        top.push(`L${xi.toFixed(1)},${y(f[hiQ]).toFixed(1)}`);
+        bot.push(`${xi.toFixed(1)},${y(f[lo]).toFixed(1)}`);
+      });
+      return `<path d="${top.join("")}L${bot.reverse().join("L")}Z" class="${cls}"/>`;
+    }).join("");
+
+    const mid = fan.map((f, k) =>
+      `${k ? "L" : "M"}${x(j0 + 1 + k).toFixed(1)},${y(f[Q50]).toFixed(1)}`);
+
+    /* The prior version, as a ghost. The product page is where a planner asks "did
+       this move since last cycle?" and the answer was available only as a word on
+       the review card. chart.js already renders this; the data, the colour token
+       and a reference implementation all existed, so this is porting. Negative
+       sentinels mark days the earlier vintage did not cover, and break the path. */
+    let prior = "", started = false;
+    (s.prior || []).forEach((v, k) => {
+      if (v < 0) { started = false; return; }
       const xi = x(j0 + 1 + k);
-      up.push(`L${xi.toFixed(1)},${y(f[5]).toFixed(1)}`);
-      down.push(`${xi.toFixed(1)},${y(f[1]).toFixed(1)}`);
-      mid.push(`${k ? "L" : "M"}${xi.toFixed(1)},${y(f[Q50]).toFixed(1)}`);
+      prior += `${started ? "L" : "M"}${xi.toFixed(1)},${y(v).toFixed(1)}`;
+      started = true;
     });
-    const area = fan.length ? up.join("") + "L" + down.reverse().join("L") + "Z" : "";
 
     return `<svg class="cat-chart" viewBox="0 0 ${w} ${h}" role="img"
       aria-label="Daily sales for the last ${hist.length} days and the forecast for the next ${fan.length} days, with its likely range">
+      <rect class="fan-future" x="${x(j0).toFixed(1)}" y="${PAD.t}"
+            width="${(w - PAD.r - x(j0)).toFixed(1)}" height="${ih}"/>
       ${ticks}
-      ${area ? `<path d="${area}" class="cc-band"/>` : ""}
+      ${bands}
+      ${prior ? `<path d="${prior}" class="cc-prior"/>` : ""}
       <path d="${histLine}" class="cc-hist"/>
       ${mid.length ? `<path d="${mid.join("")}" class="cc-fc"/>` : ""}
       <line x1="${x(j0).toFixed(1)}" y1="${PAD.t}" x2="${x(j0).toFixed(1)}" y2="${PAD.t + ih}" class="cc-now"/>
+      <circle cx="${x(j0).toFixed(1)}" cy="${anchorY.toFixed(1)}" r="3" class="cc-last"/>
       <text x="${(x(j0) + 6).toFixed(1)}" y="${PAD.t + 12}" class="cc-nowlab">today</text>
       <text x="${PAD.l}" y="${h - 8}" class="cc-tick cc-start">${hist.length} days of sales</text>
       <text x="${w - PAD.r}" y="${h - 8}" class="cc-tick cc-end">${fan.length}-day forecast</text>
@@ -262,6 +291,7 @@ window.Catalog = (() => {
           <span><i class="k-hist"></i>sold so far</span>
           <span><i class="k-fc"></i>forecast</span>
           <span><i class="k-band"></i>likely range</span>
+          <span><i class="k-prior"></i>last week's version</span>
         </div>
       </div>
 
@@ -274,7 +304,7 @@ window.Catalog = (() => {
         <div class="rc-fig" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
           <span class="rc-fig-cap">Stock up to</span>
           ${s.orderUpTo == null
-            ? `<span class="rc-fig-val rc-pending">Not yet</span>
+            ? `<span class="rc-fig-word rc-pending">Not yet</span>
                <span class="rc-fig-sub">needs a forecast first &middot; aiming at
                  ${svc.pct}% service</span>`
             : `<span class="rc-fig-val">${Plain.units(s.orderUpTo)}<small>units</small></span>
@@ -282,7 +312,7 @@ window.Catalog = (() => {
         </div>
         <div class="rc-fig" title="${e(q.note)}">
           <span class="rc-fig-cap">Data quality</span>
-          <span class="rc-fig-val rc-q-${q.tone}">${e(q.word)}</span>
+          <span class="rc-fig-word rc-q-${q.tone}">${e(q.word)}</span>
           <span class="rc-fig-sub">${isNewProduct(s)
             ? `estimated from ${s._estimateFrom || 0} similar products`
             : `confidence ${e(conf.word.toLowerCase())}`}</span>

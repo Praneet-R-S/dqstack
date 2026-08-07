@@ -71,13 +71,11 @@
 #view-today {
   grid-template-columns: 1fr;
   overflow-y: auto;
-  background:
-    radial-gradient(900px 400px at 50% -8%, rgba(var(--forecast-rgb) / 0.06), transparent 70%),
-    var(--bg-base);
+  background: var(--cone-wash), var(--bg-base);
 }
 .rv {
   width: 100%; max-width: var(--rv-max); margin: 0 auto;
-  padding: var(--s8) var(--s7) calc(var(--s9) * 1.6);
+  padding: var(--s8) var(--gutter) var(--s9);
 }
 
 /* ---- the headline: what needs doing, and what it is worth --------------- */
@@ -87,17 +85,21 @@
 }
 .rv-head-main { flex: 1; min-width: 280px; }
 .rv-head h1 {
-  font-size: 30px; font-weight: 600; letter-spacing: -0.025em;
+  font-size: var(--fs-28); font-weight: 600; letter-spacing: var(--tracking-tight);
   line-height: 1.15; color: var(--text-primary);
 }
 .rv-head p {
   margin: var(--s4) 0 0; font-size: var(--fs-14); color: var(--text-secondary);
-  line-height: var(--lh-prose); max-width: 62ch;
+  line-height: var(--lh-prose); max-width: var(--measure);
 }
 .rv-head-money { text-align: right; }
+/* Money at risk is the thesis of the product; it belongs at the top of the figure
+   scale rather than tied with the headline at an invented 30px, where only the red
+   distinguished them. */
 .rv-money-amt {
-  display: block; font-family: var(--font-num); font-size: 30px; font-weight: 500;
-  letter-spacing: -0.04em; line-height: 1; color: var(--state-risk);
+  display: block; font-family: var(--font-num); font-size: var(--fig-xl);
+  font-weight: 600; letter-spacing: var(--track-fig-xl); line-height: 1;
+  color: var(--state-risk);
 }
 .rv-money-cap {
   display: block; margin-top: var(--s3); font-size: var(--fs-11);
@@ -146,13 +148,22 @@
   padding: 1px 7px; color: var(--text-tertiary);
 }
 .rv-tab[aria-selected="true"] .n {
-  background: rgba(var(--forecast-rgb) / 0.14); color: var(--series-forecast);
+  background: rgba(var(--ui-accent-rgb) / 0.14); color: var(--ui-accent);
 }
 
 /* ---- the card ---------------------------------------------------------- */
-.rv-list { display: grid; gap: var(--s6); }
+/* Gestalt proximity: when the space between two elevated surfaces is smaller than
+   the space inside them, they read as one surface with internal rules. At 16px
+   between and 24px within, twenty cards read as a striped column rather than as
+   twenty separable decisions — which directly undercuts "one question per card". */
+.rv-list { display: grid; gap: var(--s7); }
 
+/* One interval for the whole stack. The card previously had four different
+   vertical rhythms in 400px of height, set by four margin-bottom declarations that
+   nobody could hold in their head, plus a negative margin on the main figure to
+   compensate for the mismatch it caused. A grid gap replaces all five. */
 .rc {
+  display: grid; gap: var(--s6);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-panel);
@@ -175,14 +186,13 @@
 
 .rc-top {
   display: flex; align-items: flex-start; gap: var(--s6);
-  margin-bottom: var(--s5);
 }
 .rc-risk {
   order: 2; margin-left: auto; text-align: right; flex: none;
 }
 .rc-risk-amt {
-  display: block; font-family: var(--font-num); font-size: var(--fs-20);
-  font-weight: 500; letter-spacing: -0.03em; color: var(--state-risk);
+  display: block; font-family: var(--font-num); font-size: var(--fig-md);
+  font-weight: 500; letter-spacing: var(--track-fig-md); color: var(--state-risk);
   line-height: 1;
 }
 .rc-risk-cap {
@@ -191,12 +201,14 @@
   letter-spacing: var(--tracking-caps);
 }
 .rc-id { min-width: 0; }
+/* The product name is the subject of the card's sentence and was reading third,
+   after the money figure and the main forecast. */
 .rc-id h3 {
-  font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.015em;
+  font-size: var(--fs-20); font-weight: 600; letter-spacing: var(--tracking-tight);
   color: var(--text-primary);
 }
 .rc-id p {
-  margin: 3px 0 0; font-size: var(--fs-12); color: var(--text-tertiary);
+  margin: var(--s1) 0 0; font-size: var(--fs-13); color: var(--text-tertiary);
 }
 .rc-stamp {
   order: 3; flex: none; align-self: center;
@@ -208,9 +220,9 @@
 }
 
 .rc-why {
-  margin: 0 0 var(--s6); font-size: var(--fs-14);
+  margin: 0; font-size: var(--fs-14);
   line-height: var(--lh-prose); color: var(--text-secondary);
-  max-width: 78ch;
+  max-width: var(--measure);
 }
 .rc-why .rc-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
@@ -223,23 +235,73 @@
 .rc-why b { color: var(--text-primary); font-weight: 600; }
 
 /* ---- the sparkline ---------------------------------------------------- */
-.rc-chart { margin-bottom: var(--s6); }
+/* The fan is the motif and it was the most cramped element on the card: 63 data
+   points in 68px, boxed in a bordered well, reading as a thumbnail beside the text
+   rather than as the subject. Bleeding it to the card edges and giving it half
+   again the height makes it the thing you look at. .rc has overflow:hidden so the
+   card radius still clips it, and .rc::before is absolutely positioned so the tone
+   edge still paints over the bleed. */
+.rc-chart { margin-inline: calc(var(--s7) * -1); }
 .spark {
-  width: 100%; height: 68px; display: block;
-  background: var(--bg-inset); border: 1px solid var(--border-subtle);
-  border-radius: var(--r-card);
+  width: 100%; height: 104px; display: block;
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
 }
-.spark-band { fill: rgba(var(--forecast-rgb) / 0.16); stroke: none; }
+/* `preserveAspectRatio="none"` stretches a 300-unit viewBox across a ~600px card,
+   so the x scale is about 2x while y stays 1x — every stroke painted twice as thick
+   on horizontal runs as on vertical ones, which is why the line read as sketchy
+   rather than instrument-grade. `non-scaling-stroke` is exactly the SVG feature for
+   this, and it leaves the fills alone. */
+.spark-hist, .spark-fc, .spark-now { vector-effect: non-scaling-stroke; }
+
+/* ---- the fan: one object, one rendering, on every surface that draws it -----
+
+   Three nested levels at chart.js's own alphas, each filled with the shared
+   gradient so the band fades as it widens. That fade is not decoration — it is
+   what the data says. The further into the future, the less the model knows, and
+   a band that dissolves towards the horizon states that without a legend.
+
+   The gradient carries opacity only; the per-level alpha rides on fill-opacity,
+   which multiplies with it. That way one gradient definition serves all six band
+   paths across two chart types and both themes. */
+.fan-stop-near { stop-color: rgb(var(--forecast-rgb)); stop-opacity: 1; }
+.fan-stop-far  { stop-color: rgb(var(--forecast-rgb)); stop-opacity: 0.42; }
+
+.fan-50, .fan-80, .fan-98,
+.cc-50, .cc-80, .cc-98 { stroke: none; fill: url(#fanFade); }
+.fan-50, .cc-50 { fill-opacity: 0.30; }
+.fan-80, .cc-80 { fill-opacity: 0.19; }
+.fan-98, .cc-98 { fill-opacity: 0.11; }
+
+/* Everything right of the origin is prediction. Making that a property of the
+   region does more work than a line does, because a reader does not have to
+   notice a boundary to get it. */
+.fan-future { fill: rgb(var(--forecast-rgb)); opacity: 0.045; }
+
+/* The hinge the whole chart is a claim about. A background-coloured halo punches
+   it out of the band so it stays legible where the fan is densest. */
+.spark-last { fill: var(--series-actual); stroke: var(--bg-inset); stroke-width: 1.5; }
+.cc-last { fill: var(--series-actual); stroke: var(--bg-surface); stroke-width: 1.5; }
+
+.cc-prior {
+  fill: none; stroke: var(--series-prior); stroke-width: 1.25; stroke-dasharray: 1 3;
+}
+.rc-chart-key .k-prior { background: var(--series-prior); }
 .spark-hist { fill: none; stroke: var(--series-actual); stroke-width: 1.6; }
 .spark-fc {
   fill: none; stroke: var(--series-forecast); stroke-width: 1.8;
   stroke-dasharray: 4 3;
 }
-.spark-now { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 2; }
+/* The origin belongs to the forecast, not to the gridline furniture: everything to
+   its right is prediction, and a grey dash said "axis tick". */
+.spark-now { stroke: rgb(var(--forecast-rgb)); stroke-opacity: 0.55; stroke-width: 1; }
 .rc-chart-key {
   display: flex; gap: var(--s6); margin-top: var(--s4);
-  font-size: var(--fs-11); color: var(--text-tertiary);
+  padding-inline: var(--s7);          /* give the bled chart its inset back */
+  font-size: var(--fs-11); color: var(--text-tertiary); flex-wrap: wrap;
 }
+.cat-chartbox .rc-chart-key { padding-inline: 0; }
 .rc-chart-key i {
   display: inline-block; width: 14px; height: 3px; border-radius: 2px;
   margin-right: var(--s3); vertical-align: 0.15em;
@@ -251,8 +313,8 @@
 /* ---- the four figures ------------------------------------------------- */
 .rc-figs {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: var(--s5); margin-bottom: var(--s6);
-  padding: var(--s5) 0; border-top: 1px solid var(--border-subtle);
+  gap: var(--s5);
+  padding: var(--s6) 0; border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
 }
 .rc-fig { display: grid; gap: 3px; align-content: start; }
@@ -261,21 +323,33 @@
   text-transform: uppercase; letter-spacing: var(--tracking-caps);
 }
 .rc-fig-val {
-  font-family: var(--font-num); font-size: var(--fs-20); font-weight: 500;
-  letter-spacing: -0.03em; color: var(--text-primary); line-height: 1.1;
+  font-family: var(--font-num); font-size: var(--fig-md); font-weight: 500;
+  letter-spacing: var(--track-fig-md); color: var(--text-primary); line-height: 1.1;
 }
+/* JetBrains Mono is in this product for one stated reason: guaranteed column
+   alignment of digits. A word has no column to align to, so "Good" at 20px mono was
+   paying the legibility cost for none of the benefit and read as a status code
+   rather than a judgement. */
+.rc-fig-word {
+  font-family: var(--font-ui); font-size: var(--fig-md); font-weight: 600;
+  letter-spacing: -0.01em; color: var(--text-primary); line-height: 1.1;
+}
+/* The unit is not decoration — "units" versus a currency amount is the
+   accuracy-versus-economics distinction the whole product argues about — and it was
+   the least legible text on the card: 11px monospace in the palest colour. */
 .rc-fig-val small {
-  font-size: var(--fs-11); font-weight: 400; color: var(--text-tertiary);
-  margin-left: 4px; letter-spacing: 0;
+  font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 400;
+  color: var(--text-secondary); margin-left: var(--s2); letter-spacing: 0;
 }
 .rc-fig-sub { font-size: var(--fs-11); color: var(--text-tertiary); line-height: 1.45; }
 /* The main figure is the one the buttons act on, so it gets the accent well. */
 .rc-fig-main {
-  padding: var(--s4) var(--s5); margin: calc(var(--s4) * -1) 0;
+  padding: var(--s5); margin: 0;
   background: rgba(var(--forecast-rgb) / 0.06);
   border-radius: var(--r-card);
 }
-.rc-fig-main .rc-fig-val { font-size: 26px; }
+.rc-fig-main .rc-fig-val { font-size: var(--fig-lg); font-weight: 600;
+  letter-spacing: var(--track-fig-lg); }
 .rc-up { color: var(--state-excess); }
 .rc-down { color: var(--state-risk); }
 .rc-flat { color: var(--text-secondary); }
@@ -295,7 +369,7 @@
 .btn-quiet:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 .rc-more, .link-btn {
   margin-left: auto; background: none; border: 0; cursor: pointer;
-  color: var(--series-forecast); font-size: var(--fs-12);
+  color: var(--ui-accent); font-size: var(--fs-12);
   text-decoration: underline; text-underline-offset: 3px;
   text-decoration-thickness: 1px; padding: var(--s3);
 }
@@ -378,7 +452,7 @@
 .rv-empty h3 { font-size: var(--fs-20); letter-spacing: -0.02em; }
 .rv-empty p {
   margin: var(--s4) auto var(--s6); font-size: var(--fs-14);
-  color: var(--text-secondary); max-width: 46ch; line-height: var(--lh-prose);
+  color: var(--text-secondary); max-width: var(--measure-short); line-height: var(--lh-prose);
 }
 
 /* ============================================================ orientation */
@@ -420,7 +494,7 @@
 }
 .gloss-item p {
   margin: 0; font-size: var(--fs-13); line-height: var(--lh-prose);
-  color: var(--text-secondary); max-width: 76ch;
+  color: var(--text-secondary); max-width: var(--measure);
 }
 
 /* ============================================== plain wording on the sheets */
@@ -435,7 +509,7 @@
 }
 .sheet-intro p {
   margin: 0; font-size: var(--fs-14); line-height: var(--lh-prose);
-  color: var(--text-secondary); max-width: 76ch;
+  color: var(--text-secondary); max-width: var(--measure);
 }
 .sheet-intro p + p { margin-top: var(--s4); }
 .sheet-intro b { color: var(--text-primary); font-weight: 500; }
@@ -497,6 +571,10 @@
   height: var(--chrome-h); padding: 0 var(--s5) 0 var(--s6);
   border-bottom: 1px solid var(--border-subtle);
 }
+/* The glowing gradient dot that used to be the logo sat eight pixels from the
+   engine-status LED and was visually identical to it, so the one piece of brand in
+   the chrome read as a second status light. */
+.brand-mark span { all: unset; }
 .sb-brand .brand-mark { flex: 1; min-width: 0; overflow: hidden; }
 .sb-collapse {
   flex: none; width: 26px; height: 26px; display: grid; place-items: center;
@@ -533,8 +611,8 @@
 }
 .sb-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .sb-item[aria-selected="true"] {
-  background: rgba(var(--forecast-rgb) / 0.11);
-  color: var(--series-forecast); font-weight: 500;
+  background: rgba(var(--ui-accent-rgb) / 0.11);
+  color: var(--ui-accent); font-weight: 500;
 }
 .sb-item[aria-selected="true"] svg { opacity: 1; }
 
@@ -625,7 +703,7 @@
    stopped scanning and are looking at one thing. */
 
 #view-products {
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: var(--rail-w) 1fr;
   overflow: hidden; min-height: 0;
 }
 
@@ -642,7 +720,7 @@
   outline: none;
   transition: border-color var(--t-feedback) var(--ease), box-shadow var(--t-feedback) var(--ease);
 }
-.cat-search input:focus { border-color: var(--series-forecast); box-shadow: var(--ring-focus); }
+.cat-search input:focus { border-color: var(--ui-accent); box-shadow: var(--ring-focus); }
 .cat-search input::placeholder { color: var(--text-tertiary); }
 .cat-search input::-webkit-search-cancel-button { display: none; }
 
@@ -657,8 +735,8 @@
 }
 .cat-filters button:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .cat-filters button[aria-pressed="true"] {
-  background: rgba(var(--forecast-rgb) / 0.12); border-color: var(--series-forecast);
-  color: var(--series-forecast); font-weight: 500;
+  background: rgba(var(--ui-accent-rgb) / 0.12); border-color: var(--ui-accent);
+  color: var(--ui-accent); font-weight: 500;
 }
 .cat-flagged[aria-pressed="true"] {
   background: var(--tint-risk) !important; border-color: var(--state-risk) !important;
@@ -680,8 +758,8 @@
 }
 .cat-row:hover { background: var(--bg-hover); }
 .cat-row[aria-current="true"] {
-  background: rgba(var(--forecast-rgb) / 0.1);
-  box-shadow: inset 2px 0 0 var(--series-forecast);
+  background: rgba(var(--ui-accent-rgb) / 0.1);
+  box-shadow: inset 2px 0 0 var(--ui-accent);
 }
 .cat-row[data-removed="true"] .cat-row-name { text-decoration: line-through; opacity: 0.6; }
 .cat-row-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
@@ -706,7 +784,7 @@
 .cat-empty { padding: var(--s7) var(--s5); font-size: var(--fs-12); color: var(--text-tertiary); }
 .cat-more {
   border: 0; border-top: 1px solid var(--border-subtle); background: transparent;
-  color: var(--series-forecast); font-size: var(--fs-12); padding: var(--s4);
+  color: var(--ui-accent); font-size: var(--fs-12); padding: var(--s4);
   cursor: pointer; text-align: center;
 }
 .cat-more:hover { background: var(--bg-hover); }
@@ -716,14 +794,14 @@
 
 /* ---- the detail pane --------------------------------------------------- */
 .cat-main { display: grid; grid-template-rows: auto 1fr; min-height: 0; overflow: hidden; }
-.cat-detail { overflow-y: auto; min-height: 0; padding: var(--s8) var(--s8) var(--s9); }
+.cat-detail { overflow-y: auto; min-height: 0; padding: var(--s8) var(--gutter) var(--s9); }
 .cat-detail > * { max-width: 880px; }
 
 .cat-head {
   display: flex; align-items: flex-start; gap: var(--s6);
   margin-bottom: var(--s6); flex-wrap: wrap;
 }
-.cat-head h2 { font-size: 24px; letter-spacing: -0.025em; }
+.cat-head h2 { font-size: var(--fs-28); letter-spacing: var(--tracking-tight); }
 .cat-head p { margin: var(--s3) 0 0; font-size: var(--fs-13); color: var(--text-tertiary); }
 .cat-head-act { margin-left: auto; display: flex; align-items: center; gap: var(--s4); }
 .btn-danger {
@@ -766,16 +844,20 @@
   border-radius: var(--r-card);
 }
 .cc-grid { stroke: var(--border-subtle); stroke-width: 1; }
+/* --text-tertiary measures 3.87:1 on --bg-surface (dark) and 3.86:1 (light) — below
+   the 4.5:1 AA threshold for text. These are the numbers that give every chart its
+   scale, so they were the lowest-contrast text in the application. --text-secondary
+   gives 7.18:1 dark and 6.42:1 light. The token itself is NOT changed: it is read by
+   name in dozens of non-chart places and by the canvas renderers. */
 .cc-tick {
-  fill: var(--text-tertiary); font-size: 10px; font-family: var(--font-num);
+  fill: var(--text-secondary); font-size: var(--fs-10); font-family: var(--font-num);
   text-anchor: end;
 }
 .cc-start { text-anchor: start; }
 .cc-end { text-anchor: end; }
-.cc-band { fill: rgba(var(--forecast-rgb) / 0.17); }
 .cc-hist { fill: none; stroke: var(--series-actual); stroke-width: 1.6; }
 .cc-fc { fill: none; stroke: var(--series-forecast); stroke-width: 2; stroke-dasharray: 5 3; }
-.cc-now { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+.cc-now { stroke: rgb(var(--forecast-rgb)); stroke-opacity: 0.55; stroke-width: 1; }
 .cc-nowlab {
   fill: var(--text-tertiary); font-size: 9px; text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -815,7 +897,7 @@
 .cat-blank-mark { font-size: 40px; color: var(--border-strong); line-height: 1; }
 .cat-blank h3 { font-size: var(--fs-20); letter-spacing: -0.02em; }
 .cat-blank p {
-  margin: 0; max-width: 42ch; font-size: var(--fs-14);
+  margin: 0; max-width: var(--measure-short); font-size: var(--fs-14);
   color: var(--text-secondary); line-height: var(--lh-prose);
 }
 
@@ -861,7 +943,7 @@
   padding: var(--s4) var(--s5); font-size: var(--fs-13); color: var(--text-primary);
   outline: none;
 }
-.ap-text:focus { border-color: var(--series-forecast); box-shadow: var(--ring-focus); }
+.ap-text:focus { border-color: var(--ui-accent); box-shadow: var(--ring-focus); }
 .ap-text::placeholder { color: var(--text-tertiary); }
 
 .ap-preview {
@@ -871,17 +953,17 @@
   background: var(--tint-forecast); border-radius: var(--r-input);
 }
 .ap-preview:empty { display: none; }
-.ap-preview b { color: var(--series-forecast); font-weight: 600; }
+.ap-preview b { color: var(--ui-accent); font-weight: 600; }
 
-.rc-fig-val.rc-pending { color: var(--text-tertiary); font-size: var(--fs-16); }
+.rc-fig-word.rc-pending { color: var(--text-tertiary); font-size: var(--fs-16); }
 
 /* ================================================= review: keyboard + summary */
 
 /* The keyboard ring. Only ever painted once a key has been pressed, so it cannot
    read as a stuck selection on load. */
 .rc[data-focus="true"] {
-  border-color: var(--series-forecast);
-  box-shadow: 0 0 0 3px rgba(var(--forecast-rgb) / 0.22), var(--e2);
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px rgba(var(--ui-accent-rgb) / 0.22), var(--e2);
 }
 .rc[data-focus="true"]::before { width: 4px; }
 
@@ -943,7 +1025,7 @@
 .cp-name b { color: var(--text-tertiary); font-weight: 400; }
 .cp-link {
   background: none; border: 0; padding: 0; cursor: pointer;
-  color: var(--series-forecast); text-decoration: underline;
+  color: var(--ui-accent); text-decoration: underline;
   text-underline-offset: 2px; text-decoration-thickness: 1px;
   font: inherit;
 }

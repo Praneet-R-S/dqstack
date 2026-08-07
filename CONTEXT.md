@@ -618,6 +618,96 @@ the evidence the estimate was built from.
 App code 108.6 KB gzipped against the 250 KB budget; 94 tests pass; zero
 horizontal overflow across all six views.
 
+### C7. Visual identity: the fan — DONE
+
+Brief: make the aesthetics better, with an identity related to demand and supply.
+Run as a six-lens parallel audit of the CSS, markup and render code (identity,
+colour, typography, spacing, surface, data-viz). Four lenses reported; the colour
+and surface agents stalled and were stopped, so their ground was covered by hand —
+the contrast table below is measured, not delegated.
+
+**The motif is the uncertainty fan, and it was chosen because it is already the
+product's own geometry** rather than a metaphor applied to it: an origin rule with a
+cone opening to the right of it is what `chart.js`, `grid.js`, `review.js` and
+`catalog.js` all already draw. Rejected alternatives: shelf strata, the
+underage/overage balance, the weekly demand rhythm.
+
+- **The mark** is that geometry at 16px — a vertical rule plus two nested wedges
+  (the 50% and 98% bands). It replaces a glowing gradient dot that sat eight pixels
+  from the engine-status LED and was visually indistinguishable from it. It survives
+  the sidebar collapsing to a rail, which is what keeps the icon rail feeling like
+  the product.
+- **A favicon** at last, same geometry, one hue at two values — a favicon cannot
+  read custom properties or know the tab strip's theme, so ink-plus-accent would
+  lose its rule on a dark strip.
+- **The film grain is deleted, not replaced.** It was declared "the only decorative
+  element in the interface", said nothing about the domain, and at 0.020 opacity was
+  invisible on the panels this is actually used on. The signature slot now holds
+  `--cone-wash`: a conic-gradient wedge sharing the mark's origin-and-widening
+  geometry at a sixth of its alpha, on the scrolling surfaces only.
+- **The fan itself is now one object with one rendering.** The two inline-SVG
+  surfaces drew a single flat p10–p90 slab while `chart.js` drew three nested bands;
+  they now all draw the same three levels at the same alphas. Each band is filled
+  from a **shared gradient that fades towards the horizon** — not decoration: the
+  further into the future, the less the model knows. Verified in-browser that CSS
+  custom properties inside `<stop>` re-resolve on theme change and that cross-SVG
+  `url(#id)` references paint, so one hidden `<defs>` serves every chart in both
+  themes.
+
+**Blue meant two things.** `--series-forecast` was simultaneously "this is a
+predicted quantity" (read by both canvases) and the colour of every link, focus
+ring, selected row and primary button. A hue that means two unrelated things cannot
+be learned, so `--ui-accent` was added — a new name with a byte-identical value, so
+no pixel moved — and 38 interaction surfaces were repointed to it by hand, selector
+by selector, leaving every data surface on `--series-forecast`. This is the
+precondition for colour meaning anything domain-wise, not a substitute for it.
+
+**Three real rendering bugs the audit found:**
+
+1. **Sparkline strokes were distorted ~2×.** `preserveAspectRatio="none"` stretches
+   a 300-unit viewBox across a ~600px card, so every stroke painted twice as thick
+   horizontally as vertically — which is why the line read as sketchy.
+   `vector-effect: non-scaling-stroke`.
+2. **Chart axis labels failed WCAG AA in both themes.** `--text-tertiary` measures
+   3.87:1 dark / 3.86:1 light on the surfaces the charts sit on — the numbers that
+   give every chart its scale were the lowest-contrast text in the product. Moved to
+   `--text-secondary` (7.80:1 / 5.66:1). The token itself was *not* revalued: it is
+   read by name in dozens of non-chart places and by both canvases.
+3. **The grid micro-fan double-encoded uncertainty, backwards.** Band opacity was
+   multiplied by confidence on top of band *height* already encoding spread, so the
+   widest intervals rendered both taller and paler — the riskiest rows were the
+   hardest to see in a grid scanned fifty rows at a time.
+
+**Typography** gained a figure scale (`--fig-xl/lg/md` with paired tracking): seven
+hero numerals had used six sizes and five tracking values, so no two panels agreed
+on how big "the answer" is. `--fs-24` closes the 20→28 hole that four literals were
+filling. Words no longer render in the numeral face — `.rc-fig-word` splits "Good" /
+"Fair" out of JetBrains Mono, which exists here for digit alignment a word cannot
+use. The serif went from one orphaned selector to carrying every section heading on
+the three reference views, making the document-versus-instrument split real.
+
+**Spacing**: one `--gutter` (the left content edge used to move 24→32→48px on every
+navigation, and `.sheet` had no `margin-inline`, so on a wide screen the reference
+views sat hard left while Today was centred); one `--rail-w` for both list-beside-
+detail views; stacked-list gaps raised above their own card padding, because when
+the space between elevated surfaces is smaller than the space inside them they fuse
+into a ribbon; and `.rc` became a grid with a single gap, replacing four
+margin-bottoms and a negative-margin hack that existed to compensate for them.
+
+**The fan was the most cramped element on the card** — 63 data points in 68px, boxed
+in a bordered well, reading as a thumbnail beside the text rather than as the
+subject. It now bleeds to the card edges at 104px.
+
+Also: prior-version ghost and a 1/2/5 tick ladder on the product chart (a pure
+power-of-ten ladder sent a peak of 210 to a top of 300, wasting a third of the
+plot); the last-actual dot, which the whole chart is a claim about and which was
+invisible; table headers out of the numeral face; and measures for two prose blocks
+that had none and ran ~200 characters per line.
+
+**Measured: 34 contrast checks across both themes, 0 failures. 94 tests pass. Zero
+horizontal overflow across all six views in both themes. 114.5 KB gzipped against
+the 250 KB budget.**
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -654,6 +744,10 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **`--ui-accent` is for interaction; `--series-forecast` is for data.** They share
+  a value today. Do not collapse them back.
+- **Chart tick labels must use `--text-secondary`.** `--text-tertiary` fails AA on
+  the surfaces charts sit on, and revaluing the token is not the fix.
 - **A commit must not clear the state that records what was done.** Track
   committed separately from reviewed, or finishing the work undoes it.
 - **Do not claim a write that does not happen.** There is no system of record; the

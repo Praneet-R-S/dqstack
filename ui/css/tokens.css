@@ -65,6 +65,20 @@
   --state-attention: #C99A2E;
   --state-ok:        #14A99A;
 
+  /* ---- the interactive accent, separated from the data accent ------------
+     --series-forecast means "this is a predicted quantity" and is read by
+     chart.js and grid.js. It was *also* the colour of every link, focus ring,
+     selected row, pressed chip and primary button, so blue meant both "demand"
+     and "click me" — and a hue that means two unrelated things cannot be learned.
+
+     --ui-accent is a new name with a byte-identical value, so nothing changes
+     visually today and nothing the canvases resolve is touched. What it buys is
+     the ability to move one of the two roles later without dragging the other
+     with it. Purely interactive surfaces point here; anything depicting a
+     forecast keeps pointing at --series-forecast. */
+  --ui-accent:     #4C6FFF;
+  --ui-accent-rgb: 76 111 255;
+
   /* Read by the canvas renderers via rgba(var(--x-rgb) / a). Space-separated
      because that is the form the modern rgba() syntax takes. */
   --forecast-rgb: 76 111 255;
@@ -78,8 +92,8 @@
   --tint-excess:   rgba(var(--excess-rgb) / 0.13);
   --tint-override: rgba(var(--override-rgb) / 0.13);
 
-  /* One gradient, used on primary actions and the brand mark only. A gradient
-     that appears in more than two places stops being an accent. */
+  /* One gradient, used on primary actions only. It is built from --ui-accent
+     rather than --series-forecast because a button is a control, not a series. */
   --grad-accent: linear-gradient(180deg, #5C7CFF 0%, #3E5FF0 100%);
 
   /* ---- type ------------------------------------------------------------- */
@@ -99,8 +113,29 @@
   --fs-28: 28px;  /* executive headings */
   --fs-40: 40px;  /* executive display figures */
 
+  --fs-24: 24px;  /* closes the 20 -> 28 gap that four literals were filling */
+
+  /* ---- the figure scale ------------------------------------------------
+     This is a numbers application whose seven "hero figure" surfaces used six
+     different sizes and five tracking values, so no two panels agreed on how big
+     "the answer" is. Three steps, each with the tracking that size actually
+     wants: JetBrains Mono needs progressively less negative tracking as it gets
+     smaller, and below ~24px a weight of 600 reads level with the 600 sans
+     headings beside it while 500 reads underweight. */
+  --fig-xl: 40px;  --track-fig-xl: -0.03em;
+  --fig-lg: 28px;  --track-fig-lg: -0.03em;
+  --fig-md: 20px;  --track-fig-md: -0.02em;
+
   --lh-dense: 1.35;
   --lh-prose: 1.6;
+  --lh-prose-sm: 1.7;   /* 11-12px prose needs more leading, not the same */
+  --lh-caption: 1.45;   /* replaces a 1.4 / 1.45 / 1.5 trio doing one job */
+
+  /* One measure for flowing prose. Ten values between 42ch and 82ch had
+     accumulated, several within 2ch of each other — a difference no reader can
+     perceive and every new component reinvents. */
+  --measure: 72ch;
+  --measure-short: 44ch;
 
   /* Uppercase micro-labels appear in about a dozen places and were each
      re-declaring the same three properties. */
@@ -111,7 +146,17 @@
   --s1: 2px;  --s2: 4px;  --s3: 6px;  --s4: 8px;  --s5: 12px;
   --s6: 16px; --s7: 24px; --s8: 32px; --s9: 48px;
 
+  /* ---- the page frame --------------------------------------------------
+     Four unrelated gutters (16/24/32/48) meant the left content edge moved on
+     every view switch, which is the single biggest reason the app read as three
+     applications stitched together. --rail-w unifies the two "list beside
+     detail" views, whose lists held the same object at two different widths. */
+  --gutter: 32px;
+  --gutter-tight: 16px;
+  --rail-w: 288px;
+
   /* ---- radius. Zero inside grid cells: rounding blurs alignment. -------- */
+  --r-sm: 4px;      /* the de-facto sixth radius, in five places, now named */
   --r-input: 6px;
   --r-card:  10px;
   --r-panel: 14px;
@@ -130,7 +175,7 @@
   --e3: 0 24px 56px rgba(0, 0, 0, 0.55),
         0 2px 8px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 var(--border-hair);
-  --ring-focus: 0 0 0 3px rgba(var(--forecast-rgb) / 0.32);
+  --ring-focus: 0 0 0 3px rgba(var(--ui-accent-rgb) / 0.32);
 
   /* ---- motion. Reserved for state changes that need confirmation. ------- */
   --t-feedback: 120ms;
@@ -144,7 +189,7 @@
   --cell-fs: 12px;
 
   --chrome-h: 52px;
-  --worklist-w: 292px;
+  --worklist-w: var(--rail-w);
   --dock-h: 348px;
 }
 
@@ -178,6 +223,9 @@
   --state-excess:    #0B7D71;
   --state-attention: #96690B;
   --state-ok:        #0B7D71;
+
+  --ui-accent:     #3050E8;
+  --ui-accent-rgb: 48 80 232;
 
   --forecast-rgb: 48 80 232;
   --risk-rgb:     192 57 43;

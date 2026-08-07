@@ -4,17 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DQ-Stack — Demand Planning</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5.25 1.75V14.25' stroke='%234C6FFF' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M5.25 8 L14.75 2.75 V13.25 Z' fill='%234C6FFF' fill-opacity='0.5'/%3E%3Cpath d='M5.25 8 L14.75 5.4 V10.6 Z' fill='%234C6FFF'/%3E%3C/svg%3E">
 <meta name="description" content="Probabilistic demand forecasting and inventory decision platform. Uncertainty, data health, and economic consequence visible on every number.">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="css/tokens.css?v=eac8bed0">
-<link rel="stylesheet" href="css/app.css?v=e49a8cda">
-<link rel="stylesheet" href="css/simple.css?v=ae4b57e3">
+<link rel="stylesheet" href="css/tokens.css?v=bce1b7bc">
+<link rel="stylesheet" href="css/app.css?v=a0dfba8a">
+<link rel="stylesheet" href="css/simple.css?v=2c262179">
 </head>
 <body>
+
+<!-- Shared gradient definitions for every inline SVG chart. Kept out of flow with
+     absolute positioning and zero size: `display:none` on an SVG makes its <defs>
+     unreachable in some engines. -->
+<svg aria-hidden="true" focusable="false" class="svg-defs">
+  <defs>
+    <!-- The fan fades as it widens, which is literally what it means: the further
+         into the future, the less we know. -->
+    <linearGradient id="fanFade" x1="0" y1="0" x2="1" y2="0">
+      <stop class="fan-stop-near" offset="0"/>
+      <stop class="fan-stop-far" offset="1"/>
+    </linearGradient>
+  </defs>
+</svg>
+
 <div id="app">
 
   <!-- =========================================================== sidebar
@@ -29,7 +45,13 @@
        tool buttons keep `data-menu` so they reuse the same dispatcher. -->
   <aside class="sidebar" id="sidebar">
     <div class="sb-brand">
-      <span class="brand-mark">DQ<span>·</span>STACK</span>
+      <!-- The mark is the product's own geometry, not a metaphor applied to it: a
+           vertical origin rule with a fan opening to the right of it. Those are
+           exactly the two gestures chart.js draws, and the fan is already
+           load-bearing in four independent renderers. The inner wedge is the
+           50% band, the outer the 98% — the same nesting the charts use. -->
+      <svg class="mark" viewBox="0 0 16 16" aria-hidden="true" fill="none"><path d="M5.25 1.75V14.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M5.25 8 L14.75 2.75 V13.25 Z" fill="var(--series-forecast)" fill-opacity="0.9"/><path d="M5.25 8 L14.75 5.4 V10.6 Z" fill="var(--series-forecast)"/></svg>
+      <span class="brand-mark">DQ&middot;STACK</span>
       <button class="sb-collapse" id="sbCollapse" aria-label="Collapse the sidebar"
               aria-expanded="true">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor"
@@ -704,11 +726,11 @@ FROM series GROUP BY 1 ORDER BY series DESC</textarea>
 <script src="js/plain.js?v=6cf59f73"></script>
 <script src="js/duck.js?v=64beaf16"></script>
 <script src="js/util.js?v=251bf016"></script>
-<script src="js/grid.js?v=be833f18"></script>
+<script src="js/grid.js?v=01971e8f"></script>
 <script src="js/chart.js?v=9922be45"></script>
 <script src="js/views.js?v=75c048ff"></script>
-<script src="js/catalog.js?v=04fd7a06"></script>
-<script src="js/review.js?v=c9b414de"></script>
+<script src="js/catalog.js?v=62bb45a7"></script>
+<script src="js/review.js?v=666b3caa"></script>
 <script src="js/app.js?v=e6c3c556"></script>
 </body>
 </html>

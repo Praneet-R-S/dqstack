@@ -147,7 +147,7 @@ window.Review = (() => {
      Inline SVG rather than canvas: one of these per card, they must survive
      being re-rendered on every action, and at this size the fan reads better as
      a filled path than as the grid's 40x14 glyph. */
-  function spark(s, w = 300, h = 68) {
+  function spark(s, w = 300, h = 104) {
     const HIST = 35;
     const hist = s.hist.slice(-HIST);
     const fan = s.fan;                     // 28 days x 7 quantiles
@@ -159,28 +159,47 @@ window.Review = (() => {
     hi = hi || 1;
 
     const x = (i) => (w * i) / (n - 1);
-    const y = (v) => h - 4 - ((h - 12) * v) / hi;
+    const y = (v) => h - 5 - ((h - 14) * v) / hi;
 
     const histLine = hist.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
 
     const j0 = hist.length - 1;
-    const up = [], down = [], mid = [];
-    // Start the band at the last actual so the forecast visibly continues the line.
-    up.push(`M${x(j0).toFixed(1)},${y(hist[j0] ?? 0).toFixed(1)}`);
-    fan.forEach((f, k) => {
-      const xi = x(j0 + 1 + k);
-      up.push(`L${xi.toFixed(1)},${y(f[5]).toFixed(1)}`);
-      down.push(`${xi.toFixed(1)},${y(f[1]).toFixed(1)}`);
-      mid.push(`${k ? "L" : "M"}${xi.toFixed(1)},${y(f[Q50]).toFixed(1)}`);
-    });
-    const area = up.join("") + "L" + down.reverse().join("L") + "Z";
+    const anchorY = y(hist[j0] ?? 0);
+
+    /* Three nested bands, not one slab.
+
+       This surface used to draw a single p10-p90 rectangle-ish shape, while
+       chart.js drew three nested levels for the same statistical object — so the
+       chart a planner sees twenty-four times a screen was the least honest of the
+       four. Nesting is what gives a fan its shape: the dense core reads as
+       "probably this" and the pale edge as "but it could be that", pre-attentively
+       and without reading an axis.
+
+       The quantile pairs and alphas are chart.js's, exactly, so the two agree. */
+    const LEVELS = [[0, 6, "fan-98"], [1, 5, "fan-80"], [2, 4, "fan-50"]];
+    const bands = LEVELS.map(([lo, up, cls]) => {
+      const top = [`M${x(j0).toFixed(1)},${anchorY.toFixed(1)}`];
+      const bot = [];
+      fan.forEach((f, k) => {
+        const xi = x(j0 + 1 + k);
+        top.push(`L${xi.toFixed(1)},${y(f[up]).toFixed(1)}`);
+        bot.push(`${xi.toFixed(1)},${y(f[lo]).toFixed(1)}`);
+      });
+      return `<path d="${top.join("")}L${bot.reverse().join("L")}Z" class="${cls}"/>`;
+    }).join("");
+
+    const mid = fan.map((f, k) =>
+      `${k ? "L" : "M"}${x(j0 + 1 + k).toFixed(1)},${y(f[Q50]).toFixed(1)}`).join("");
 
     return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"
-                 role="img" aria-label="Sales for the last ${HIST} days and the forecast for the next 28, with its likely range">
-      <path d="${area}" class="spark-band"/>
+                 role="img" aria-label="Sales for the last ${hist.length} days and the forecast for the next ${fan.length}, with its likely range">
+      <rect class="fan-future" x="${x(j0).toFixed(1)}" y="0"
+            width="${(w - x(j0)).toFixed(1)}" height="${h}"/>
+      ${bands}
       <path d="${histLine}" class="spark-hist"/>
-      <path d="${mid.join("")}" class="spark-fc"/>
+      <path d="${mid}" class="spark-fc"/>
       <line x1="${x(j0).toFixed(1)}" y1="2" x2="${x(j0).toFixed(1)}" y2="${h - 2}" class="spark-now"/>
+      <circle cx="${x(j0).toFixed(1)}" cy="${anchorY.toFixed(1)}" r="2.6" class="spark-last"/>
     </svg>`;
   }
 
@@ -243,7 +262,7 @@ window.Review = (() => {
         </div>
         <div class="rc-fig">
           <span class="rc-fig-cap">Versus last week</span>
-          <span class="rc-fig-val rc-${ch ? ch.dir : "flat"}">${ch ? e(ch.word) : "—"}</span>
+          <span class="rc-fig-word rc-${ch ? ch.dir : "flat"}">${ch ? e(ch.word) : "—"}</span>
           <span class="rc-fig-sub">${e(changeNote(ch))}</span>
         </div>
         <div class="rc-fig" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
@@ -253,7 +272,7 @@ window.Review = (() => {
         </div>
         <div class="rc-fig">
           <span class="rc-fig-cap">Data quality</span>
-          <span class="rc-fig-val rc-q-${q.tone}">${e(q.word)}</span>
+          <span class="rc-fig-word rc-q-${q.tone}">${e(q.word)}</span>
           <span class="rc-fig-sub">confidence ${e(conf.word.toLowerCase())}</span>
         </div>
       </div>

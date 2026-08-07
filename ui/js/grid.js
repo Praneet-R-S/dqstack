@@ -300,7 +300,11 @@ const Grid = (() => {
       for (let i = 1; i < up.length; i++) ctx.lineTo(sx(i), sy(up[i]));
       for (let i = lo.length - 1; i >= 0; i--) ctx.lineTo(sx(i), sy(lo[i]));
       ctx.closePath();
-      ctx.fillStyle = U.rgba(U.tk("--series-forecast"), alpha * (0.35 + 0.65 * conf));
+      // Spread is already encoded by the band's height — that is what a fan is.
+        // Multiplying opacity by confidence double-encoded it, and backwards: a
+        // wide interval rendered both taller and paler, so the rows carrying the
+        // most risk were the hardest to see in a grid scanned fifty rows at a time.
+        ctx.fillStyle = U.rgba(U.tk("--series-forecast"), alpha);
       ctx.fill();
     };
     band(p10, p90, 0.20);
