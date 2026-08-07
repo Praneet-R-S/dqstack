@@ -242,6 +242,69 @@ def measure_transfer() -> dict:
     }
 
 
+SERIES_COLUMNS: dict[str, str] = {
+    # identity / hierarchy
+    "id": "str", "item": "str", "store": "str", "dept": "str", "cat": "str",
+    "state": "str",
+    # Stage 1 diagnostics
+    "cls": "str", "health": "f4", "adi": "f4", "cv2": "f4", "abc": "str",
+    "xyz": "str", "censoredDays": "i4", "ooaDays": "i4",
+    "priceCompleteness": "f4", "ageWeeks": "i4",
+    # economics
+    "revenue": "f4", "price": "f4", "cost": "f4", "marginRate": "f4",
+    "shelfLife": "i4", "targetQ": "f4", "underage": "f4", "overage": "f4",
+    # Stage 7 decision
+    "orderUpTo": "f4",
+    # triage
+    "priority": "f4", "swing": "f4", "relWidth": "f4",
+}
+
+
+def series_table_arrow(bundle_path: Path | None = None) -> pa.Table:
+    """The scalar series attributes as Arrow, for DuckDB-WASM in the browser.
+
+    Deliberately derived from the same bundle the fallback path reads, so a query
+    answered by the browser's query engine and the same query answered by the
+    JavaScript fallback are comparing identical inputs. If the two paths disagreed
+    on the numbers, a query accelerator would be a correctness liability rather than
+    a performance win, and there is a test that checks they do not.
+
+    Nested per-series arrays (the fan, the history, the weight vector) are excluded.
+    They are render inputs, not query inputs — nothing filters or groups on them, and
+    a list column would multiply the transfer for no query benefit.
+    """
+    bundle_path = bundle_path or (UI_DATA / "bundle.json")
+    D = json.loads(bundle_path.read_text(encoding="utf-8"))
+    rows = D["series"]
+
+    cols: dict[str, pa.Array] = {}
+    for name, kind in SERIES_COLUMNS.items():
+        raw = [r.get(name) for r in rows]
+        if kind == "str":
+            cols[name] = pa.array([("" if v is None else str(v)) for v in raw], pa.string())
+        else:
+            arr = np.array([(np.nan if v is None else v) for v in raw], dtype="f8")
+            cols[name] = (
+                pa.array(np.nan_to_num(arr).astype("i4"), pa.int32()) if kind == "i4"
+                else pa.array(arr.astype("f4"), pa.float32())
+            )
+    # `mean` and `sd` are per-horizon vectors. Summed to horizon and first-week
+    # totals, which are the scalars a planner actually filters and sorts on. The
+    # horizon sd is deliberately not a column: adding daily variances would assume
+    # independence across days, which the model does not, and a wrong scalar in a
+    # query table is worse than an absent one.
+    m = [r.get("mean") or [] for r in rows]
+    cols["demandH"] = pa.array([float(sum(v)) for v in m], pa.float32())
+    cols["demandW1"] = pa.array([float(sum(v[:7])) for v in m], pa.float32())
+
+    # Reason codes arrive as a list per series; the browser filters on membership, so
+    # a delimited string plus DuckDB's `contains` beats shipping a list column.
+    cols["reasons"] = pa.array(
+        ["|" + "|".join(r.get("reasons") or []) + "|" for r in rows], pa.string()
+    )
+    return pa.table(cols)
+
+
 # ---------------------------------------------------------------- routes
 
 def _routes(store: Store) -> dict:
@@ -277,6 +340,9 @@ def _routes(store: Store) -> dict:
             return js({"detail": f"unknown series {sid}"}, 404)
         return 200, ARROW_MIME, to_ipc(tbl)
 
+    def series_arrow(_q):
+        return 200, ARROW_MIME, to_ipc(series_table_arrow())
+
     def benchmark(_q):
         return js(measure_transfer())
 
@@ -286,15 +352,36 @@ def _routes(store: Store) -> dict:
         "/rollup": rollup,
         "/health-by-class": health_by_class,
         "/forecast.arrow": forecast_arrow,
+        "/series.arrow": series_arrow,
         "/series/history.arrow": series_history,
         "/transfer-benchmark": benchmark,
     }
 
 
+UI_ROOT = UI_DATA.parent
+
+_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".wasm": "application/wasm",
+    ".map": "application/json",
+}
+
+
 def make_server(host: str = "127.0.0.1", port: int = 8000):
-    """A read-only HTTP server over the analytical store."""
+    """A read-only HTTP server over the analytical store, plus the workspace itself.
+
+    The static half is not a convenience. DuckDB-WASM is an ES module and its worker
+    is cross-origin, and a page opened from `file://` has a null origin, so the
+    browser refuses both the dynamic import and the worker instantiation. The
+    client-side query engine the spec calls "the single biggest perceived-performance
+    win" simply cannot exist without an origin, so the app has to be served.
+    """
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from urllib.parse import parse_qs, urlparse
+    from urllib.parse import parse_qs, unquote, urlparse
 
     store = Store()
     routes = _routes(store)
@@ -306,6 +393,9 @@ def make_server(host: str = "127.0.0.1", port: int = 8000):
             u = urlparse(self.path)
             fn = routes.get(u.path)
             if fn is None:
+                served = self._try_static(unquote(u.path))
+                if served:
+                    return
                 self._send(*_routes_404(routes))
                 return
             try:
@@ -315,12 +405,30 @@ def make_server(host: str = "127.0.0.1", port: int = 8000):
                 body = json.dumps({"detail": f"{type(e).__name__}: {e}"}).encode()
             self._send(code, mime, body)
 
+        def _try_static(self, path: str) -> bool:
+            """Serve ui/ with a path-traversal guard."""
+            rel = "index.html" if path in ("/", "") else path.lstrip("/")
+            target = (UI_ROOT / rel).resolve()
+            try:
+                target.relative_to(UI_ROOT.resolve())
+            except ValueError:
+                return False                       # escaped the ui/ root
+            if not target.is_file():
+                return False
+            mime = _MIME.get(target.suffix.lower(), "application/octet-stream")
+            self._send(200, mime, target.read_bytes())
+            return True
+
         def _send(self, code, mime, body):
             self.send_response(code)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(body)))
-            # The workspace may be opened from file://, which is a null origin.
             self.send_header("Access-Control-Allow-Origin", "*")
+            # DuckDB-WASM's threaded build needs SharedArrayBuffer, which browsers
+            # gate behind cross-origin isolation. Without these two headers it
+            # silently falls back to the slower single-threaded bundle.
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Cross-Origin-Embedder-Policy", "credentialless")
             self.end_headers()
             self.wfile.write(body)
 
@@ -411,6 +519,28 @@ def selftest() -> None:
         print(f"  GET {'/forecast.arrow':<32s} {code}  {len(body):>10,} bytes  {mime}")
         print(f"      round-trips to {tbl.num_rows:,} rows x {tbl.num_columns} columns")
 
+        code, mime, body = get("/series.arrow")
+        tbl = ipc.open_stream(io.BytesIO(body)).read_all()
+        assert code == 200 and mime == ARROW_MIME
+        print(f"  GET {'/series.arrow':<32s} {code}  {len(body):>10,} bytes  {mime}")
+        print(f"      the browser's DuckDB-WASM table: {tbl.num_rows:,} rows x "
+              f"{tbl.num_columns} columns")
+
+        # The static half exists so DuckDB-WASM has an origin; if it regresses, the
+        # client-side query engine silently disappears and only the fallback runs.
+        for path, needle in (("/", b"duck.js"), ("/js/duck.js", b"insertArrowFromIPCStream")):
+            code, mime, body = get(path)
+            assert code == 200 and needle in body, f"{path} missing {needle!r}"
+            print(f"  GET {path:<32s} {code}  {len(body):>10,} bytes  {mime}")
+
+        for attack in ("/../dqstack/config.py", "/css/../../dqstack/serve.py"):
+            try:
+                get(attack)
+                raise AssertionError(f"path traversal not refused: {attack}")
+            except urllib.error.HTTPError as e:
+                assert e.code == 404
+                print(f"  GET {attack:<32s} {e.code}  (traversal refused)")
+
         sid = store.sql("SELECT series_id FROM dim_series LIMIT 1")["series_id"].iloc[0]
         code, mime, body = get(f"/series/history.arrow?series_id={sid}&days=60")
         tbl = ipc.open_stream(io.BytesIO(body)).read_all()
@@ -465,8 +595,9 @@ def main() -> None:
         return
 
     srv = make_server(a.host, a.port)
-    print(f"DQ-Stack read API on http://{a.host}:{a.port}")
-    print(f"  routes: {', '.join(sorted(_routes(Store())))}")
+    print(f"DQ-Stack workspace on http://{a.host}:{a.port}/")
+    print(f"  API routes: {', '.join(sorted(_routes(Store())))}")
+    print("  Serving the workspace over HTTP so DuckDB-WASM has an origin to load from.")
     print("  Ctrl-C to stop")
     try:
         srv.serve_forever()

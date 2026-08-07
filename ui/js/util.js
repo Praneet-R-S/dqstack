@@ -154,7 +154,15 @@ const U = (() => {
   }
 
   refresh();
+  /* HTML-escape. Every value that reaches innerHTML goes through this. The SQL
+     console renders arbitrary column names and string values from query results,
+     which makes it the one surface in the app where unescaped interpolation would
+     be an injection rather than merely a rendering bug. */
+  const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+
   return {
+    esc,
     refresh, tk, nf, compact, money, pct, signed, signedPct,
     rgba, mix, hexToRgb, healthColor, varianceTint, clamp,
     CLASS_SHORT, REASON_COLOR, REASON_LABEL,

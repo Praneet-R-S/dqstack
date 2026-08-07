@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="css/tokens.css?v=fef6f69c">
-<link rel="stylesheet" href="css/app.css?v=0dacb235">
+<link rel="stylesheet" href="css/tokens.css?v=eac8bed0">
+<link rel="stylesheet" href="css/app.css?v=e49a8cda">
 </head>
 <body>
 <div id="app">
@@ -43,6 +43,12 @@
       <div class="origin-chip">
         <span>horizon</span><b id="horizonLabel">—</b>
       </div>
+      <!-- The query engine is stated, not hidden. It can genuinely fail to load,
+           and a planner who sees a slower interaction deserves to know why. -->
+      <button class="engine-pill" id="enginePill" data-status="idle"
+              aria-label="Query engine status. Opens the SQL console.">
+        <span class="led"></span><b>JS fallback</b><span class="t"></span>
+      </button>
       <button class="icon-btn" id="themeBtn" aria-label="Toggle colour theme">◐ theme</button>
       <button class="icon-btn" id="densityBtn" aria-label="Cycle row density">≡ default</button>
     </div>
@@ -74,15 +80,27 @@
         <span id="crumbCount">—</span>
         <span class="sep">·</span>
         <span>sorted by <b id="crumbSort">priority</b></span>
+
         <div class="crumbs-right">
           <div class="seg" role="group" aria-label="Scope">
             <button data-scope="queue" aria-pressed="true">Queue</button>
             <button data-scope="all" aria-pressed="false">All series</button>
           </div>
-          <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-secondary)">
-            group
-            <select class="ov-select" id="groupBy" aria-label="Group rows by"
-                    style="max-width:120px">
+
+          <label class="field">
+            <span>order</span>
+            <select class="sel" id="sortBy" aria-label="Order rows by">
+              <option value="priority">priority</option>
+              <option value="health">health, worst first</option>
+              <option value="swing">swing vs prior</option>
+              <option value="width">interval width</option>
+              <option value="revenue">revenue</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>group</span>
+            <select class="sel" id="groupBy" aria-label="Group rows by">
               <option value="">none</option>
               <option value="cat">category</option>
               <option value="dept">department</option>
@@ -91,10 +109,17 @@
               <option value="cls">planning class</option>
             </select>
           </label>
-          <button class="icon-btn" id="colReset" title="Reset column widths and order">⇄ cols</button>
-          <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--text-secondary)">
-            <input type="checkbox" id="priorToggle" checked> prior version
+
+          <label class="switch">
+            <input type="checkbox" id="priorToggle" checked>
+            <span class="track"><span class="knob"></span></span>
+            <span class="switch-label">prior</span>
           </label>
+
+          <button class="icon-btn" id="colReset" title="Reset column widths and order">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h12M2 11h12" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M11 2.5 13.5 5 11 7.5M5 8.5 2.5 11 5 13.5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            columns
+          </button>
         </div>
       </div>
 
@@ -147,13 +172,13 @@
                 <div class="cap">expected margin impact</div>
               </div>
             </div>
-            <div class="ov-row" style="margin-top:8px">
+            <div class="ov-row">
               <span class="ov-label" id="pendingCount" aria-live="polite"></span>
               <button class="btn" id="undoBtn" disabled title="Undo (Cmd-Z)">↶</button>
               <button class="btn" id="redoBtn" disabled title="Redo (Shift-Cmd-Z)">↷</button>
               <span class="ov-total" id="ovTotal" data-sign="flat"></span>
             </div>
-            <div class="ov-row" style="margin-top:8px">
+            <div class="ov-row">
               <select class="ov-select" id="ovReason" aria-label="Reason for override">
                 <option value="">Reason…</option>
                 <option>Known promotion not in feed</option>
@@ -164,7 +189,7 @@
                 <option>Category judgement</option>
               </select>
               <button class="btn" id="ovReset">Reset</button>
-              <button class="btn btn-primary" id="ovCommit" disabled>Commit <span class="kbd" style="border-color:rgba(255,255,255,.4)">⌘↵</span></button>
+              <button class="btn btn-primary" id="ovCommit" disabled>Commit <span class="kbd">⌘↵</span></button>
             </div>
           </div>
         </div>
@@ -199,7 +224,7 @@
       </p>
 
       <h2 class="sheet-h2">Candidate leaderboard</h2>
-      <p class="sheet-lede" style="margin-top:0">
+      <p class="sheet-lede tight">
         Ranked by WSPL, the weighted scaled pinball loss, because it scores the whole predictive
         distribution rather than only its centre. WRMSSE is shown alongside for comparability with
         the M5 literature.
@@ -222,7 +247,7 @@
         </div>
         <div>
           <canvas id="relChart" class="mini-chart"></canvas>
-          <p style="font-size:11px;color:var(--text-tertiary);margin-top:8px;line-height:1.55">
+          <p class="fig-caption">
             Reliability diagram. The dotted diagonal is perfect calibration; the red dashed line is
             empirical coverage before conformal adjustment and the blue line after. Distance from the
             diagonal is the error the next stage would otherwise inherit when it reads a quantile off
@@ -250,9 +275,9 @@
       </div>
 
       <h2 class="sheet-h2">Accuracy is not economics</h2>
-      <p class="sheet-lede" style="margin-top:0" id="aveSummary"></p>
+      <p class="sheet-lede tight" id="aveSummary"></p>
       <div class="two-col">
-        <div><canvas id="aveChart" class="mini-chart" style="height:260px"></canvas></div>
+        <div><canvas id="aveChart" class="mini-chart tall"></canvas></div>
         <div><div id="invTable"></div></div>
       </div>
       <h2 class="sheet-h2">Economics by configuration</h2>
@@ -276,7 +301,7 @@
       <div class="cards" id="decCards"></div>
 
       <h2 class="sheet-h2">The critical fractile in action</h2>
-      <p class="sheet-lede" style="margin-top:0">
+      <p class="sheet-lede tight">
         The eight lowest and eight highest target quantiles in the assortment. A low-margin,
         high-holding-cost, short-shelf-life item is planned far below 95%; a high-margin durable is
         planned above it. The formula says so precisely, and a blanket policy cannot express it.
@@ -288,7 +313,7 @@
         <div><div id="simTable"></div></div>
         <div>
           <div id="temporalTable"></div>
-          <div class="note" style="margin-top:16px">
+          <div class="note">
             Temporal reconciliation makes the daily, weekly and 28-day views arithmetically
             identical. "The weekly plan disagrees with the quarterly plan" becomes structurally
             impossible rather than a recurring meeting.
@@ -317,8 +342,7 @@
 <div class="palette-backdrop" id="keysBackdrop" data-open="false"></div>
 <div class="palette" id="keysSheet" data-open="false" role="dialog" aria-modal="true"
      aria-label="Keyboard shortcuts">
-  <input aria-label="Keyboard shortcuts" value="Keyboard — spreadsheet conventions, not a new language" readonly
-         style="font-family:var(--font-ui);font-size:var(--fs-14)">
+  <div class="palette-head">Keyboard — spreadsheet conventions, not a new language</div>
   <div class="palette-list">
     <div class="palette-item"><span>Move cell selection</span><span class="kbd">← ↑ ↓ →</span></div>
     <div class="palette-item"><span>Extend selection</span><span class="kbd">Shift + arrows</span></div>
@@ -335,13 +359,43 @@
   </div>
 </div>
 
+<!-- ========================================================== SQL console -->
+<div class="palette-backdrop" id="sqlBackdrop" data-open="false"></div>
+<div class="sqlbox" id="sqlBox" data-open="false" role="dialog" aria-modal="true"
+     aria-label="SQL console">
+  <div class="sqlbox-head">
+    <div>
+      <div class="sqlbox-title">SQL console</div>
+      <div class="sqlbox-sub" id="sqlEngineInfo">—</div>
+    </div>
+    <button class="btn" id="sqlClose" aria-label="Close SQL console">Esc</button>
+  </div>
+  <div class="sqlbox-body">
+    <label class="sr-only" for="sqlText">SQL query</label>
+    <textarea id="sqlText" spellcheck="false" rows="4"
+      aria-describedby="sqlHelp">SELECT cls, count(*) AS series, round(avg(health),3) AS health,
+       round(sum(revenue)) AS revenue, round(avg(targetQ),3) AS target_q
+FROM series GROUP BY 1 ORDER BY series DESC</textarea>
+    <div class="sqlbox-bar">
+      <div class="sqlbox-chips" id="sqlExamples"></div>
+      <button class="btn btn-primary" id="sqlRun">Run <span class="kbd">⌘↵</span></button>
+    </div>
+    <p class="sqlbox-help" id="sqlHelp">
+      One table, <code>series</code>, delivered as Arrow IPC and queried in the browser —
+      the same table the worklist filters and the grouping rollups run against. Read-only.
+    </p>
+    <div class="sqlbox-out" id="sqlOut"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
 
 <script src="data/bundle.js?v=7fe0fd9a"></script>
-<script src="js/util.js?v=18df86dd"></script>
+<script src="js/duck.js?v=64beaf16"></script>
+<script src="js/util.js?v=251bf016"></script>
 <script src="js/grid.js?v=be833f18"></script>
 <script src="js/chart.js?v=9922be45"></script>
 <script src="js/views.js?v=75c048ff"></script>
-<script src="js/app.js?v=d498caff"></script>
+<script src="js/app.js?v=b4e09727"></script>
 </body>
 </html>

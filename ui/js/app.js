@@ -28,6 +28,8 @@
     view: "workspace",
     scope: "queue",
     filters: new Set(),
+    sort: "priority",
+    search: "",
     pending: new Map(),                          // "id:week" -> value
     selected: null,
   };
@@ -96,20 +98,25 @@
   const ALL_ROWS = D.series.map(toRow);
   const BY_ID = new Map(ALL_ROWS.map((r) => [r.id, r]));
 
-  function visibleRows() {
-    let rows = ALL_ROWS;
-    if (state.scope === "queue") rows = rows.filter((r) => r.reasons.length > 0);
-    if (state.filters.size)
-      rows = rows.filter((r) => r.reasons.some((x) => state.filters.has(x)));
-    return rows.slice().sort((a, b) => b.priority - a.priority);
+  /* Row selection now goes through Query, which answers from DuckDB-WASM when the
+     engine is up and from the JavaScript path when it is not. Both are held to the
+     same answer by Query.selftest(); see ui/js/duck.js on why this is a resolver
+     rather than a hard dependency. */
+  function visibleQuery() {
+    return {
+      scope: state.scope,
+      filters: [...state.filters],
+      sort: state.sort,
+      search: state.search,
+    };
   }
 
   /* ============================================================ worklist */
 
-  function renderFilters() {
-    const counts = {};
-    ALL_ROWS.forEach((r) => r.reasons.forEach((x) => (counts[x] = (counts[x] || 0) + 1)));
-    const order = ["risk", "stale", "censored", "wide", "swing", "cold-start", "terminal"];
+  async function renderFilters() {
+    const pairs = await Query.reasonCounts();
+    const counts = Object.fromEntries(pairs);
+    const order = pairs.map(([k]) => k);
     $("wlFilters").innerHTML = order
       .filter((k) => counts[k])
       .map(
@@ -130,8 +137,8 @@
   }
 
   function renderWorklist(rows) {
-    const queue = ALL_ROWS.filter((r) => r.reasons.length > 0);
-    $("wlCount").textContent = U.nf(queue.length);
+    const queue = ALL_ROWS.reduce((a, r) => a + (r.reasons.length ? 1 : 0), 0);
+    $("wlCount").textContent = U.nf(queue);
     $("wlFoot").textContent = `${U.nf(rows.length)} shown · ${U.nf(ALL_ROWS.length)} series`;
 
     const top = rows.slice(0, 240);
@@ -468,12 +475,177 @@
     });
   }
 
-  function refresh() {
-    const rows = visibleRows();
+  /* One in-flight refresh at a time. A planner holding a filter chip down or typing
+     into the search box issues queries faster than they resolve, and without a
+     generation counter a slow early query can land after a fast later one and paint
+     a stale grid. */
+  let refreshGen = 0;
+  async function refresh() {
+    const gen = ++refreshGen;
+    const ids = await Query.ids(visibleQuery());
+    if (gen !== refreshGen) return;                 // superseded mid-flight
+    const rows = Query.rowsFor(ids);
     Grid.setRows(rows);
     renderWorklist(rows);
     $("crumbCount").textContent = `${U.nf(rows.length)} series`;
     $("gridEmpty").hidden = rows.length > 0;
+    renderEngine();
+  }
+
+  /* ------------------------------------------------------ engine readout */
+
+  function renderEngine() {
+    const el = $("enginePill");
+    if (!el) return;
+    const s = Duck.state;
+    const n = s.rows || ALL_ROWS.length;
+    const routed = Query.useSql(n, false);
+
+    // Two facts, not one: whether the engine is up, and which backend answered the
+    // last query. They differ by design — the engine can be ready and still not be
+    // the right tool at this table size — and collapsing them into one label is how
+    // a status line starts lying.
+    const label = {
+      ready: routed ? "SQL engine" : "SQL ready",
+      loading: "loading SQL",
+      unavailable: "JS engine",
+      idle: "JS engine",
+    }[s.status];
+    el.dataset.status = s.status;
+    el.querySelector("b").textContent = label;
+    const t = s.lastMs
+      ? `${s.lastMs < 1 ? s.lastMs.toFixed(2) : Math.round(s.lastMs)} ms · ${s.lastBackend}`
+      : "";
+    el.querySelector(".t").textContent = t;
+
+    el.title = s.status === "ready"
+      ? `DuckDB-WASM is loaded — ${s.detail}.
+` +
+        `Row selection routes to SQL above ` +
+        `${Query.CROSSOVER_ROWS.toLocaleString()} rows; this table has ` +
+        `${n.toLocaleString()}, so live queries run in ${routed ? "SQL" : "JavaScript"}, ` +
+        `which is the faster of the two at this size.
+` +
+        `Click to open the SQL console.`
+      : `${label}: ${s.detail || "SQL engine not started"}
+` +
+        `Filtering, sorting and grouping still work — they run in JavaScript.
+` +
+        `Click for details.`;
+  }
+
+  /* ========================================================= SQL console
+
+     A visible SQL console is not a gimmick here. The claim being made is that
+     aggregation happens in a query engine rather than in application code, and a
+     console is the shortest proof of that claim a reviewer can run themselves.
+     It is also the honest place to demonstrate the fallback: with the engine down
+     the console says so instead of pretending. Read-only by construction — the
+     table is an in-memory copy of an Arrow buffer, so the worst a mutating
+     statement can do is corrupt a copy that is rebuilt on reload, but the guard
+     below refuses them anyway rather than relying on that. */
+
+  const SQL_EXAMPLES = [
+    ["health by class", `
+SELECT cls, count(*) AS series, round(avg(health), 3) AS health,
+       round(sum(revenue)) AS revenue, round(avg(targetQ), 3) AS target_q
+FROM series GROUP BY 1 ORDER BY series DESC`],
+
+    ["censoring by store", `
+SELECT store, count(*) AS series, sum(censoredDays) AS censored_days,
+       round(avg(priceCompleteness), 3) AS price_completeness
+FROM series GROUP BY 1 ORDER BY censored_days DESC`],
+
+    ["fractile spread", `
+SELECT cat,
+       round(min(targetQ), 3)    AS lo,
+       round(median(targetQ), 3) AS mid,
+       round(max(targetQ), 3)    AS hi,
+       round(avg(marginRate), 3) AS margin_rate
+FROM series GROUP BY 1 ORDER BY mid`],
+
+    ["widest intervals", `
+SELECT id, cls, round(health, 2) AS health, round(relWidth, 3) AS rel_width,
+       round(demandH, 1) AS demand_28d, reasons
+FROM series ORDER BY relWidth DESC LIMIT 25`],
+
+    ["queue composition", `
+SELECT cat, dept,
+       count(*) AS series,
+       sum(CASE WHEN length(reasons) > 2 THEN 1 ELSE 0 END) AS flagged,
+       round(100.0 * sum(CASE WHEN length(reasons) > 2 THEN 1 ELSE 0 END)
+             / count(*), 1) AS pct_flagged
+FROM series GROUP BY 1, 2 ORDER BY pct_flagged DESC`],
+
+    ["decision spread", `
+SELECT abc AS revenue_class, xyz AS variability_class,
+       count(*) AS series,
+       round(avg(targetQ), 3)  AS target_q,
+       round(avg(orderUpTo), 1) AS order_up_to,
+       round(avg(underage / nullif(underage + overage, 0)), 3) AS fractile_check
+FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
+  ];
+
+  const MUTATING =
+    /^\s*(insert|update|delete|drop|create|alter|attach|detach|copy|truncate|replace|call|export|import|install|load|pragma|set|begin|commit|rollback)\b/i;
+
+  function openSql() {
+    $("sqlBox").dataset.open = "true";
+    $("sqlBackdrop").dataset.open = "true";
+    $("sqlEngineInfo").textContent = Duck.ready()
+      ? `DuckDB-WASM · ${Duck.state.detail}`
+      : `unavailable — ${Duck.state.detail || "engine not started"}`;
+    $("sqlText").focus();
+  }
+  function closeSql() {
+    $("sqlBox").dataset.open = "false";
+    $("sqlBackdrop").dataset.open = "false";
+  }
+
+  async function runSql() {
+    const out = $("sqlOut");
+    const text = $("sqlText").value.trim();
+    if (!text) return;
+    if (!Duck.ready()) {
+      out.innerHTML = `<div class="sql-err">The in-browser query engine is not
+        available (${U.esc(Duck.state.detail || "not started")}). Filtering and
+        grouping still work — they run in JavaScript — but arbitrary SQL needs the
+        engine. Serve the workspace with
+        <code>python -m dqstack.serve</code> and reload.</div>`;
+      return;
+    }
+    if (MUTATING.test(text)) {
+      out.innerHTML = `<div class="sql-err">Read-only console: ` +
+        `<code>${U.esc(text.split(/\s+/)[0])}</code> is not accepted.</div>`;
+      return;
+    }
+    out.innerHTML = '<div class="sql-note">running…</div>';
+    try {
+      const rows = await Duck.sql(text);
+      const ms = Duck.state.lastMs;
+      if (!rows.length) {
+        out.innerHTML = `<div class="sql-note">0 rows · ${ms.toFixed(1)} ms</div>`;
+        return;
+      }
+      const cols = Object.keys(rows[0]);
+      const shown = rows.slice(0, 500);
+      const cell = (v) =>
+        v === null || v === undefined ? '<span class="null">·</span>'
+        : typeof v === "number" ? `<span class="num">${U.esc(String(v))}</span>`
+        : U.esc(String(v));
+      out.innerHTML =
+        `<div class="sql-note">${U.nf(rows.length)} row${rows.length === 1 ? "" : "s"} · ` +
+        `${ms.toFixed(1)} ms in the browser` +
+        (rows.length > shown.length ? ` · showing first ${shown.length}` : "") + `</div>` +
+        `<div class="sql-table-wrap"><table class="sql-table"><thead><tr>` +
+        cols.map((c) => `<th>${U.esc(c)}</th>`).join("") + `</tr></thead><tbody>` +
+        shown.map((r) => `<tr>` + cols.map((c) => `<td>${cell(r[c])}</td>`).join("") +
+                         `</tr>`).join("") +
+        `</tbody></table></div>`;
+      renderEngine();
+    } catch (e) {
+      out.innerHTML = `<div class="sql-err">${U.esc(String(e && e.message || e))}</div>`;
+    }
   }
 
   /* ============================================================ palette */
@@ -516,7 +688,7 @@
       n.addEventListener("click", () => jumpTo(n.dataset.id))
     );
   }
-  function jumpTo(id) {
+  async function jumpTo(id) {
     closePalette();
     state.scope = "all";
     state.filters.clear();
@@ -524,7 +696,7 @@
       b.setAttribute("aria-pressed", b.dataset.scope === "all")
     );
     renderFilters();
-    refresh();
+    await refresh();                 // the grid must hold the row before selecting it
     const idx = Grid.rows.findIndex((r) => r.id === id);
     if (idx >= 0) Grid.select(idx);
   }
@@ -568,14 +740,37 @@
     $("densityBtn").textContent = "≡ " + next;
     window.dispatchEvent(new Event("dq:density"));
   }
-  function toggleTheme() {
-    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
+  /* A theme flip must not be animated, for two independent reasons.
+
+     The visible one: every surface in the application would cross-fade at once,
+     which is precisely the kind of large-area motion the design brief rules out.
+
+     The one that is actually a bug: an element that declares `transition` for a
+     property whose value comes from a custom property can keep painting the old
+     value after the token changes on :root. Measured here — the tabs, the reason
+     chips, the engine pill and the toggle switch all kept their dark background
+     and border after switching to light, because each declares a transition on
+     exactly the property that failed, while `.override`, which declares none,
+     updated correctly. Suppressing transitions across the swap fixes the stale
+     paint and removes the animation in one move. The class is dropped after two
+     frames: one for the attribute change to be styled, one for it to be painted.
+     Doing it after a single frame reinstates transitions too early and the stale
+     paint returns. */
+  function setTheme(next) {
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.dataset.theme = next;
     localStorage.setItem("dq.theme", next);
-    U.refresh();
+    U.refresh();                        // the token cache the canvases read
     window.dispatchEvent(new Event("dq:theme"));
     Views.invalidate();
     if (state.view !== "workspace") Views.render(state.view, true);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => root.classList.remove("theme-switching")));
+  }
+
+  function toggleTheme() {
+    setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
   }
 
   /* ============================================================ keyboard */
@@ -705,14 +900,25 @@
     Chart.init();
     Views.init(D);
 
+    Query.attach(ALL_ROWS);
     renderFilters();
     refresh();
+
+    // Fire and forget. The workspace is already interactive on the JS path; when
+    // the engine lands, the resolver starts using it and one refresh re-answers
+    // the current query through SQL. Nothing blocks on the CDN.
+    Duck.onChange(renderEngine);
+    Duck.init({ arrowUrl: "series.arrow" }).then((ok) => {
+      renderEngine();
+      if (ok) { renderFilters(); refresh(); }
+    });
 
     // Establish the initial view in code rather than trusting the markup. A
     // reloaded tab can retain the previous session's tab state, and an attribute
     // that has drifted leaves every view hidden — which presents as a blank app
     // with no error in the console.
     setView("workspace");
+    window.DQ = { state, Query, Duck, rows: ALL_ROWS, selftest: Query.selftest, setTheme };
 
     document.querySelectorAll(".tab").forEach((t) =>
       t.addEventListener("click", () => setView(t.dataset.view))
@@ -736,6 +942,26 @@
       Grid.resetColumns();
       toast("Column widths and order reset");
     });
+    $("sortBy").addEventListener("change", (e) => {
+      state.sort = e.target.value;
+      $("crumbSort").textContent = e.target.selectedOptions[0].textContent;
+      refresh();
+    });
+    $("enginePill").addEventListener("click", openSql);
+    $("sqlClose").addEventListener("click", closeSql);
+    $("sqlBackdrop").addEventListener("click", closeSql);
+    $("sqlRun").addEventListener("click", runSql);
+    $("sqlText").addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); runSql(); }
+    });
+    $("sqlExamples").innerHTML = SQL_EXAMPLES
+      .map(([label], i) => `<button class="chip-sql" data-i="${i}">${label}</button>`).join("");
+    $("sqlExamples").querySelectorAll(".chip-sql").forEach((b) =>
+      b.addEventListener("click", () => {
+        $("sqlText").value = SQL_EXAMPLES[+b.dataset.i][1].trim();
+        runSql();
+      })
+    );
     $("themeBtn").addEventListener("click", toggleTheme);
     $("densityBtn").addEventListener("click", cycleDensity);
     $("priorToggle").addEventListener("change", () => {
@@ -776,7 +1002,7 @@
     $("keysBtn").addEventListener("click", () => toggleKeys(true));
     $("keysBackdrop").addEventListener("click", () => toggleKeys(false));
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") toggleKeys(false);
+      if (e.key === "Escape") { toggleKeys(false); closeSql(); }
       if (e.key === "?" && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) {
         toggleKeys(true);
       }

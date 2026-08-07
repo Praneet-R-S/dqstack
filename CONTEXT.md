@@ -63,13 +63,28 @@ dqstack/
   sensitivity.py   cost-parameter sweep
   ablate.py        ablation runner (NOT YET EXECUTED)
   pipeline.py      the orchestrator
-  export.py        UI data bundle
+  export.py        UI data bundle; stamp_assets() content-hashes every asset URL
+  serve.py         the read path: DuckDB store, Arrow IPC, HTTP API, static ui/
   data/generate.py synthetic M5-shaped panel generator
-tests/             79 tests: leakage, simulator, contracts, diagnose, backtest, sensitivity
-ui/                planner workspace (canvas grid + canvas chart, no build step)
+tests/             94 tests: leakage, simulator, contracts, diagnose, backtest,
+                   sensitivity, serve (the Arrow query table + routes)
+ui/                planner workspace. No build step, no bundler, no framework.
+  index.html       four views; the only markup
+  css/tokens.css   design tokens. Canvas renderers read these at paint time.
+  css/app.css      the shell
+  js/util.js       token cache, formatters, esc()
+  js/duck.js       DuckDB-WASM + the two-backend query resolver (Duck, Query)
+  js/grid.js       the canvas grid: selection, editing, undo, grouping, micro-fan
+  js/chart.js      the canvas fan chart
+  js/views.js      pipeline / evidence / decisions sheets
+  js/app.js        wiring, state layers, override economics, SQL console
+.claude/launch.json  dev-server entry for the preview harness
 artifacts/         results tables, ledger, metrics.json  (gitignored)
 data/              generated panel                        (gitignored)
 ```
+
+**Running the workspace.** `python -m dqstack.serve` then <http://127.0.0.1:8000/>.
+Opening `ui/index.html` from disk also works, with the SQL engine disabled — see C2.
 
 ---
 
@@ -224,26 +239,128 @@ and live aggregation that includes pending edits, and persisted column widths/or
 ### C. Architecture and budgets — DONE
 `dqstack/serve.py`: DuckDB analytical store over the Parquet lake with aggregation as
 SQL (CON-5), Arrow IPC transfer (CON-1), read-only HTTP API with no inference on the
-read path (CON-3). Verify with `python -m dqstack.serve --selftest`.
+read path (CON-3). It also serves `ui/` statically, which is not a convenience — see
+DuckDB-WASM below. Verify with `python -m dqstack.serve --selftest`; run it with
+`python -m dqstack.serve` and open <http://127.0.0.1:8000/>.
 
 Measured, not asserted:
 
 | budget | target | measured |
 |---|---|---|
-| app code, gzipped | < 250 KB | **47.8 KB** |
-| grid paint, p95 | < 16 ms | **5.9 ms** (was 40 ms) |
-| frames > 32 ms | zero | **zero** |
-| sort / regroup | < 150 ms | 33 ms / 118 ms |
-| WCAG 2.2 AA contrast | 9 checks | **9 pass** |
+| app code, gzipped | < 250 KB | **67.2 KB** (9 files, 222.9 KB raw) |
+| grid paint, median | < 16 ms | **4.2 ms** cold, 3.1 ms warm |
+| grid paint, p95 | < 16 ms | **11.4 ms** cold, 6.5 ms warm |
+| frames > 32 ms | zero | **zero** (worst single frame 15.8 ms) |
+| full dataset replace | < 150 ms | 72 ms |
+| WCAG 2.2 AA contrast | — | **26 checks, 26 pass** (13 pairs x 2 themes) |
+| horizontal overflow, 4 views | zero | **zero** |
 
 Arrow versus JSON on this project's own 28,000-row matrix: **1.44 MB against 3.26 MB
 (2.3x) and 1.1 ms against 65.6 ms to parse (61x)**. The spec's claim that "the parse
 cost difference is worse than the transfer cost difference" holds, with a factor of 26
 between the two ratios.
 
-Still open in C: **DuckDB-WASM in the browser** (the client-side query trick the spec
-calls the biggest perceived-performance win), and the UI still reads the static bundle
-rather than the API — the API exists and is tested, but nothing consumes it yet.
+### C2. DuckDB-WASM in the browser — DONE, and the spec's claim partly refuted
+
+`ui/js/duck.js`. `/series.arrow` emits the 31 scalar series columns as Arrow IPC
+(**195 KB**, against 3.7 MB for the full bundle — the fan, 126 days of history and the
+weight vectors are render inputs, never query inputs, so they stay in the JS heap).
+The browser registers that buffer as a DuckDB table via `insertArrowFromIPCStream`
+and answers filtering, sorting and grouping as SQL, with **zero network round trips**
+per interaction.
+
+Two mechanical constraints, both of which cost real debugging:
+
+- **`file://` cannot host it at all.** A null origin can neither dynamic-import a
+  cross-origin ES module nor spawn its worker. This is why `serve.py` now serves the
+  workspace over HTTP.
+- **`new Worker(crossOriginUrl)` is forbidden by the HTML spec**, and the CDN is
+  cross-origin by definition. The fix is a same-origin blob shim whose only statement
+  is `importScripts(cdnUrl)`, which is not subject to the restriction.
+
+**The measurement, which is the interesting part.** The spec calls in-browser SQL
+"the single biggest perceived-performance win available to you". Measured on this
+project's own table, that is true for one query shape and false for the other.
+
+Row selection (filter, sort, take the head):
+
+| rows | DuckDB-WASM | JavaScript | ratio |
+|---|---|---|---|
+| 1,000 | 10.9 ms | 0.5 ms | 0.04x |
+| 10,000 | 35.0 ms | 5.2 ms | 0.15x |
+| 30,000 | 46.2 ms | 11.6 ms | 0.25x |
+| 100,000 | 74.5 ms | 79.9 ms | **1.07x — crossover** |
+| 300,000 | 93.0 ms | 215.4 ms | 2.32x |
+
+Group rollup (GROUP BY one hierarchy column, six aggregates) **never crosses over**:
+0.06x at 1k, 0.10x at 30k, 0.22x at 300k. The reason is cardinality, not engine
+quality — a hierarchy level has three to ten distinct keys, and a ten-bucket hash
+aggregation over a flat array is about as cheap as computation gets, while every
+DuckDB query pays a fixed cost (postMessage to the worker, parse, plan, materialise
+an Arrow result back). Below ~10^5 rows that fixed cost *is* the query.
+
+So `Query` routes by the measurement rather than by the claim: `CROSSOVER_ROWS =
+100_000` for row selection, JavaScript for the rollups, and DuckDB unconditionally
+for the SQL console — where the alternative is not a slower answer but no answer.
+**This project's 1,000 series therefore run on the JavaScript path in normal use**,
+and the engine pill says so rather than implying otherwise. Shipping the slower path
+under a performance label would have been the easy thing to do and would have been
+wrong.
+
+What *is* unambiguously won is the third thing the spec does not dwell on: arbitrary
+analytical SQL against the planning table, client-side, with no endpoint to write.
+That is the **SQL console** (click the engine pill), read-only guarded, with six
+worked examples.
+
+**Both backends are held to agreement, not hoped to agree.** `DQ.selftest()` in the
+console runs 15 row-selection cases, 5 rollup levels and the reason histogram through
+both engines and diffs them: **all pass**. It has already earned its keep — it caught
+DuckDB returning `sum(CASE …)` over int32 as a 128-bit integer, which Arrow surfaces
+as a four-word object rather than a BigInt, so the filter chips would have rendered
+`[object Object]`. `Duck.narrow()` handles both wide-integer forms. `tests/test_serve.py`
+(15 tests) pins the Python half: column set, reason encoding, horizon sums, null-freedom
+on every sort column, IPC round trip, path-traversal refusal.
+
+**Graceful degradation is verified, not assumed.** Opened from `file://` the workspace
+is fully functional — 848 queue rows, filtering, magnitude sort, grouping — and the
+pill reads `JS ENGINE` with an actionable reason.
+
+### C3. UI second pass — DONE
+
+The brief was that the workspace looked clumsy and should be something people want to
+use. Density was not the problem and was not given up: row height, grid font sizes and
+information-per-screen are unchanged. What was missing was craft.
+
+- `tokens.css`: a five-step surface ladder (borders were doing the job of light), a
+  two-part elevation model (hairline ring + shadow, which is what actually reads as
+  depth on a dark panel), accent tints, one gradient, and a light theme that is a real
+  palette rather than an inversion. Every previous token name survives, because the
+  canvas renderers resolve tokens through `getComputedStyle` at paint time.
+- `app.css`: segmented tab control, a real toggle switch, custom selects, the engine
+  pill with a status LED, a raised-and-amber override card (the one control that costs
+  money), cards with an accent hairline, refined tables, the SQL console, and a
+  responsive clamp so a 1280px laptop does not clip the toolbar.
+- All 14 inline `style=` attributes removed from `index.html` except the four legend
+  swatches, which are genuinely data-bound to series semantics.
+
+Three real defects found and fixed while verifying:
+
+1. **A theme flip left elements painted in the old theme.** Every property that failed
+   was one the element declared a `transition` for — tabs, reason chips, engine pill,
+   toggle switch — while `.override`, which declares none, updated correctly.
+   `setTheme()` now suppresses transitions across the swap for two frames (one for the
+   attribute to be styled, one for it to be painted; a single frame reinstates them too
+   early and the stale paint returns). This also removes an unwanted 120 ms cross-fade
+   of every surface in the app.
+2. **The dock starved the grid.** `grid-template-rows: auto 1fr var(--dock-h)` gave the
+   toolbar and dock 394 px unconditionally, so on a 450 px-tall window the grid region
+   resolved to **four pixels** — a fully populated canvas painting into a 912x0 box.
+   Now `auto minmax(120px, 1fr) minmax(0, var(--dock-h))`: the grid keeps a floor and
+   the dock yields height first.
+3. **9 px of horizontal overflow in the Evidence view.** A grid item defaults to
+   `min-width: auto` and refuses to shrink below its content, so one wide table pushed
+   the sheet past its track. `min-width: 0` on `.sheet`, `.two-col > *`, `.cards > *`,
+   `.stage > *`.
 
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
@@ -281,6 +398,19 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **`new Worker(crossOriginUrl)` is illegal**, and `file://` cannot load DuckDB-WASM
+  at all. Both are spec behaviour, not bugs to fix. See `duck.js`.
+- **A CSS `transition` on a property fed by a custom property can keep painting the
+  old value** after the token changes. If a theme flip leaves something stale, look
+  for a transition on exactly the property that is stuck, not at the token.
+- **`min-width: auto` is a grid item's default** and is the cause of essentially every
+  unexplained horizontal overflow in a CSS grid layout.
+- **Do not measure computed styles right after changing the theme**, and never read a
+  live `CSSStyleDeclaration` after restoring it — both produced convincing false
+  positives in this session before the CSSOM dump settled it.
+- **DuckDB widens aggregates.** `count()` and `sum()` over BIGINT arrive as BigInt;
+  `sum()` over int32 is promoted to HUGEINT and arrives as a four-word little-endian
+  array. Neither is a JS number. `Duck.narrow()` exists for this.
 - **The micro-fan is the frame budget.** Not the mirror, not getComputedStyle. It is
   cached to offscreen canvases and degraded during scroll; clearing that cache on every
   edit is intentional.

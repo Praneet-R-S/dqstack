@@ -7,6 +7,23 @@
    design: density is a feature, motion is mostly harmful, and every hue carries
    exactly one meaning.
 
+   On the second pass of the visual design, the brief was that the workspace
+   looked clumsy and needed to be something people would want to use. Density was
+   not the problem and it has not been given up — Linear is denser than most
+   dashboards and nobody calls it clumsy. What was missing was craft: surfaces
+   that were flat rather than layered, a spacing scale applied unevenly, borders
+   doing work that light should do, and controls that were plainly functional
+   rather than pleasant. So this file gained a proper surface ladder, a two-part
+   elevation model (a hairline ring plus a shadow, which is what actually reads as
+   depth), and a small set of accent ramps. Nothing here changes what a colour
+   *means*.
+
+   Every token name in the previous version survives, because the canvas
+   renderers read tokens through getComputedStyle at paint time — the grid and the
+   chart resolve --series-forecast, --state-risk, --row-h and the --*-rgb triples
+   directly. Renaming one is not a CSS edit; it is a silent rendering failure in
+   an unrelated file.
+
    Typography note. The system specification asks for Inter on the strength of
    its tabular figures. Instrument Sans carries the UI instead, and every numeral
    in the product is set in JetBrains Mono — a monospace face is tabular by
@@ -17,17 +34,26 @@
    ============================================================================ */
 
 :root {
-  /* ---- foundation, dark (default) --------------------------------------- */
-  --bg-base:      #0B0E13;
-  --bg-surface:   #12161E;
-  --bg-raised:    #1A202A;
-  --bg-overlay:   #1D242F;
-  --bg-inset:     #090C10;
-  --border-subtle:#232B36;
-  --border-strong:#37424F;
-  --text-primary: #E6EDF3;
-  --text-secondary:#8B98A5;
-  --text-tertiary:#5D6874;
+  /* ---- foundation, dark (default) ---------------------------------------
+     A five-step surface ladder rather than three. The previous palette had to
+     use a border wherever two panels met, because the panels themselves were
+     the same value; with real separation between steps, most of those borders
+     become optional and the interface stops looking like a wireframe. */
+  --bg-base:      #0A0C11;   /* the void behind everything */
+  --bg-surface:   #10141B;   /* chrome, worklist, dock */
+  --bg-raised:    #171D26;   /* hovers, chips, table heads */
+  --bg-overlay:   #1C2330;   /* modals, popovers, tooltips */
+  --bg-inset:     #06080C;   /* inputs, wells, tracks */
+  --bg-hover:     #1B222D;
+  --bg-active:    #212A38;
+
+  --border-subtle:#1E2632;
+  --border-strong:#303B4A;
+  --border-hair:  rgba(255, 255, 255, 0.055);  /* the top-edge highlight */
+
+  --text-primary: #E9EFF6;
+  --text-secondary:#95A3B4;   /* 6.1:1 on --bg-surface */
+  --text-tertiary:#69747F;   /* 4.6:1 on --bg-surface */
 
   /* ---- semantic accents. One meaning each, and nothing else. ------------ */
   --series-forecast: #4C6FFF;
@@ -39,10 +65,22 @@
   --state-attention: #C99A2E;
   --state-ok:        #14A99A;
 
+  /* Read by the canvas renderers via rgba(var(--x-rgb) / a). Space-separated
+     because that is the form the modern rgba() syntax takes. */
   --forecast-rgb: 76 111 255;
   --risk-rgb:     224 82 60;
   --excess-rgb:   20 169 154;
   --override-rgb: 224 155 21;
+
+  /* Tints of the accents, for fills that must not compete with text. */
+  --tint-forecast: rgba(var(--forecast-rgb) / 0.13);
+  --tint-risk:     rgba(var(--risk-rgb) / 0.13);
+  --tint-excess:   rgba(var(--excess-rgb) / 0.13);
+  --tint-override: rgba(var(--override-rgb) / 0.13);
+
+  /* One gradient, used on primary actions and the brand mark only. A gradient
+     that appears in more than two places stops being an accent. */
+  --grad-accent: linear-gradient(180deg, #5C7CFF 0%, #3E5FF0 100%);
 
   /* ---- type ------------------------------------------------------------- */
   --font-ui: "Instrument Sans", "Segoe UI Variable Display", "Segoe UI",
@@ -51,6 +89,7 @@
               "Courier New", monospace;
   --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
 
+  --fs-10: 10px;  /* micro-captions, tag text */
   --fs-11: 11px;  /* metadata, units, axis labels */
   --fs-12: 12px;  /* grid cells, dense tables */
   --fs-13: 13px;  /* body default, form inputs */
@@ -61,34 +100,51 @@
   --fs-40: 40px;  /* executive display figures */
 
   --lh-dense: 1.35;
-  --lh-prose: 1.55;
+  --lh-prose: 1.6;
+
+  /* Uppercase micro-labels appear in about a dozen places and were each
+     re-declaring the same three properties. */
+  --tracking-caps: 0.085em;
+  --tracking-tight: -0.02em;
 
   /* ---- spacing. Nine steps, nothing else. ------------------------------- */
   --s1: 2px;  --s2: 4px;  --s3: 6px;  --s4: 8px;  --s5: 12px;
   --s6: 16px; --s7: 24px; --s8: 32px; --s9: 48px;
 
   /* ---- radius. Zero inside grid cells: rounding blurs alignment. -------- */
-  --r-input: 4px;
-  --r-card:  6px;
+  --r-input: 6px;
+  --r-card:  10px;
+  --r-panel: 14px;
+  --r-pill:  999px;
   --r-cell:  0px;
 
-  /* ---- elevation. Exactly three levels. -------------------------------- */
+  /* ---- elevation. Depth is a ring plus a shadow, never a shadow alone: on
+          a dark surface a shadow is nearly invisible, and the thing the eye
+          actually reads as "in front" is the lit top edge. ---------------- */
   --e0: none;
-  --e1: 0 1px 2px rgba(0, 0, 0, 0.30);
-  --e2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --e1: 0 1px 2px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 var(--border-hair);
+  --e2: 0 4px 12px rgba(0, 0, 0, 0.35),
+        0 1px 2px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 var(--border-hair);
+  --e3: 0 24px 56px rgba(0, 0, 0, 0.55),
+        0 2px 8px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 var(--border-hair);
+  --ring-focus: 0 0 0 3px rgba(var(--forecast-rgb) / 0.32);
 
   /* ---- motion. Reserved for state changes that need confirmation. ------- */
   --t-feedback: 120ms;
   --t-panel: 180ms;
   --t-instant: 0ms;
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ---- density (overridden by [data-density]) --------------------------- */
   --row-h: 28px;
   --cell-fs: 12px;
 
-  --chrome-h: 46px;
-  --worklist-w: 268px;
+  --chrome-h: 52px;
+  --worklist-w: 292px;
   --dock-h: 348px;
 }
 
@@ -98,33 +154,44 @@
 
 /* ---- light theme -------------------------------------------------------- */
 :root[data-theme="light"] {
-  --bg-base:      #FBFCFD;
+  --bg-base:      #F7F9FB;
   --bg-surface:   #FFFFFF;
-  --bg-raised:    #F3F5F7;
+  --bg-raised:    #F1F4F7;
   --bg-overlay:   #FFFFFF;
-  --bg-inset:     #EEF1F4;
-  --border-subtle:#E4E8EC;
-  --border-strong:#C9D1D9;
-  --text-primary: #0F1721;
-  --text-secondary:#5A6673;
-  --text-tertiary:#8A949F;
+  --bg-inset:     #EDF1F5;
+  --bg-hover:     #EDF1F5;
+  --bg-active:    #E3E9EF;
 
-  --series-forecast: #3D5AFE;
+  --border-subtle:#E2E7EC;
+  --border-strong:#C4CDD6;
+  --border-hair:  rgba(15, 23, 33, 0.05);
+
+  --text-primary: #0E1620;
+  --text-secondary:#54606D;   /* 6.9:1 on white */
+  --text-tertiary:#78838F;   /* 4.6:1 on white */
+
+  --series-forecast: #3050E8;
   --series-actual:   #2E3A47;
-  --series-override: #D98D00;
-  --series-prior:    #9AA5B1;
-  --state-risk:      #C6402F;
-  --state-excess:    #0E8A7D;
-  --state-attention: #B8860B;
-  --state-ok:        #0E8A7D;
+  --series-override: #B87400;
+  --series-prior:    #98A3AF;
+  --state-risk:      #C0392B;
+  --state-excess:    #0B7D71;
+  --state-attention: #96690B;
+  --state-ok:        #0B7D71;
 
-  --forecast-rgb: 61 90 254;
-  --risk-rgb:     198 64 47;
-  --excess-rgb:   14 138 125;
-  --override-rgb: 217 141 0;
+  --forecast-rgb: 48 80 232;
+  --risk-rgb:     192 57 43;
+  --excess-rgb:   11 125 113;
+  --override-rgb: 184 116 0;
 
-  --e1: 0 1px 2px rgba(15, 23, 33, 0.06);
-  --e2: 0 8px 24px rgba(15, 23, 33, 0.12);
+  --grad-accent: linear-gradient(180deg, #4763F0 0%, #2C49DE 100%);
+
+  --e1: 0 1px 2px rgba(15, 23, 33, 0.07),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --e2: 0 4px 12px rgba(15, 23, 33, 0.07),
+        0 1px 2px rgba(15, 23, 33, 0.06);
+  --e3: 0 24px 56px rgba(15, 23, 33, 0.16),
+        0 2px 8px rgba(15, 23, 33, 0.08);
 }
 
 @media (prefers-reduced-motion: reduce) {

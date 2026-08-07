@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dqstack",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "dqstack.serve", "--port", "8123"],
+      "port": 8123
+    }
+  ]
+}
