@@ -139,6 +139,15 @@ window.Plain = (() => {
     return { word: "Poor", note: "The history has serious gaps. Treat this forecast as a rough guide only.", tone: "urgent" };
   }
 
+  /** For a product with no history at all. "Poor" is a judgement about the data;
+      this is the absence of any data to judge, which is a different message and
+      calls for a different action from the planner. */
+  const qualityUnknown = () => ({
+    word: "Not yet known",
+    note: "There is no sales history for this product, so there is nothing to assess. Expect to steer it by hand for the first few weeks.",
+    tone: "info",
+  });
+
   /* ---- how confident are we? -------------------------------------------
      relWidth is the interval width relative to the median, so it is comparable
      across products of wildly different size. */
@@ -265,6 +274,6 @@ window.Plain = (() => {
   ];
 
   return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, quality, confidence,
-           service, feature, money, units, change, calibrate, GLOSSARY,
+           service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
            get CUT() { return CUT; } };
 })();

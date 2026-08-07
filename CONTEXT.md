@@ -552,6 +552,72 @@ spreadsheet, shortcuts. Six destinations, all one click.
 App code 102.9 KB gzipped against the 250 KB budget; 94 tests pass; zero
 horizontal overflow across all six views.
 
+### C6. Self-audit of the front end, and what it turned up — DONE
+
+Asked to find the design flaws myself. Six real ones, found by probing the running
+application rather than by reading the code.
+
+1. **The primary surface had no keyboard flow.** The spreadsheet had nine
+   keybindings; the Today list, which is what a planner works every morning, had
+   zero — twenty-four decisions meant twenty-four trips to the mouse. Added
+   **J/K** to move, **A** or **Enter** to approve, **C** to change, **S** to skip,
+   **W** for why, **O** to open the product. Letters chosen to be sayable rather
+   than to mirror spreadsheet convention, because this is not a spreadsheet. The
+   focus ring only paints after a key is actually pressed, since a ring sitting on
+   the first card before anyone touched the keyboard reads as a stuck state. Keys
+   are inert while a modal is open or a field has focus.
+
+2. **The review flow had no terminal action.** You could clear the whole list and
+   the only trace was a tab labelled "Reviewed" — the spreadsheet had a Commit
+   button and the front door did not. Added a sticky summary bar: what you decided,
+   what it is worth (quoting `totalPendingImpact`, the *same* estimator the
+   spreadsheet uses, so the two can never disagree), and the two things you might
+   do with it.
+
+3. **Decisions could not leave the browser.** Added CSV export of the whole
+   session — product, store, why it was flagged, action, model forecast, your
+   value, the delta, money at risk, both dates — with range additions and removals
+   in the same file. UTF-8 BOM so Excel on Windows does not mangle it, and a Blob
+   download so it works from `file://` too.
+
+4. **No route from a decision card to the product's own page.** Added a *Full
+   details* button and the **O** key.
+
+5. **Products had no store filter and no sort.** Ten stores, a thousand products,
+   alphabetical only — "the worst thing in my store" meant reading a thousand rows.
+   Added a store filter and five orderings, and the trailing figure on each row now
+   changes to match the sort, because sorting by "most at risk" while displaying
+   unit forecasts looks like a broken sort.
+
+6. **A brand-new product reported "Data quality: Poor".** Wrong: there is no
+   history to judge, which is a different statement from judging it badly. Now
+   "Not yet known", with the sub-line reporting how many comparable products the
+   estimate came from instead of a confidence level inherited from a prototype.
+
+Also fixed: a dead `.rc-why::first-line` rule (the line break depends on the
+viewport, so it coloured an arbitrary number of words) replaced by an explicit
+element; and the product list was `display: none` below 1000px, leaving no way to
+browse at all on a narrow window — it is now a stacked panel above the detail.
+
+**Added because it is genuinely useful, not to fill space:** *the same product in
+other stores* on the product page — a peer bar chart of next week's forecast across
+every store carrying the item, each one clickable. It is the fastest sanity check
+on an odd forecast ("is it just this store?") and, for a cold-start product, it is
+the evidence the estimate was built from.
+
+**Two bugs found in my own new code while verifying it:**
+
+- **Committing undid the review.** `onCommit` cleared the reviewed map, so all
+  twenty-four cards reappeared the moment you finished them. Committed items are
+  now tracked separately: they stay reviewed, the summary counts only what is
+  still pending, and the Reviewed tab marks them committed and withdraws Undo.
+- **The commit toast claimed a ledger write that does not happen.** It said
+  "recorded in the override ledger"; there is no write path to a system of record.
+  It now says to export the CSV, which is the truth and also the useful next step.
+
+App code 108.6 KB gzipped against the 250 KB budget; 94 tests pass; zero
+horizontal overflow across all six views.
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -588,6 +654,10 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **A commit must not clear the state that records what was done.** Track
+  committed separately from reviewed, or finishing the work undoes it.
+- **Do not claim a write that does not happen.** There is no system of record; the
+  CSV is the only way decisions leave the browser.
 - **Search must match what is on the screen**, not the internal identifier. The
   bundle's item codes (`FOODS_1_001`) are never shown to a user.
 - **Never copy a derived number from a prototype product.** `orderUpTo` is a

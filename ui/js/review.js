@@ -34,9 +34,12 @@ window.Review = (() => {
   const state = {
     tab: "urgent",
     reviewed: new Map(),         // id -> {action, value}
+    committed: new Set(),        // ids already committed; still reviewed, not pending
     expanded: new Set(),
     editing: null,
     limit: 24,
+    cursor: 0,                   // keyboard position within the visible list
+    keyboard: false,             // only paint the ring once a key has been used
   };
 
   /* ------------------------------------------------------------- the queue */
@@ -200,7 +203,11 @@ window.Review = (() => {
     const secondary = Plain.others(s.reasons);
     const shown = done && done.action === "changed" ? done.value : now;
 
+    const list = forTab(state.tab);
+    const isFocus = state.keyboard && list[Math.min(state.cursor, list.length - 1)]?.id === r.id;
+
     return `<article class="rc" data-id="${e(r.id)}" data-tone="${r.head.tone}"
+             ${isFocus ? 'data-focus="true"' : ""}
              ${done ? `data-done="${e(done.action)}"` : ""}>
 
       <header class="rc-top">
@@ -216,7 +223,7 @@ window.Review = (() => {
       </header>
 
       <p class="rc-why" title="${e(r.head.term)}">
-        <span class="rc-dot"></span>${e(r.head.label)} — ${e(r.head.detail)}
+        <span class="rc-dot"></span><b>${e(r.head.label)}</b> — ${e(r.head.detail)}
       </p>
 
       <div class="rc-chart">
@@ -262,15 +269,18 @@ window.Review = (() => {
       </div>` : `
       <div class="rc-actions">
         ${done ? `
-          <button class="btn btn-quiet" data-act="undo">Undo</button>
-          <span class="rc-done-note">${e(doneNote(done, now))}</span>
+          ${state.committed.has(r.id) ? "" :
+            '<button class="btn btn-quiet" data-act="undo">Undo</button>'}
+          <span class="rc-done-note">${e(doneNote(done, now) + committedNote(r.id))}</span>
         ` : `
           <button class="btn btn-primary" data-act="approve">
-            Approve ${Plain.units(now)} units
+            Approve ${Plain.units(now)} units <span class="kbd">A</span>
           </button>
-          <button class="btn" data-act="edit">Change the number</button>
-          <button class="btn btn-quiet" data-act="skip">Skip</button>
+          <button class="btn" data-act="edit">Change <span class="kbd">C</span></button>
+          <button class="btn btn-quiet" data-act="skip">Skip <span class="kbd">S</span></button>
         `}
+        <button class="btn btn-quiet" data-act="open"
+                title="Open this product's own page">Full details</button>
         <button class="rc-more" data-act="toggle" aria-expanded="${open}">
           ${open ? "Hide detail" : "Why this number?"}
         </button>
@@ -364,6 +374,8 @@ window.Review = (() => {
   const doneWord = (d) =>
     d.action === "approved" ? "Approved" : d.action === "changed" ? "Changed" : "Skipped";
 
+  const committedNote = (id) => (state.committed.has(id) ? " · committed" : "");
+
   function doneNote(d, orig) {
     if (d.action === "approved") return `Approved at ${Plain.units(orig)} units.`;
     if (d.action === "skipped") return "Skipped — left as it was.";
@@ -428,7 +440,10 @@ window.Review = (() => {
       b.hidden = k === "done" && c.done === 0;
     }
 
+    renderSummary();
+
     const list = forTab(state.tab);
+    if (state.cursor >= list.length) state.cursor = Math.max(0, list.length - 1);
     $("rvList").innerHTML = list.length
       ? list.map(card).join("")
       : emptyState(c);
@@ -437,6 +452,61 @@ window.Review = (() => {
       const inp = $("rvList").querySelector(".rc-input");
       if (inp) { inp.focus(); inp.select(); }
     }
+  }
+
+  /* Decisions used to accumulate with nowhere to go: you could clear the whole
+     list and the only trace was a tab labelled "Reviewed". The spreadsheet has a
+     Commit button and the front door did not, which meant the primary surface had
+     no terminal action at all. This bar is that ending — what you did, what it is
+     worth, and the two things you might want to do with it. */
+  function renderSummary() {
+    const bar = $("rvSummary");
+    if (!bar) return;
+    // Only *uncommitted* decisions are pending. Committing used to clear the whole
+    // reviewed map, which meant all twenty-four cards reappeared on the list the
+    // moment you finished them — the commit undid the review.
+    const pending = [...state.reviewed.keys()].filter((id) => !state.committed.has(id));
+    const n = pending.length;
+    bar.hidden = n === 0;
+    if (!n) return;
+
+    let changed = 0;
+    for (const id of pending) if (state.reviewed.get(id).action === "changed") changed++;
+    const impact = hooks.impact ? hooks.impact() : 0;
+
+    $("rvSummaryText").innerHTML =
+      `<b>${n}</b> decision${n === 1 ? "" : "s"} made` +
+      (changed ? ` &middot; <b>${changed}</b> number${changed === 1 ? "" : "s"} changed` : "") +
+      (changed
+        ? ` &middot; expected margin effect <b class="${impact >= 0 ? "rc-up" : "rc-down"}">` +
+          `${Plain.money(impact, { sign: true })}</b>`
+        : " &middot; nothing changed, so no margin effect");
+    $("rvCommit").disabled = n === 0;
+  }
+
+  /** What was decided, as data. A planner who has spent twenty minutes on this
+      list should be able to take it away — to a buyer, to an email, to a
+      spreadsheet — without retyping it. */
+  function decisions({ pendingOnly = false } = {}) {
+    const out = [];
+    for (const [id, d] of state.reviewed) {
+      if (pendingOnly && state.committed.has(id)) continue;
+      const r = byId(id);
+      if (!r) continue;
+      const model = week1(r.s);
+      out.push({
+        product: prettyItem(r.s.item), store: prettyStore(r.s.store),
+        category: Plain.catWord(r.s.cat), id,
+        flag: r.head.label,
+        action: d.action,
+        committed: state.committed.has(id) ? "yes" : "no",
+        modelForecast: Math.round(model),
+        yourValue: d.action === "changed" ? d.value : Math.round(model),
+        change: d.action === "changed" ? Math.round(d.value - model) : 0,
+        moneyAtRisk: Math.round(r.risk),
+      });
+    }
+    return out;
   }
 
   function emptyState(c) {
@@ -460,6 +530,58 @@ window.Review = (() => {
       <p>${U.esc(msg.p)}</p>
       ${msg.cta ? `<button class="btn" data-goto="${msg.cta}">See what to check</button>` : ""}
     </div>`;
+  }
+
+  /* ------------------------------------------------------------- keyboard
+
+     The spreadsheet has nine keybindings and the front door had none, which is
+     backwards: the review list is the surface a planner works every morning, and
+     twenty-four decisions is twenty-four round trips to the mouse. The letters are
+     chosen to be sayable — Approve, Change, Skip, Open, Why — rather than to
+     mirror the grid's spreadsheet conventions, because this is not a spreadsheet.
+
+     The ring only appears once a key has actually been pressed. A focus ring
+     sitting on the first card before anyone has touched the keyboard reads as a
+     stuck state. */
+
+  const inField = () =>
+    /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || "");
+
+  function moveCursor(delta) {
+    const list = forTab(state.tab);
+    if (!list.length) return;
+    state.keyboard = true;
+    state.cursor = Math.max(0, Math.min(list.length - 1, state.cursor + delta));
+    render();
+    const el = $("rvList").querySelector('.rc[data-focus="true"]');
+    el?.scrollIntoView({ block: "nearest" });
+  }
+
+  function focused() {
+    const list = forTab(state.tab);
+    return list[Math.min(state.cursor, list.length - 1)] || null;
+  }
+
+  function onKey(ev) {
+    if (state.tab === "done") return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+
+    // Inside the inline editor only Enter and Escape mean anything; the rest is
+    // someone typing a number.
+    if (inField()) return;
+
+    const r = focused();
+    const k = ev.key;
+
+    if (k === "j" || k === "ArrowDown") { ev.preventDefault(); return moveCursor(1); }
+    if (k === "k" || k === "ArrowUp") { ev.preventDefault(); return moveCursor(-1); }
+    if (!r) return;
+
+    if (k === "a" || k === "Enter") { ev.preventDefault(); state.keyboard = true; return act(r.id, "approve"); }
+    if (k === "s") { ev.preventDefault(); state.keyboard = true; return act(r.id, "skip"); }
+    if (k === "c") { ev.preventDefault(); state.keyboard = true; return act(r.id, "edit"); }
+    if (k === "o") { ev.preventDefault(); return hooks.onOpenProduct?.(r.id); }
+    if (k === "w") { ev.preventDefault(); state.keyboard = true; return act(r.id, "toggle"); }
   }
 
   /* -------------------------------------------------------------- actions */
@@ -524,6 +646,10 @@ window.Review = (() => {
         const v = Math.max(0, Math.round(+cardEl.querySelector(".rc-input").value || 0));
         return act(id, "changed", v);
       }
+      if (a === "open") return hooks.onOpenProduct?.(id);
+      // A mouse click also moves the keyboard cursor, so the two never disagree.
+      const idx = forTab(state.tab).findIndex((r) => r.id === id);
+      if (idx >= 0) state.cursor = idx;
       act(id, a);
     });
 
@@ -539,10 +665,33 @@ window.Review = (() => {
     });
 
     document.querySelectorAll(".rv-tab").forEach((b) =>
-      b.addEventListener("click", () => { state.tab = b.dataset.tab; render(); }));
+      b.addEventListener("click", () => {
+        state.tab = b.dataset.tab; state.cursor = 0; render();
+      }));
+
+    $("rvCommit").addEventListener("click", () => {
+      const rows = decisions({ pendingOnly: true });
+      if (!rows.length) return;
+      hooks.onCommit?.(rows);
+      // Committed items stay reviewed — they are done, not undone.
+      for (const r of rows) state.committed.add(r.id);
+      render();
+    });
+    // Export the whole session, committed or not: the file is a record of what was
+    // decided, and a planner emailing it does not care which half was committed.
+    $("rvExport").addEventListener("click", () => hooks.onExport?.(decisions()));
+
+    // Scoped to the document but inert unless Today is the visible view, so the
+    // spreadsheet's own bindings are never shadowed.
+    document.addEventListener("keydown", (ev) => {
+      if (document.getElementById("view-today")?.dataset.active !== "true") return;
+      if (document.querySelector('.palette[data-open="true"], .sheet-modal[data-open="true"]')) return;
+      onKey(ev);
+    });
 
     render();
   }
 
-  return { init, render, get state() { return state; }, prettyItem, prettyStore };
+  return { init, render, decisions, get state() { return state; },
+           prettyItem, prettyStore, get rows() { return rows; } };
 })();

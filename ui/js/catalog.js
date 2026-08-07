@@ -41,6 +41,8 @@ window.Catalog = (() => {
     query: "",
     cat: "",
     flagged: false,
+    store: "",
+    sort: "name",
     selected: null,
     added: new Map(),              // id -> product (session-local)
     removed: new Set(),            // ids marked for removal
@@ -53,19 +55,37 @@ window.Catalog = (() => {
      M5 identifier prettifier — it does not match `HOBBIES_NEW_001` and fell back
      to printing the raw key. */
   const name = (s) => s._name || Review.prettyItem(s.item);
+  const isNewProduct = (s) => !!s._new;
 
   /* ------------------------------------------------------------- the list */
 
+  /* A planner is usually responsible for a store or a region, and the list was
+     alphabetical across all ten of them with no way to narrow or reorder — so
+     finding "the worst thing in my store" meant reading a thousand rows. */
+  const atRisk = (s) => (s.ledger?.lostMargin || 0) + (s.ledger?.wasteCost || 0);
+
+  const SORTS = {
+    name: (a, b) => (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : 0),
+    risk: (a, b) => atRisk(b) - atRisk(a),
+    revenue: (a, b) => (b.revenue || 0) - (a.revenue || 0),
+    demand: (a, b) => week1(b) - week1(a),
+    health: (a, b) => (a.health || 0) - (b.health || 0),
+  };
+
   const visible = () => {
     const q = state.query.trim().toLowerCase();
-    return all.filter((s) => {
+    const out = all.filter((s) => {
       if (state.cat && s.cat !== state.cat) return false;
+      if (state.store && s.store !== state.store) return false;
       if (state.flagged && !s.reasons.length) return false;
       if (!q) return true;
       return s.item.toLowerCase().includes(q) || s.store.toLowerCase().includes(q) ||
              s.id.toLowerCase().includes(q) || s.dept.toLowerCase().includes(q) ||
              name(s).toLowerCase().includes(q);
     });
+    // Tie-broken on name so the order is stable and does not shuffle on re-render.
+    const cmp = SORTS[state.sort] || SORTS.name;
+    return out.sort((a, b) => cmp(a, b) || SORTS.name(a, b));
   };
 
   function renderList() {
@@ -94,7 +114,7 @@ window.Catalog = (() => {
             <span class="cat-row-end">
               ${isNew ? '<span class="cat-tag new">new</span>'
                       : removed ? '<span class="cat-tag gone">removing</span>'
-                      : `<span class="cat-row-num">${Plain.units(week1(s))}</span>`}
+                      : `<span class="cat-row-num">${rowNum(s)}</span>`}
             </span>
           </button>`;
         }).join("")
@@ -103,6 +123,17 @@ window.Catalog = (() => {
     $("catMore").hidden = list.length <= state.limit;
     $("catMore").textContent = `Show ${Math.min(200, list.length - state.limit)} more ` +
       `(${(list.length - state.limit).toLocaleString()} not shown)`;
+  }
+
+  /** Whatever the list is sorted by is what the trailing figure shows. Sorting by
+      "most at risk" while displaying unit forecasts looks like a broken sort. */
+  function rowNum(s) {
+    switch (state.sort) {
+      case "risk": return Plain.money(atRisk(s));
+      case "revenue": return Plain.money(s.revenue || 0);
+      case "health": return (s.health ?? 0).toFixed(2);
+      default: return Plain.units(week1(s));
+    }
   }
 
   /* ----------------------------------------------------------- the detail */
@@ -177,7 +208,10 @@ window.Catalog = (() => {
     const e = U.esc;
     const isNew = state.added.has(s.id);
     const removed = state.removed.has(s.id);
-    const q = Plain.quality(s.health);
+    // A brand-new product has no history, so "Poor data quality" is the wrong
+    // statement — there is nothing to judge yet, which is a different thing from
+    // judging it badly.
+    const q = isNewProduct(s) ? Plain.qualityUnknown() : Plain.quality(s.health);
     const conf = Plain.confidence(s.relWidth);
     const svc = Plain.service(s);
     const b = s.weekly ? { lo: s.weekly[0][1], hi: s.weekly[0][5] } : { lo: 0, hi: 0 };
@@ -246,10 +280,12 @@ window.Catalog = (() => {
             : `<span class="rc-fig-val">${Plain.units(s.orderUpTo)}<small>units</small></span>
                <span class="rc-fig-sub">covers ${COVER()} days, to ${svc.pct}% service</span>`}
         </div>
-        <div class="rc-fig">
+        <div class="rc-fig" title="${e(q.note)}">
           <span class="rc-fig-cap">Data quality</span>
           <span class="rc-fig-val rc-q-${q.tone}">${e(q.word)}</span>
-          <span class="rc-fig-sub">confidence ${e(conf.word.toLowerCase())}</span>
+          <span class="rc-fig-sub">${isNewProduct(s)
+            ? `estimated from ${s._estimateFrom || 0} similar products`
+            : `confidence ${e(conf.word.toLowerCase())}`}</span>
         </div>
         <div class="rc-fig">
           <span class="rc-fig-cap">Sells for</span>
@@ -283,8 +319,41 @@ window.Catalog = (() => {
         </ul>
       </section>` : ""}
 
+      ${similarBlock(s)}
+
       <p class="rc-fine">Internal id <code>${e(s.id)}</code> &middot;
         ${e(svc.why)}</p>`;
+  }
+
+  /** The same product in other stores. Useful in two directions: it is the fastest
+      sanity check on an odd-looking forecast ("is it just this store?"), and for a
+      new or cold-start product it is the evidence the estimate was built from. */
+  function similarBlock(s) {
+    const peers = all
+      .filter((x) => x.item === s.item && x.id !== s.id && !state.removed.has(x.id))
+      .sort((a, b) => week1(b) - week1(a))
+      .slice(0, 6);
+    if (!peers.length) return "";
+    const e = U.esc;
+    const hi = Math.max(...peers.map(week1), week1(s), 1);
+    const bar = (x) => ((week1(x) / hi) * 100).toFixed(0);
+    return `<section class="cat-similar">
+      <h4>The same product in other stores</h4>
+      <ul class="cat-peers">
+        <li class="is-self">
+          <span class="cp-name">${e(Review.prettyStore(s.store))} <b>(this one)</b></span>
+          <span class="cp-bar"><i style="width:${bar(s)}%"></i></span>
+          <span class="cp-num">${Plain.units(week1(s))}</span>
+        </li>
+        ${peers.map((x) => `<li>
+          <button class="cp-name cp-link" data-goto="${e(x.id)}">${e(Review.prettyStore(x.store))}</button>
+          <span class="cp-bar"><i style="width:${bar(x)}%"></i></span>
+          <span class="cp-num">${Plain.units(week1(x))}</span>
+        </li>`).join("")}
+      </ul>
+      <p class="rc-fine">Next week's forecast, same product. A store far from the
+        others is worth a second look before you act on it.</p>
+    </section>`;
   }
 
   /* ------------------------------------------------------- add and remove */
@@ -430,8 +499,9 @@ window.Catalog = (() => {
     const s = all.find((x) => x.id === id);
     if (!s) return false;
     if (!visible().some((x) => x.id === id)) {
-      state.query = ""; state.cat = ""; state.flagged = false;
+      state.query = ""; state.cat = ""; state.flagged = false; state.store = "";
       $("catSearch").value = "";
+      $("catStore").value = "";
       document.querySelectorAll("#catFilters [data-cat]").forEach((b) =>
         b.setAttribute("aria-pressed", String(b.dataset.cat === "")));
       $("catFlagged").setAttribute("aria-pressed", "false");
@@ -468,9 +538,17 @@ window.Catalog = (() => {
       const b = e.target.closest(".cat-row");
       if (b) select(b.dataset.id);
     });
+    $("catStore").addEventListener("change", (e) => {
+      state.store = e.target.value; state.limit = 200; renderList();
+    });
+    $("catSort").addEventListener("change", (e) => {
+      state.sort = e.target.value; state.limit = 200; renderList();
+    });
     $("catMore").addEventListener("click", () => { state.limit += 200; renderList(); });
 
     $("catDetail").addEventListener("click", (e) => {
+      const goto = e.target.closest("[data-goto]");
+      if (goto) return select(goto.dataset.goto);
       const b = e.target.closest("[data-act]");
       if (!b) return;
       if (b.dataset.act === "remove") removeProduct(state.selected);
@@ -485,6 +563,8 @@ window.Catalog = (() => {
 
     // Add-product dialog.
     const stores = [...new Set(D.series.map((s) => s.store))].sort();
+    $("catStore").innerHTML = '<option value="">All stores</option>' + stores.map((x) =>
+      `<option value="${U.esc(x)}">${U.esc(Review.prettyStore(x))}</option>`).join("");
     $("apStore").innerHTML = stores.map((s) =>
       `<option value="${U.esc(s)}">${U.esc(Review.prettyStore(s))}</option>`).join("");
     $("catAdd").addEventListener("click", () => {

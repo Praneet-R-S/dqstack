@@ -12,7 +12,7 @@
 
 <link rel="stylesheet" href="css/tokens.css?v=eac8bed0">
 <link rel="stylesheet" href="css/app.css?v=e49a8cda">
-<link rel="stylesheet" href="css/simple.css?v=89eac8e6">
+<link rel="stylesheet" href="css/simple.css?v=ae4b57e3">
 </head>
 <body>
 <div id="app">
@@ -171,6 +171,14 @@
         </button>
       </div>
 
+      <div class="rv-summary" id="rvSummary" hidden>
+        <span class="rv-summary-text" id="rvSummaryText"></span>
+        <span class="rv-summary-act">
+          <button class="btn" id="rvExport">Export as CSV</button>
+          <button class="btn btn-primary" id="rvCommit">Commit decisions</button>
+        </span>
+      </div>
+
       <div class="rv-list" id="rvList" aria-live="polite"></div>
     </div>
   </section>
@@ -193,6 +201,24 @@
         <button data-cat="HOUSEHOLD" aria-pressed="false">Household</button>
         <button data-cat="HOBBIES" aria-pressed="false">Hobbies</button>
         <button id="catFlagged" aria-pressed="false" class="cat-flagged">Needs attention</button>
+      </div>
+      <div class="cat-selects">
+        <label class="field">
+          <span class="sr-only">Store</span>
+          <select class="sel" id="catStore" aria-label="Filter by store">
+            <option value="">All stores</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="sr-only">Order by</span>
+          <select class="sel" id="catSort" aria-label="Order the list by">
+            <option value="name">A&ndash;Z</option>
+            <option value="risk">Most at risk</option>
+            <option value="revenue">Biggest sellers</option>
+            <option value="demand">Highest forecast</option>
+            <option value="health">Worst data</option>
+          </select>
+        </label>
       </div>
       <p class="cat-count" id="catCount">&mdash;</p>
       <div class="cat-list" id="catList" role="listbox" aria-label="Products"></div>
@@ -539,6 +565,14 @@
      aria-label="Keyboard shortcuts">
   <div class="palette-head">Keyboard — spreadsheet conventions, not a new language</div>
   <div class="palette-list">
+    <div class="palette-item ks-group"><span>On today&rsquo;s list</span><span></span></div>
+    <div class="palette-item"><span>Next / previous decision</span><span class="kbd">J / K</span></div>
+    <div class="palette-item"><span>Approve the focused one</span><span class="kbd">A or ↵</span></div>
+    <div class="palette-item"><span>Change its number</span><span class="kbd">C</span></div>
+    <div class="palette-item"><span>Skip it</span><span class="kbd">S</span></div>
+    <div class="palette-item"><span>Why this number</span><span class="kbd">W</span></div>
+    <div class="palette-item"><span>Open the product&rsquo;s page</span><span class="kbd">O</span></div>
+    <div class="palette-item ks-group"><span>In the spreadsheet</span><span></span></div>
     <div class="palette-item"><span>Move cell selection</span><span class="kbd">← ↑ ↓ →</span></div>
     <div class="palette-item"><span>Extend selection</span><span class="kbd">Shift + arrows</span></div>
     <div class="palette-item"><span>Next / previous exception</span><span class="kbd">J / K</span></div>
@@ -667,14 +701,14 @@ FROM series GROUP BY 1 ORDER BY series DESC</textarea>
 <div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
 
 <script src="data/bundle.js?v=e6dbcf0a"></script>
-<script src="js/plain.js?v=5ba1ab3a"></script>
+<script src="js/plain.js?v=6cf59f73"></script>
 <script src="js/duck.js?v=64beaf16"></script>
 <script src="js/util.js?v=251bf016"></script>
 <script src="js/grid.js?v=be833f18"></script>
 <script src="js/chart.js?v=9922be45"></script>
 <script src="js/views.js?v=75c048ff"></script>
-<script src="js/catalog.js?v=781e8306"></script>
-<script src="js/review.js?v=8ddba281"></script>
-<script src="js/app.js?v=5ce9aa5a"></script>
+<script src="js/catalog.js?v=04fd7a06"></script>
+<script src="js/review.js?v=c9b414de"></script>
+<script src="js/app.js?v=e6c3c556"></script>
 </body>
 </html>

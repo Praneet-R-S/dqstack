@@ -217,7 +217,10 @@
   background: var(--tone); margin-right: var(--s4);
   vertical-align: 0.12em;
 }
-.rc-why::first-line { color: var(--text-primary); }
+/* ::first-line cannot be used to emphasise the reason label: the line break
+   depends on the viewport, so it coloured an arbitrary number of words and none of
+   the right ones. The label is wrapped in its own element instead. */
+.rc-why b { color: var(--text-primary); font-weight: 600; }
 
 /* ---- the sparkline ---------------------------------------------------- */
 .rc-chart { margin-bottom: var(--s6); }
@@ -871,3 +874,99 @@
 .ap-preview b { color: var(--series-forecast); font-weight: 600; }
 
 .rc-fig-val.rc-pending { color: var(--text-tertiary); font-size: var(--fs-16); }
+
+/* ================================================= review: keyboard + summary */
+
+/* The keyboard ring. Only ever painted once a key has been pressed, so it cannot
+   read as a stuck selection on load. */
+.rc[data-focus="true"] {
+  border-color: var(--series-forecast);
+  box-shadow: 0 0 0 3px rgba(var(--forecast-rgb) / 0.22), var(--e2);
+}
+.rc[data-focus="true"]::before { width: 4px; }
+
+.rc-actions .kbd { margin-left: var(--s3); }
+.rc-actions .btn-primary .kbd {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* The terminal action for a review session. Sticky, because a planner who has
+   worked twenty cards should not have to scroll back up to finish. */
+.rv-summary {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: var(--s6); flex-wrap: wrap;
+  margin-bottom: var(--s6); padding: var(--s5) var(--s6);
+  background: color-mix(in srgb, var(--bg-overlay) 94%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-strong); border-radius: var(--r-card);
+  box-shadow: var(--e2);
+}
+.rv-summary[hidden] { display: none; }
+.rv-summary-text {
+  flex: 1; min-width: 240px; font-size: var(--fs-13);
+  color: var(--text-secondary); line-height: var(--lh-prose);
+}
+.rv-summary-text b { color: var(--text-primary); font-weight: 600; }
+.rv-summary-act { display: flex; gap: var(--s4); flex-wrap: wrap; }
+
+.ks-group {
+  background: var(--bg-raised); font-size: var(--fs-10) !important;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--text-tertiary);
+}
+
+/* ==================================================== products: new controls */
+
+.cat-selects { display: flex; gap: var(--s3); padding: 0 var(--s5) var(--s4); }
+.cat-selects .field { flex: 1; min-width: 0; }
+.cat-selects .sel { width: 100%; max-width: none; }
+
+/* ---- the same product in other stores ------------------------------------ */
+.cat-similar { margin-top: var(--s7); }
+.cat-similar h4 {
+  font-size: var(--fs-11); text-transform: uppercase;
+  letter-spacing: var(--tracking-caps); color: var(--text-tertiary);
+  margin-bottom: var(--s4); font-weight: 600;
+}
+.cat-peers { list-style: none; margin: 0 0 var(--s4); padding: 0; display: grid; gap: var(--s3); }
+.cat-peers li {
+  display: grid; grid-template-columns: minmax(0, 160px) 1fr 70px;
+  align-items: center; gap: var(--s5);
+}
+.cp-name {
+  font-size: var(--fs-12); color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: left;
+}
+.cp-name b { color: var(--text-tertiary); font-weight: 400; }
+.cp-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--series-forecast); text-decoration: underline;
+  text-underline-offset: 2px; text-decoration-thickness: 1px;
+  font: inherit;
+}
+.cp-link:hover { text-decoration-thickness: 2px; }
+.cat-peers .is-self .cp-name { color: var(--text-primary); font-weight: 500; }
+.cp-bar { height: 7px; background: var(--bg-inset); border-radius: var(--r-pill); overflow: hidden; }
+.cp-bar i { display: block; height: 100%; background: var(--series-forecast); opacity: 0.55; }
+.cat-peers .is-self .cp-bar i { opacity: 1; }
+.cp-num {
+  font-family: var(--font-num); font-size: var(--fs-12);
+  color: var(--text-secondary); text-align: right;
+}
+
+/* ---- narrow: the product list stays reachable ----------------------------
+   It was hidden outright below 1000px, which left no way to browse at all on a
+   narrow window — search was the only route in. It becomes a stacked panel above
+   the detail instead, which is worse than side-by-side and much better than gone. */
+@media (max-width: 1000px) {
+  #view-products {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 40%) minmax(0, 60%);
+    overflow: hidden;
+  }
+  .cat-side { display: grid; border-right: 0; border-bottom: 1px solid var(--border-strong); }
+  .cat-peers li { grid-template-columns: minmax(0, 110px) 1fr 60px; }
+}

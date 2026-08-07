@@ -695,6 +695,61 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     }
   }
 
+  /* ============================================================== export
+
+     A planner who has spent twenty minutes on the list should be able to take the
+     result away without retyping it. CSV rather than anything cleverer because the
+     destination is Excel, an email, or a buyer — and a Blob download works from
+     `file://` as well as over HTTP, which nothing server-side would. */
+
+  function csvCell(v) {
+    const t = v == null ? "" : String(v);
+    return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  }
+
+  function download(name, text, mime = "text/csv;charset=utf-8") {
+    // BOM so Excel on Windows reads UTF-8 rather than the system codepage — the
+    // same class of bug that corrupted a pipeline log earlier in this project.
+    const blob = new Blob(["\ufeff" + text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportDecisions(rows) {
+    if (!rows.length) return toast("Nothing to export yet");
+    const cat = Catalog.state;
+    const head = ["product", "store", "category", "why_flagged", "action",
+                  "model_forecast_units", "your_value_units", "change_units",
+                  "money_at_risk", "forecast_made", "exported_for_week_of"];
+    const lines = [head.join(",")];
+    for (const r of rows) {
+      lines.push([r.product, r.store, r.category, r.flag, r.action,
+                  r.modelForecast, r.yourValue, r.change, r.moneyAtRisk,
+                  D.run.origin, D.dates.future[0]].map(csvCell).join(","));
+    }
+    // Range changes ride along in the same file: they are part of the same
+    // decision set and a second download would just get lost.
+    for (const [id, p] of cat.added) {
+      lines.push([p._name || p.item, Review.prettyStore(p.store), Plain.catWord(p.cat),
+                  "new product", "added", "", "", "", "",
+                  D.run.origin, D.dates.future[0]].map(csvCell).join(","));
+    }
+    for (const id of cat.removed) {
+      const p = Catalog.all.find((x) => x.id === id);
+      if (!p) continue;
+      lines.push([p._name || Review.prettyItem(p.item), Review.prettyStore(p.store),
+                  Plain.catWord(p.cat), "removed from range", "removed",
+                  "", "", "", Math.round(p.ledger?.realizedMargin || 0),
+                  D.run.origin, D.dates.future[0]].map(csvCell).join(","));
+    }
+    const extra = cat.added.size + cat.removed.size;
+    download(`dq-stack-decisions-${D.run.origin}.csv`, lines.join("\r\n"));
+    toast(`Exported ${rows.length + extra} row${rows.length + extra === 1 ? "" : "s"}`);
+  }
+
   /* ============================================================ palette */
 
   let palIdx = 0, palItems = [];
@@ -1018,6 +1073,29 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
        and finish in the table without losing work. */
     Review.init(D, {
       onToast: toast,
+
+      // The summary bar quotes the same estimator the spreadsheet's impact figure
+      // uses, so the two surfaces can never disagree about what a change is worth.
+      impact: totalPendingImpact,
+
+      onOpenProduct: (id) => { setView("products"); Catalog.reveal(id); },
+
+      onCommit: (rows) => {
+        const n = rows.length;
+        const impact = totalPendingImpact();
+        // Same honesty as the spreadsheet's commit: announced and cleared, because
+        // there is no write path to a system of record. Saying "sent to SAP" would
+        // be a lie, and saying nothing would be worse.
+        Grid.commitAll();
+        ALL_ROWS.forEach((r) => (r._s._override = null));
+        syncPending();
+        // No claim about a system of record, because there is not one. The CSV is
+        // the only way these leave the browser, so the toast says so.
+        toast(`${n} decision${n === 1 ? "" : "s"} committed · ` +
+              `${U.money(impact)} expected effect · export the CSV to take them away`);
+      },
+
+      onExport: (rows) => exportDecisions(rows),
       onCount: (n) => {
         const b = $("sbTodayBadge");
         if (!b) return;
