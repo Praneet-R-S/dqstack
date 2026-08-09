@@ -1225,6 +1225,21 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     });
     $("keysBackdrop").addEventListener("click", () => toggleKeys(false));
     $("hintKeys")?.addEventListener("click", () => toggleKeys(true));
+
+    /* The orientation strip is 87px of permanent onboarding sitting on top of the
+       densest, most keyboard-driven surface in the application — read once, then
+       furniture forever. Dismissing it is remembered and hands the height back to
+       the grid, which is the one surface the design says must never give up space.
+       `display: none` on the element rather than a template-row change: altering
+       .main's rows has collapsed the grid to zero height twice in this project. */
+    const hintOff = localStorage.getItem("dq.hint") === "off";
+    if (hintOff) document.documentElement.dataset.hint = "off";
+    $("hintDismiss")?.addEventListener("click", () => {
+      document.documentElement.dataset.hint = "off";
+      try { localStorage.setItem("dq.hint", "off"); } catch (_) {}
+      requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
+      toast("Tip hidden — the shortcuts are in the sidebar under Tools");
+    });
     // In-prose links to another view, so the spreadsheet can point at the simpler
     // tool without the reader having to find it in the sidebar.
     document.addEventListener("click", (e) => {

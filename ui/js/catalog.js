@@ -226,7 +226,7 @@ window.Catalog = (() => {
     const s = all.find((x) => x.id === state.selected);
     if (!s) {
       host.innerHTML = `<div class="cat-blank">
-        <div class="cat-blank-mark" aria-hidden="true">&#9678;</div>
+        <div class="cat-blank-mark" aria-hidden="true"></div>
         <h3>Pick a product</h3>
         <p>Choose one from the list to see how it has been selling, what it is
            forecast to sell next, and how much to stock.</p>
@@ -365,24 +365,53 @@ window.Catalog = (() => {
       .slice(0, 6);
     if (!peers.length) return "";
     const e = U.esc;
-    const hi = Math.max(...peers.map(week1), week1(s), 1);
-    const bar = (x) => ((week1(x) / hi) * 100).toFixed(0);
+
+    /* Range bars, not median bars.
+
+       This was the only chart in the application that dropped uncertainty
+       entirely, while asking the reader to make a judgement — "is this store an
+       outlier?" — that a bare median cannot support. A store whose p10-p90
+       straddles all of its peers is a completely different situation from one
+       whose interval sits clear of them, and the single bar could not tell them
+       apart. Everything needed was already on each series and already displayed
+       on the figure cards above. */
+    const rows = [s, ...peers];
+    const lo = (x) => (x.weekly ? x.weekly[0][1] : 0);
+    const hiQ = (x) => (x.weekly ? x.weekly[0][5] : 0);
+    const scale = Math.max(...rows.map(hiQ), 1);
+    const pc = (v) => ((v / scale) * 100).toFixed(1);
+
+    // The cohort's own middle, so "is this one unusual?" has something to be
+    // unusual against. Median of the peers' medians, self excluded.
+    const meds = peers.map(week1).sort((a, b) => a - b);
+    const cohortMed = meds.length ? meds[Math.floor(meds.length / 2)] : 0;
+
+    const bar = (x, self) => `<span class="cp-bar">
+        <span class="cp-range" style="left:${pc(lo(x))}%;width:${pc(hiQ(x) - lo(x))}%"></span>
+        <span class="cp-med" style="left:${pc(week1(x))}%"></span>
+        ${cohortMed > 0 ? `<span class="cp-ref" style="left:${pc(cohortMed)}%"></span>` : ""}
+      </span>`;
+
     return `<section class="cat-similar">
       <h4>The same product in other stores</h4>
       <ul class="cat-peers">
         <li class="is-self">
           <span class="cp-name">${e(Review.prettyStore(s.store))} <b>(this one)</b></span>
-          <span class="cp-bar"><i style="width:${bar(s)}%"></i></span>
+          ${bar(s, true)}
           <span class="cp-num">${Plain.units(week1(s))}</span>
         </li>
         ${peers.map((x) => `<li>
           <button class="cp-name cp-link" data-goto="${e(x.id)}">${e(Review.prettyStore(x.store))}</button>
-          <span class="cp-bar"><i style="width:${bar(x)}%"></i></span>
+          ${bar(x, false)}
           <span class="cp-num">${Plain.units(week1(x))}</span>
         </li>`).join("")}
       </ul>
-      <p class="rc-fine">Next week's forecast, same product. A store far from the
-        others is worth a second look before you act on it.</p>
+      <p class="rc-fine">
+        Next week's forecast for the same product, one row per store. The bar is the
+        likely range and the notch is the middle of it; the faint upright is the
+        typical store. A range that sits clear of the others is worth a look before
+        you act on it &mdash; one that merely overlaps them is not.
+      </p>
     </section>`;
   }
 

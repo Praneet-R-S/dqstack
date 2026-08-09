@@ -42,7 +42,7 @@ a:hover { text-decoration: underline; }
 code {
   font-family: var(--font-num); font-size: 0.92em;
   background: var(--bg-inset); border: 1px solid var(--border-subtle);
-  border-radius: 4px; padding: 0.05em 0.34em;
+  border-radius: var(--r-sm); padding: 0.05em 0.34em;
 }
 
 /* Reusable micro-label. It appeared a dozen times as three repeated
@@ -142,7 +142,7 @@ code {
 .tab {
   border: 0; background: transparent; color: var(--text-secondary);
   font-size: var(--fs-12); font-weight: 500; padding: var(--s3) var(--s5);
-  border-radius: 4px; cursor: pointer; white-space: nowrap;
+  border-radius: var(--r-sm); cursor: pointer; white-space: nowrap;
   transition: color var(--t-feedback) var(--ease),
               background var(--t-feedback) var(--ease);
 }
@@ -178,7 +178,7 @@ code {
 .cmd input::-webkit-search-cancel-button { display: none; }
 .kbd {
   font-family: var(--font-num); font-size: var(--fs-10); color: var(--text-tertiary);
-  border: 1px solid var(--border-subtle); border-radius: 4px;
+  border: 1px solid var(--border-subtle); border-radius: var(--r-sm);
   padding: 2px 5px; background: var(--bg-raised); white-space: nowrap;
   line-height: 1.1;
 }
@@ -187,7 +187,7 @@ code {
 .origin-chip {
   display: flex; align-items: baseline; gap: var(--s3);
   font-size: var(--fs-10); color: var(--text-tertiary);
-  text-transform: uppercase; letter-spacing: 0.06em;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
   padding: var(--s2) var(--s4);
   background: var(--bg-inset); border: 1px solid var(--border-subtle);
   border-radius: var(--r-input);
@@ -223,7 +223,7 @@ code {
   border: 1px solid var(--border-subtle); background: var(--bg-inset);
   border-radius: var(--r-pill); padding: var(--s2) var(--s5) var(--s2) var(--s4);
   font-size: var(--fs-10); color: var(--text-secondary); cursor: pointer;
-  text-transform: uppercase; letter-spacing: 0.06em;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
   transition: border-color var(--t-feedback) var(--ease);
 }
 .engine-pill:hover { border-color: var(--border-strong); }
@@ -371,7 +371,7 @@ code {
 }
 .wl-meta {
   font-size: var(--fs-10); color: var(--text-tertiary); margin-top: 3px;
-  text-transform: uppercase; letter-spacing: 0.05em;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
 }
 .wl-val { text-align: right; display: grid; gap: 2px; justify-items: end; }
 .wl-val .n {
@@ -380,7 +380,7 @@ code {
 }
 .wl-val .u {
   font-size: var(--fs-10); color: var(--text-tertiary);
-  text-transform: uppercase; letter-spacing: 0.05em;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
 }
 .wl-tags { display: flex; gap: 3px; margin-top: 2px; justify-content: flex-end; }
 .wl-tag {
@@ -390,7 +390,7 @@ code {
 .wl-foot {
   padding: var(--s5) var(--s6); border-top: 1px solid var(--border-subtle);
   font-size: var(--fs-10); color: var(--text-tertiary);
-  text-transform: uppercase; letter-spacing: 0.05em;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
   display: flex; justify-content: space-between; align-items: center;
   gap: var(--s4); background: var(--bg-surface);
 }
@@ -404,8 +404,19 @@ code {
 .main {
   display: grid;
   grid-template-rows: auto minmax(120px, 1fr) minmax(0, var(--dock-h));
-  min-height: 0;
+  /* `min-width: 0` for the same reason `min-height: 0` is here. A grid item
+     refuses to shrink below its content, and this item contains a canvas whose
+     width is set in pixels by Grid.resize() — so after any narrowing the stale
+     canvas width held the track open and pushed the whole workspace into
+     horizontal overflow. With this, the track shrinks and the resize handler
+     then sizes the canvas to it. */
+  min-height: 0; min-width: 0;
 }
+/* Every child too. `.grid-wrap` is itself a grid item holding a canvas sized in
+   pixels, so without this the stale canvas width simply moved the overflow one
+   level down instead of removing it. The canvas is meant to scroll inside
+   `.grid-scroll`, never to widen the page. */
+.main > * { min-width: 0; }
 
 .crumbs {
   display: flex; align-items: center; gap: var(--s4);
@@ -416,9 +427,15 @@ code {
 }
 .crumbs .sep { color: var(--border-strong); }
 .crumbs b { color: var(--text-primary); font-weight: 500; }
+/* The toolbar holds five controls totalling ~690px. Below roughly 1200px the grid
+   column is narrower than that, and `nowrap` turned the shortfall into horizontal
+   overflow on the whole view rather than a second line. Wrapping costs one row of
+   height in a layout that already gives the grid a 120px floor, and it is the only
+   behaviour that degrades rather than breaks. */
+.crumbs { flex-wrap: wrap; row-gap: var(--s4); }
 .crumbs-right {
   margin-left: auto; display: flex; gap: var(--s5); align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap; row-gap: var(--s4);
 }
 .seg {
   display: flex; background: var(--bg-inset);
@@ -428,7 +445,7 @@ code {
 .seg button {
   border: 0; background: transparent; color: var(--text-secondary);
   font-size: var(--fs-11); padding: 3px var(--s5); cursor: pointer;
-  border-radius: 4px; white-space: nowrap;
+  border-radius: var(--r-sm); white-space: nowrap;
   transition: background var(--t-feedback) var(--ease),
               color var(--t-feedback) var(--ease);
 }
@@ -546,12 +563,12 @@ code {
 }
 .dock-sub {
   font-size: var(--fs-10); color: var(--text-tertiary); margin-top: 3px;
-  text-transform: uppercase; letter-spacing: 0.05em;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
 }
 .legend {
   margin-left: auto; display: flex; gap: var(--s5); font-size: var(--fs-10);
   color: var(--text-secondary); text-transform: uppercase;
-  letter-spacing: 0.05em; flex-wrap: wrap; justify-content: flex-end;
+  letter-spacing: var(--tracking-caps); flex-wrap: wrap; justify-content: flex-end;
 }
 .legend i {
   display: inline-block; width: 14px; height: 0; border-top-width: 2px;
@@ -730,7 +747,14 @@ code {
    centred — the single largest reason the app read as three applications. */
 .sheet {
   padding: var(--s8) var(--gutter) var(--s9);
-  max-width: 1320px; margin-inline: auto; min-width: 0; overflow-x: hidden;
+  /* `width: 100%` is load-bearing next to `margin-inline: auto`. A grid item
+     defaults to stretching its track; adding auto side margins switches it to
+     shrink-to-fit, so it sized to its widest table (1150px) inside a 1032px track
+     and pushed 118px of horizontal overflow onto the view. With an explicit width
+     it fills the track and the auto margins only bite once max-width binds, which
+     is the behaviour that was wanted in the first place. */
+  width: 100%; max-width: 1320px; margin-inline: auto;
+  min-width: 0; overflow-x: hidden;
 }
 .two-col > *, .cards > *, .stage > * { min-width: 0; }
 .sheet-title {
@@ -796,7 +820,7 @@ code {
 .badge {
   display: inline-block; font-size: var(--fs-10); text-transform: uppercase;
   letter-spacing: var(--tracking-caps); padding: 2px var(--s3);
-  border-radius: 4px; border: 1px solid currentColor; margin-left: var(--s3);
+  border-radius: var(--r-sm); border: 1px solid currentColor; margin-left: var(--s3);
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .badge.ok { color: var(--state-excess); }
@@ -818,7 +842,7 @@ table.data { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
 table.data th {
   font-family: var(--font-ui);
   text-align: left; font-weight: 500; font-size: var(--fs-10);
-  text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary);
   padding: var(--s4) var(--s5); background: var(--bg-raised);
   border-bottom: 1px solid var(--border-strong); white-space: nowrap;
   position: sticky; top: 0; z-index: 2;
@@ -954,7 +978,7 @@ table.data tr[data-hero="true"] td:first-child { box-shadow: inset 2px 0 0 var(-
 .sqlbox[data-open="true"] { display: grid; }
 .sqlbox-head {
   display: flex; align-items: center; gap: var(--s5);
-  padding: var(--s5) var(--s6); border-bottom: 1px solid var(--border-subtle);
+  padding: var(--s5) var(--s7); border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface);
 }
 .sqlbox-title { font-size: var(--fs-14); font-weight: 600; }
@@ -964,7 +988,7 @@ table.data tr[data-hero="true"] td:first-child { box-shadow: inset 2px 0 0 var(-
 }
 .sqlbox-head .btn { margin-left: auto; }
 .sqlbox-body {
-  padding: var(--s6); overflow-y: auto; min-height: 0;
+  padding: var(--s7); overflow-y: auto; min-height: 0;
   display: grid; gap: var(--s5); align-content: start;
 }
 #sqlText {

@@ -860,7 +860,7 @@
 .cc-now { stroke: rgb(var(--forecast-rgb)); stroke-opacity: 0.55; stroke-width: 1; }
 .cc-nowlab {
   fill: var(--text-tertiary); font-size: 9px; text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--tracking-caps);
 }
 .cat-nochart {
   padding: var(--s8); text-align: center; font-size: var(--fs-13);
@@ -1052,3 +1052,88 @@
   .cat-side { display: grid; border-right: 0; border-bottom: 1px solid var(--border-strong); }
   .cat-peers li { grid-template-columns: minmax(0, 110px) 1fr 60px; }
 }
+
+
+/* ============================================== press states and last polish */
+
+/* Sixteen interactive controls had a hover rule and no `:active` rule, so
+   pressing anything in this application produced no acknowledgement at all until
+   the click handler finished. On a list where a planner presses twenty-four
+   times in a row that is the difference between a tool that feels responsive and
+   one that feels laggy — and it costs one declaration each.
+
+   1px of travel rather than a colour change: it reads as physical, it cannot
+   collide with any semantic hue, and it is invisible to anyone who is not
+   pressing the thing. */
+.icon-btn:active, .sb-item:active, .rv-tab:active, .chip:active,
+.cat-row:active, .tab:active, .seg button:active, .cat-filters button:active,
+.chip-sql:active, .cat-more:active, .menu button:active, .rc-more:active,
+.cp-link:active, .sb-collapse:active, .palette-item:active, .wl-item:active,
+.cat-search input:active {
+  transform: translateY(1px);
+}
+/* The two that carry a persistent selected state should not also travel — the
+   press would fight the selection it is about to produce. */
+.sb-item[aria-selected="true"]:active,
+.rv-tab[aria-selected="true"]:active,
+.tab[aria-selected="true"]:active { transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn:active, .sb-item:active, .rv-tab:active, .chip:active,
+  .cat-row:active, .tab:active, .seg button:active, .cat-filters button:active,
+  .chip-sql:active, .cat-more:active, .menu button:active, .rc-more:active,
+  .cp-link:active, .sb-collapse:active, .palette-item:active, .wl-item:active {
+    transform: none;
+  }
+}
+
+/* ---- the peer range bars ------------------------------------------------- */
+.cp-bar { position: relative; overflow: visible; background: var(--bg-inset); }
+.cp-range {
+  position: absolute; top: 0; height: 100%;
+  background: rgb(var(--forecast-rgb)); opacity: 0.26;
+  border-radius: var(--r-pill);
+}
+.cp-med {
+  position: absolute; top: -2px; width: 2px; height: 11px;
+  background: var(--series-forecast); border-radius: 1px;
+}
+/* The cohort's middle, behind everything, so it reads as a backdrop rather than
+   as another series. */
+.cp-ref {
+  position: absolute; top: -3px; width: 1px; height: 13px;
+  background: var(--border-strong);
+}
+.cat-peers .is-self .cp-range { opacity: 0.42; }
+.cat-peers .is-self .cp-med { width: 3px; height: 13px; top: -3px; }
+
+/* ---- the cone as the empty-state watermark ------------------------------- */
+.cat-blank-mark {
+  width: 56px; height: 56px; font-size: 0;
+  background: var(--series-forecast); opacity: 0.22;
+  -webkit-mask: var(--icon-cone) center / contain no-repeat;
+  mask: var(--icon-cone) center / contain no-repeat;
+}
+
+/* Hiding the hint has to hide its ROW as well.
+
+   `.main` declares four template rows for its four children. `display: none`
+   removes an item from grid placement entirely, so with the hint gone the grid
+   region auto-placed into the hint's `auto` row and collapsed to zero height —
+   the third time this exact bug class has bitten this project. The template is
+   therefore restated for the dismissed case rather than left to auto-placement. */
+:root[data-hint="off"] .grid-hint { display: none; }
+:root[data-hint="off"] .main {
+  grid-template-rows: auto minmax(120px, 1fr) minmax(0, var(--dock-h));
+}
+.hint-dismiss {
+  margin-left: auto; flex: none;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-sm); cursor: pointer;
+  color: var(--text-tertiary); font-size: var(--fs-16); line-height: 1;
+  padding: 0 var(--s3); height: 22px;
+  transition: color var(--t-feedback) var(--ease),
+              background var(--t-feedback) var(--ease);
+}
+.hint-dismiss:hover { color: var(--text-primary); background: var(--bg-hover); }
+.hint-dismiss:active { transform: translateY(1px); }

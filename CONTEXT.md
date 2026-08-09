@@ -708,6 +708,55 @@ that had none and ran ~200 characters per line.
 horizontal overflow across all six views in both themes. 114.5 KB gzipped against
 the 250 KB budget.**
 
+### C8. Interaction states, the peer chart, and three layout regressions — DONE
+
+Continuation of the visual pass, covering the ground the two stalled audit lenses
+(colour and surface/states) would have taken. Probed the running application rather
+than reading the CSS.
+
+- **Sixteen of seventeen interactive controls had a hover rule and no `:active`
+  rule** — only `.btn` acknowledged a press. On a list a planner presses twenty-four
+  times in a row, that is the whole difference between responsive and laggy. All
+  seventeen now travel 1px on press: physical, cannot collide with a semantic hue,
+  invisible unless you are pressing. Controls carrying a persistent selected state
+  are exempt so the press does not fight the selection, and the whole set is
+  disabled under `prefers-reduced-motion`.
+- **The peer chart was the only surface in the application that dropped uncertainty
+  entirely**, while asking the reader to judge whether a store is an outlier — which
+  a bare median bar cannot support. Each row is now a p10–p90 range with a median
+  notch and a faint cohort-median upright behind it, so "sits clear of its peers"
+  and "merely overlaps them" are finally distinguishable. Everything needed was
+  already on each series.
+- **The `◎` dingbat empty state** became the cone watermark, which carries the right
+  semantic for "nothing selected yet": a future not yet resolved.
+- **Drift finished off**: five `border-radius: 4px` to `--r-sm`, nine hardcoded
+  uppercase tracking values to `--tracking-caps`, three dialog bodies to one frame.
+- **The grid hint is dismissible** and remembered, handing 71px back to the grid —
+  87px of permanent onboarding was sitting on the densest, most keyboard-driven
+  surface in the product, read once and then furniture forever.
+
+**Three layout regressions found and fixed, two of them mine from the previous
+commit:**
+
+1. **`margin-inline: auto` broke the sheets.** Adding it to `.sheet` turned a
+   stretched grid item into a shrink-to-fit one, so it sized to its widest table
+   (1150px) inside a 1032px track and pushed **118px of horizontal overflow** onto
+   the Evidence view. `width: 100%` alongside the auto margins restores stretch and
+   lets the centring bite only once `max-width` binds. `.rv` was unaffected because
+   it already declared a width.
+2. **`display: none` on the grid hint collapsed the grid to zero height.** It
+   removes the item from grid placement, so the remaining children shifted up a row
+   into the hint's `auto` track — **the third occurrence of this exact bug class in
+   this project**. The template is now restated for the dismissed case.
+3. **The workspace overflowed at laptop widths.** `.main` and its children lacked
+   `min-width: 0`, so the canvas's stale pixel width held the track open; and
+   underneath that, `.crumbs-right` is ~690px of controls that `nowrap` turned into
+   view overflow rather than a second line. Both fixed — the toolbar now wraps,
+   which degrades instead of breaking.
+
+**Verified: zero horizontal overflow across six views × two themes × two sidebar
+states, at both 1100px and 1512px. 94 tests pass. 117.0 KB gzipped.**
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -744,6 +793,10 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **`min-width: 0` on every grid item that contains a canvas or a table.** Both
+  hold their track open otherwise, and the symptom appears on an ancestor.
+- **`margin-inline: auto` on a grid item needs `width: 100%`** or the item stops
+  stretching and sizes to its content.
 - **`--ui-accent` is for interaction; `--series-forecast` is for data.** They share
   a value today. Do not collapse them back.
 - **Chart tick labels must use `--text-secondary`.** `--text-tertiary` fails AA on
