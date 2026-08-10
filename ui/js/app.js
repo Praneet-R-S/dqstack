@@ -493,6 +493,103 @@
     renderEngine();
   }
 
+  /* ================================================== the sidebar as a board
+
+     The rail carries state, not more destinations. Everything below is live and
+     one click: which tier is waiting and how much, the scope being worked, how
+     many drafts are uncommitted, what this session has achieved, and whether the
+     data underneath is current. */
+
+  function paintTiers(c) {
+    const host = $("sbTiers");
+    if (!host) return;
+    for (const b of host.querySelectorAll("[data-tier]")) {
+      const t = b.dataset.tier;
+      const n = c[t] ?? 0;
+      b.querySelector("b").textContent = n;
+      b.hidden = t === "done" && n === 0;
+      b.dataset.empty = String(n === 0);
+      b.setAttribute("aria-current", String(state.view === "today" && Review.state.tab === t));
+      if (t !== "done" && c[t + "Behind"]) {
+        b.title = `${n} on today's list · ${c[t + "Behind"].toLocaleString()} more behind them`;
+      }
+    }
+  }
+
+  function paintDrafts() {
+    const b = $("sbDraftBadge");
+    if (!b) return;
+    const n = Grid.overrideCount;
+    b.hidden = n === 0;
+    b.textContent = n;
+    b.title = `${n} uncommitted edit${n === 1 ? "" : "s"}`;
+  }
+
+  /* The session block. A planner who cannot see what the session has achieved has
+     no way to feel the tool is working, because most of its work is invisible. */
+  function paintSession() {
+    const line = $("sbSessionLine");
+    if (!line) return;
+    const pending = [...Review.state.reviewed.keys()]
+      .filter((id) => !Review.state.committed.has(id));
+    const decided = Review.state.reviewed.size;
+    const impact = totalPendingImpact();
+
+    line.innerHTML = decided === 0
+      ? "Nothing decided yet"
+      : `<b>${decided}</b> decided` +
+        (Grid.overrideCount
+          ? ` · <b class="${impact >= 0 ? "rc-up" : "rc-down"}">` +
+            `${Plain.money(impact, { sign: true })}</b> effect`
+          : " · no numbers changed");
+    $("sbCommit").disabled = pending.length === 0;
+    $("sbExport").disabled = decided === 0;
+  }
+
+  function paintWatch(ids) {
+    const el = $("sbWatchCount");
+    if (el) el.textContent = (ids || []).length;
+    Review.setWatched(ids || []);
+  }
+
+  /* Feed condition, from the Stage-0 records the pipeline already writes. Silence is
+     the healthy state -- the control only raises its voice when something is late or
+     was rejected, because a permanently green tick is noise a planner learns to
+     ignore. */
+  function paintHealth() {
+    const el = $("sbHealth"), txt = $("sbHealthText");
+    if (!el) return;
+    const runs = (D.metrics && D.metrics.feedRuns) || [];
+    if (!runs.length) { el.hidden = true; return; }
+    const rejected = runs.filter((r) => r.outcome === "rejected");
+    const stale = runs.filter((r) => (r.freshness_days ?? 0) > 1);
+    const warned = runs.filter((r) =>
+      (r.checks || []).some((c) => c.outcome === "warn"));
+
+    if (rejected.length) {
+      el.dataset.state = "bad";
+      txt.textContent = `${rejected.length} data feed${rejected.length === 1 ? "" : "s"} rejected`;
+      el.title = "A feed failed its quality gate, so its products are forecast from " +
+                 "older data. " + rejected.map((r) => r.table).join(", ");
+    } else if (stale.length) {
+      el.dataset.state = "warn";
+      const worst = Math.max(...stale.map((r) => r.freshness_days));
+      txt.textContent = `${stale.length} feed${stale.length === 1 ? "" : "s"} ${worst} days behind`;
+      el.title = "Forecasts for the affected products use older data than the rest.";
+    } else if (warned.length) {
+      el.dataset.state = "warn";
+      txt.textContent = `${warned.length} feed${warned.length === 1 ? "" : "s"} with warnings`;
+      el.title = warned.flatMap((r) => (r.checks || [])
+        .filter((c) => c.outcome === "warn").map((c) => `${r.table}: ${c.detail}`)).join("\n");
+    } else {
+      el.dataset.state = "ok";
+      txt.textContent = `All ${runs.length} feeds current`;
+      el.title = "Every feed passed its quality gate and is up to date.";
+    }
+  }
+
+  function paintSidebar() { paintDrafts(); paintSession(); paintHealth(); }
+
   /* ---------------------------------------------------------- the ribbon
 
      Three things a planner needs before they need anything else: which cycle this
@@ -932,6 +1029,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     else if (v === "products") Catalog.renderDetail();
     paintEvidenceTabs(v);
     renderRibbon();
+    if (typeof paintSidebar === "function") paintSidebar();
     closeMenu();
   }
 
@@ -1167,6 +1265,9 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
       onExport: (rows) => exportDecisions(rows),
       onRibbon: renderRibbon,
+      // The whole board, not just the tiers: a decision changes the counts, the
+      // session line and the commit/export affordances together.
+      onTiers: (c) => { paintTiers(c); paintSidebar(); },
       onCount: (n) => {
         const b = $("sbTodayBadge");
         if (!b) return;
@@ -1194,6 +1295,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
        a product page is the same draft edit the spreadsheet shows. */
     Catalog.init(D, {
       onToast: toast,
+      onWatch: paintWatch,
       onChange: (s, value) => {
         const row = BY_ID.get(s.id);
         if (!row) {                 // a session-added product has no grid row yet
@@ -1207,6 +1309,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       },
     });
 
+    paintSidebar();
     setView("today");
     window.DQ = { state, Query, Duck, rows: ALL_ROWS, selftest: Query.selftest, setTheme };
 
@@ -1238,6 +1341,43 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       const b = e.target.closest("[data-menu]");
       if (b) onMenu(b.dataset.menu);
     });
+    // ---- the scope selector: one setting, honoured by the queue and the list
+    const stores = [...new Set(D.series.map((x) => x.store))].sort();
+    $("sbScope").innerHTML = '<option value="">All stores</option>' +
+      stores.map((x) => `<option value="${U.esc(x)}">${U.esc(Review.prettyStore(x))}</option>`).join("");
+    $("sbScope").addEventListener("change", (e) => {
+      const v = e.target.value;
+      Review.setScope(v);
+      Catalog.state.store = v;
+      Catalog.renderList();
+      const cs = $("catStore");
+      if (cs) cs.value = v;
+      state.scope = v;
+      refresh();
+      paintSidebar();
+      toast(v ? `Scope set to ${Review.prettyStore(v)}` : "Scope cleared - all stores");
+    });
+
+    // ---- the queue tiers, straight from the rail
+    $("sbTiers").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-tier]");
+      if (!b) return;
+      setView("today");
+      Review.setTab(b.dataset.tier);
+    });
+
+    $("sbWatch").addEventListener("click", () => {
+      if (!Catalog.watchCount()) {
+        return toast("Nothing on your watchlist yet - star a product in Products");
+      }
+      setView("products");
+      Catalog.showWatchlist();
+    });
+
+    $("sbExport").addEventListener("click", () => exportDecisions(Review.decisions()));
+    $("sbCommit").addEventListener("click", () => $("rvCommit").click());
+    $("sbHealth").addEventListener("click", () => { setView("pipeline"); });
+
     document.getElementById("sbEvidence").addEventListener("click", () =>
       setView(state.lastEvidence));
     // The strip is re-created on every view change, so it is delegated.
@@ -1296,6 +1436,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       syncPending();
     });
     Grid.onEdits(() => {
+      paintSidebar();
       $("pendingCount").textContent = Grid.pendingMap.size
         ? `${Grid.pendingMap.size} pending` : "";
       $("undoBtn").disabled = !Grid.canUndo;

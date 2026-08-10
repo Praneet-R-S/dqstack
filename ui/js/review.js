@@ -49,16 +49,37 @@ window.Review = (() => {
       brand-new product can be urgent while having no history of loss yet. */
   const atRisk = (s) => s.ledger.lostMargin + s.ledger.wasteCost;
 
+  /* Scope and watchlist both change which items are in the queue at all, so both
+     belong in build() rather than in a render filter — the cohort has to be chosen
+     from the scoped set, or the progress denominator would count items the planner
+     cannot see. */
+  let scope = "";                 // store id, or "" for everything
+  const watched = new Set();
+
+  function setScope(store) { scope = store || ""; build(); render(); }
+  function setWatched(ids) {
+    watched.clear();
+    for (const id of ids) watched.add(id);
+    build(); render();
+  }
+
   function build() {
     Plain.calibrate(D.series);
     rows = D.series
-      .filter((s) => s.reasons.length > 0)
+      .filter((s) => !scope || s.store === scope)
+      /* A watched product is in the queue whether or not it was flagged. That is the
+         entire point of pinning: a planner who does not trust a product wants to see
+         it every cycle, not only when the model happens to raise a flag. */
+      .filter((s) => s.reasons.length > 0 || watched.has(s.id))
       .map((s) => {
         const head = Plain.headline(s.reasons);
+        const pinned = watched.has(s.id);
         return {
-          s, id: s.id, head,
+          s, id: s.id, head, pinned,
           risk: atRisk(s),
-          tier: head.tone === "urgent" || atRisk(s) >= 200 ? "urgent"
+          // Pinned items sort into the top tier regardless of exposure, because the
+          // planner has said explicitly that they want to see them.
+          tier: pinned || head.tone === "urgent" || atRisk(s) >= 200 ? "urgent"
               : head.tone === "warn" ? "check" : "later",
         };
       })
@@ -238,6 +259,7 @@ window.Review = (() => {
           <h3>${e(prettyItem(s.item))}</h3>
           <p>${e(prettyStore(s.store))} · ${e(catWord(s.cat))} · ${e(Plain.CLASS[s.cls]?.label || s.cls)}</p>
         </div>
+        ${r.pinned ? '<div class="rc-stamp watch">Watched</div>' : ""}
         ${done ? `<div class="rc-stamp">${e(doneWord(done))}</div>` : ""}
       </header>
 
@@ -444,6 +466,7 @@ window.Review = (() => {
     // this view, so it is pushed rather than polled.
     hooks.onCount?.(onList);
     hooks.onRibbon?.();
+    hooks.onTiers?.(c);
 
     // Tabs. A tier holding more than a screenful shows "24 of 489" rather than
     // 489, so the number never implies more work than the list actually presents.
@@ -712,6 +735,8 @@ window.Review = (() => {
     render();
   }
 
-  return { init, render, decisions, get state() { return state; },
-           prettyItem, prettyStore, get rows() { return rows; } };
+  return { init, render, decisions, counts, setScope, setWatched,
+           get state() { return state; }, get scope() { return scope; },
+           prettyItem, prettyStore, get rows() { return rows; },
+           setTab(t) { state.tab = t; state.cursor = 0; render(); } };
 })();

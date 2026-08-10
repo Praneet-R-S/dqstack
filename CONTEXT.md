@@ -822,6 +822,59 @@ plausibility guardrail; `Cmd-Z` undo and the decision log; batch grouping; watch
 track-record panel; first-run walkthrough; command-palette actions; density modes;
 icon set; mobile approvals.
 
+### C10. The sidebar as a status board — DONE
+
+Brief: add more features to the sidebar and make it look full. There is a real tension
+here, because the external review had just diagnosed a flat nine-item rail serving four
+audiences as *the* structural fault, and that fix had shipped one commit earlier.
+
+Resolved by filling the rail with **live state and actions rather than destinations**.
+A persistent rail is good at exactly one thing — telling you continuously where things
+stand — and it was doing none of it. Navigation stays at four entries. Three of the
+additions are items the review itself deferred.
+
+| Block | What it carries |
+|---|---|
+| Scope | A store selector honoured by **both** the queue and the product list |
+| Today | Live badge, plus the four queue tiers with their own counts, each one click |
+| Products | Watchlist entry with a count |
+| Spreadsheet | Amber badge counting uncommitted drafts |
+| This session | Decisions made, expected margin effect, Export and Commit |
+| Evidence | One entry, with the query-engine dot |
+| Footer | Feed condition, theme, row height, shortcuts |
+
+- **Scope** filters inside `Review.build()`, not at render, because the cohort has to
+  be drawn from the scoped set — filtering later would leave the progress denominator
+  counting items the planner cannot see. Setting `CA_3` takes the queue from 848 to 83.
+- **Watchlist** is persisted to `localStorage`, and a watched product enters the urgent
+  tier **whether or not it was flagged** — that is the entire point of pinning, and the
+  card marks it *Watched* so the reason it is there is never mysterious.
+- **Feed condition** reads the Stage-0 `feedRuns` records the pipeline already writes:
+  rejected outcomes, then staleness, then check warnings, then "All 6 feeds current".
+  Silence is the healthy state; it only raises its voice when something is late.
+- Everything repaints from one `paintSidebar()` wired into the review hooks and
+  `Grid.onEdits`, so a decision moves the tier counts, the session line, the ribbon and
+  the commit affordance together.
+
+The rail now fills its height exactly — 428px of content in 428px — with seven live
+numbers on it, and collapses cleanly to the 60px icon rail.
+
+**A latent defect this uncovered, which had already shipped.** The previous commit's
+footer replacement had consumed the `</div>` that closed `.sb-foot`. Browsers
+auto-closed it and the layout still rendered, so nothing complained. This commit's edit
+then searched for "the next `</div>`" and, finding none nearby, swallowed the sidebar
+close, the entire chrome opening **and the cycle ribbon**. The symptom was a 9,931px
+footer containing 372 buttons.
+
+`tests/test_markup.py` now closes that class off for good: tag balance over
+`index.html`, presence of the six layout landmarks, every `$("id")` in `app.js`
+resolving to a real element, and a control-character scan over all nine UI scripts
+(heredoc round-trips have twice written a literal backspace or a raw BOM into a source
+file, where it is invisible in a diff).
+
+**Measured: 111 tests pass. Zero horizontal overflow across 3 views x 2 themes x 2 rail
+states, plus Evidence. 124.1 KB gzipped.**
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -858,6 +911,9 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **Never slice markup by searching for the next closing tag.** Two commits in a row
+  ate structural `</div>`s that way, and the first was invisible because browsers
+  auto-close. `tests/test_markup.py` asserts tag balance now; trust it over reading.
 - **Every `$("id")` in app.js must resolve.** A single stale lookup in `boot()`
   throws and silently aborts all wiring downstream of it — the symptom looks like
   several unrelated features being broken.

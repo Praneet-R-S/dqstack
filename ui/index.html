@@ -13,7 +13,7 @@
 
 <link rel="stylesheet" href="css/tokens.css?v=5b169678">
 <link rel="stylesheet" href="css/app.css?v=06e97e3b">
-<link rel="stylesheet" href="css/simple.css?v=b92f776f">
+<link rel="stylesheet" href="css/simple.css?v=fed02568">
 </head>
 <body>
 
@@ -61,18 +61,57 @@
       </button>
     </div>
 
+    <!-- The scope a planner is working. Most planners own a store or a region, and
+         the queue and the product list should both respect that without being set
+         twice. -->
+    <div class="sb-scope">
+      <label class="sr-only" for="sbScope">Scope</label>
+      <select id="sbScope" class="sel">
+        <option value="">All stores</option>
+      </select>
+    </div>
+
     <nav class="sb-nav" aria-label="Sections">
       <p class="sb-group">Work</p>
+
       <button class="sb-item tab" role="tab" data-view="today" aria-selected="true">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v9h-11z"/><path d="M2.5 7.5h11"/><path d="M5.5 2.5v3M10.5 2.5v3"/><path d="M5 10.5l1.4 1.4 2.8-2.8"/></svg><span>Today</span>
         <span class="sb-badge" id="sbTodayBadge">0</span>
       </button>
+      <!-- The queue's own tiers, with live counts. They already exist as tabs inside
+           Today; surfacing them here makes each one a single click from anywhere and
+           turns the rail into a status board rather than a menu. -->
+      <div class="sb-sub" id="sbTiers">
+        <button data-tier="urgent"><span>Needs a decision</span><b>0</b></button>
+        <button data-tier="check"><span>Worth checking</span><b>0</b></button>
+        <button data-tier="later"><span>Low priority</span><b>0</b></button>
+        <button data-tier="done" hidden><span>Reviewed</span><b>0</b></button>
+      </div>
+
       <button class="sb-item tab" role="tab" data-view="products" aria-selected="false">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h5.5v8H2.5z"/><path d="M9.5 4h4v8h-4z"/><path d="M4 6.2h2.5M4 8.4h2.5"/></svg><span>Products</span>
       </button>
+      <div class="sb-sub">
+        <button id="sbWatch"><span>Watchlist</span><b id="sbWatchCount">0</b></button>
+      </div>
+
       <button class="sb-item tab" role="tab" data-view="workspace" aria-selected="false">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M2.5 6.5h11M2.5 9.5h11M6.5 3.5v9"/></svg><span>Spreadsheet</span>
+        <span class="sb-badge draft" id="sbDraftBadge" hidden>0</span>
       </button>
+
+      <p class="sb-group">This session</p>
+      <div class="sb-session" id="sbSession">
+        <p class="sb-session-line" id="sbSessionLine">Nothing decided yet</p>
+        <div class="sb-session-act">
+          <button class="btn btn-quiet sb-mini" id="sbExport">
+            <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10.5V2.8"/><path d="M5.2 5.6L8 2.8l2.8 2.8"/><path d="M2.8 10v3.2h10.4V10"/></svg><span>Export</span>
+          </button>
+          <button class="btn btn-quiet sb-mini" id="sbCommit" disabled>
+            <span>Commit</span>
+          </button>
+        </div>
+      </div>
 
       <div class="sb-rule" role="separator"></div>
 
@@ -88,25 +127,26 @@
     </nav>
 
     <div class="sb-foot">
+      <!-- System condition, ambient. Silence is the healthy state; a persistent green
+           tick would be noise, so this only raises its voice when a feed is late. -->
+      <button class="sb-health" id="sbHealth" data-state="ok">
+        <span class="sb-health-dot"></span>
+        <span id="sbHealthText">Checking feeds&hellip;</span>
+      </button>
       <button class="sb-item sb-small" data-menu="theme">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.4M8 13v1.4M1.6 8h1.4M13 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1"/></svg><span id="sbThemeLabel">Dark mode</span>
       </button>
       <button class="sb-item sb-small" data-menu="density">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h11"/></svg><span>Row height: <b id="densityLabel">Default</b></span>
       </button>
+      <button class="sb-item sb-small" data-menu="keys">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v7h-11z"/><path d="M4.6 6.7h.01M6.8 6.7h.01M9 6.7h.01M11.2 6.7h.01M4.6 9.3h6.8"/></svg><span>Shortcuts</span><span class="kbd">?</span>
+      </button>
       <p class="sb-engine" id="menuSqlSub">SQL console &mdash; for analysts</p>
+    </div>
   </aside>
 
-  <!-- ============================================================ chrome
-
-       Four destinations, named for what a planner wants rather than for the
-       architecture behind them. "Pipeline" and "Evidence" told a reader nothing;
-       "How it works" and "How it's doing" tell them whether to click.
-
-       Everything an expert needs but a newcomer does not — the SQL console, row
-       density, the keyboard sheet, the theme — moved behind one More menu. That
-       keeps every feature within three clicks while leaving one obvious path
-       through the middle of the screen. -->
+  <!-- ============================================================ chrome -->
   <header class="chrome">
     <button class="icon-btn sb-open" id="sbOpen" aria-label="Show the sidebar"
             aria-controls="sidebar">
@@ -736,8 +776,8 @@ FROM series GROUP BY 1 ORDER BY series DESC</textarea>
 <script src="js/grid.js?v=01971e8f"></script>
 <script src="js/chart.js?v=9922be45"></script>
 <script src="js/views.js?v=75c048ff"></script>
-<script src="js/catalog.js?v=7e8a12a7"></script>
-<script src="js/review.js?v=19e9384f"></script>
-<script src="js/app.js?v=18719a4f"></script>
+<script src="js/catalog.js?v=38565961"></script>
+<script src="js/review.js?v=2a695984"></script>
+<script src="js/app.js?v=03694092"></script>
 </body>
 </html>

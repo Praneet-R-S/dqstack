@@ -1206,3 +1206,114 @@
 
 @media (max-width: 1200px) { .ribbon-right { display: none; } }
 @media (max-width: 1000px) { .ribbon { display: none; } }
+
+
+/* ============================================ the sidebar as a status board
+
+   The rail is full of live state rather than destinations. Everything here is
+   either a number that changes or an action, which is what lets it be dense
+   without being a menu. Each block collapses cleanly to the 60px icon rail. */
+
+.sb-scope { padding: var(--s5) var(--s4) var(--s3); }
+.sb-scope .sel { width: 100%; max-width: none; font-size: var(--fs-12); }
+
+/* Queue tiers. Indented under Today, aligned to its label rather than its icon, so
+   they read as belonging to it. */
+.sb-sub { display: grid; gap: 1px; margin: var(--s2) 0 var(--s4); }
+.sb-sub button {
+  display: flex; align-items: center; gap: var(--s4); width: 100%;
+  background: transparent; border: 0; cursor: pointer;
+  padding: var(--s2) var(--s4) var(--s2) 36px;
+  font-size: var(--fs-12); color: var(--text-tertiary); text-align: left;
+  border-radius: var(--r-input);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-sub button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.sb-sub button b {
+  font-family: var(--font-num); font-weight: 500; font-size: var(--fs-11);
+  color: var(--text-secondary); flex: none;
+}
+.sb-sub button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-sub button:active { transform: translateY(1px); }
+.sb-sub button[aria-current="true"] {
+  color: var(--ui-accent); background: rgba(var(--ui-accent-rgb) / 0.09);
+}
+.sb-sub button[aria-current="true"] b { color: var(--ui-accent); }
+/* An empty tier stays listed -- its absence is information -- but stops competing. */
+.sb-sub button[data-empty="true"] { opacity: 0.5; }
+.sb-sub button[hidden] { display: none; }
+
+/* This session. The one block on the rail that reports achievement rather than
+   outstanding work. */
+.sb-session {
+  margin: var(--s2) var(--s4) var(--s5);
+  padding: var(--s4) var(--s5);
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card);
+}
+.sb-session-line {
+  margin: 0 0 var(--s4); font-size: var(--fs-11); color: var(--text-tertiary);
+  line-height: var(--lh-caption);
+}
+.sb-session-line b { color: var(--text-primary); font-weight: 600; }
+.sb-session-line b.rc-up { color: var(--state-excess); }
+.sb-session-line b.rc-down { color: var(--state-risk); }
+.sb-session-act { display: flex; gap: var(--s3); }
+.sb-mini {
+  flex: 1; justify-content: center; padding: var(--s2) var(--s3);
+  font-size: var(--fs-11); box-shadow: none;
+  border: 1px solid var(--border-subtle); background: var(--bg-surface);
+}
+.sb-mini svg { width: 11px; height: 11px; }
+.sb-mini:disabled { opacity: 0.4; }
+
+/* The draft badge is amber, not red: an uncommitted edit is a human's work in
+   progress, which is what amber means everywhere else in this interface. */
+.sb-badge.draft { background: var(--series-override); color: #1A1206; }
+
+/* Feed condition. */
+.sb-health {
+  display: flex; align-items: center; gap: var(--s4); width: 100%;
+  background: transparent; border: 1px solid transparent; cursor: pointer;
+  border-radius: var(--r-input); padding: var(--s3) var(--s4);
+  font-size: var(--fs-11); color: var(--text-tertiary); text-align: left;
+  margin-bottom: var(--s2);
+}
+.sb-health:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-health:active { transform: translateY(1px); }
+.sb-health span:last-child { flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.sb-health-dot { width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--state-excess); }
+.sb-health[data-state="warn"] { color: var(--state-attention); }
+.sb-health[data-state="warn"] .sb-health-dot { background: var(--state-attention); }
+.sb-health[data-state="bad"] { color: var(--state-risk); }
+.sb-health[data-state="bad"] .sb-health-dot {
+  background: var(--state-risk); box-shadow: 0 0 7px var(--state-risk);
+}
+.sb-foot .kbd { margin-left: auto; }
+
+/* The watchlist star, on every product row. */
+.cat-star {
+  flex: none; display: grid; place-items: center;
+  width: 22px; height: 22px; margin-left: var(--s2);
+  border-radius: var(--r-sm); cursor: pointer;
+  color: var(--border-strong);
+  transition: color var(--t-feedback) var(--ease), background var(--t-feedback) var(--ease);
+}
+.cat-star svg { width: 13px; height: 13px; fill: none; stroke: currentColor;
+  stroke-width: 1.3; stroke-linejoin: round; }
+.cat-star:hover { color: var(--series-override); background: var(--bg-raised); }
+.cat-star[aria-pressed="true"] { color: var(--series-override); }
+.cat-star[aria-pressed="true"] svg { fill: currentColor; }
+
+.rc-stamp.watch { color: var(--series-override); background: var(--tint-override); }
+
+/* ---- collapsed rail: the board reduces to icons and badges ---------------- */
+:root[data-sidebar="closed"] .sb-scope,
+:root[data-sidebar="closed"] .sb-sub,
+:root[data-sidebar="closed"] .sb-session,
+:root[data-sidebar="closed"] .sb-health span:last-child,
+:root[data-sidebar="closed"] .sb-foot .kbd { display: none; }
+:root[data-sidebar="closed"] .sb-health { justify-content: center; padding: var(--s3) 0; }

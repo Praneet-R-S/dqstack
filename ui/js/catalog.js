@@ -39,11 +39,13 @@ window.Catalog = (() => {
 
   const state = {
     query: "",
+    onlyWatched: false,
     cat: "",
     flagged: false,
     store: "",
     sort: "name",
     selected: null,
+    watched: new Set(),            // pinned by the planner; persisted
     added: new Map(),              // id -> product (session-local)
     removed: new Set(),            // ids marked for removal
     limit: 200,
@@ -75,6 +77,7 @@ window.Catalog = (() => {
   const visible = () => {
     const q = state.query.trim().toLowerCase();
     const out = all.filter((s) => {
+      if (state.onlyWatched && !state.watched.has(s.id)) return false;
       if (state.cat && s.cat !== state.cat) return false;
       if (state.store && s.store !== state.store) return false;
       if (state.flagged && !s.reasons.length) return false;
@@ -115,6 +118,13 @@ window.Catalog = (() => {
               ${isNew ? '<span class="cat-tag new">new</span>'
                       : removed ? '<span class="cat-tag gone">removing</span>'
                       : `<span class="cat-row-num">${rowNum(s)}</span>`}
+            </span>
+            <span class="cat-star" data-star="${U.esc(s.id)}"
+                  aria-pressed="${state.watched.has(s.id)}"
+                  title="${state.watched.has(s.id)
+                    ? "On your watchlist - always shown in Today"
+                    : "Add to your watchlist"}">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l1.8 3.7 4 .6-2.9 2.8.7 4L8 11.4l-3.6 1.9.7-4L2.2 6.5l4-.6z"/></svg>
             </span>
           </button>`;
         }).join("")
@@ -415,6 +425,40 @@ window.Catalog = (() => {
     </section>`;
   }
 
+  /* ---------------------------------------------------------- the watchlist
+
+     A planner has a handful of products they personally distrust, and the cheapest
+     useful thing an application can do is remember which. Persisted, because a
+     watchlist that resets on reload is worse than none: it invites the planner to
+     build it twice and then stop. */
+  const WATCH_KEY = "dq.watch";
+
+  function loadWatch() {
+    try {
+      for (const id of JSON.parse(localStorage.getItem(WATCH_KEY) || "[]")) {
+        state.watched.add(id);
+      }
+    } catch (_) { /* corrupt or unavailable storage is not worth failing over */ }
+  }
+
+  function saveWatch() {
+    try { localStorage.setItem(WATCH_KEY, JSON.stringify([...state.watched])); }
+    catch (_) {}
+  }
+
+  function toggleWatch(id) {
+    const on = !state.watched.has(id);
+    on ? state.watched.add(id) : state.watched.delete(id);
+    saveWatch();
+    renderList(); renderDetail();
+    hooks.onWatch?.([...state.watched]);
+    hooks.onToast?.(on
+      ? `${name(all.find((x) => x.id === id) || {})} added to your watchlist`
+      : "Removed from your watchlist");
+  }
+
+  const watchCount = () => state.watched.size;
+
   /* ------------------------------------------------------- add and remove */
 
   /** The critical fractile, for a product whose economics the planner just typed.
@@ -520,6 +564,8 @@ window.Catalog = (() => {
   function removeProduct(id) {
     state.removed.add(id);
     hooks.onToast?.("Marked for removal — nothing sent yet");
+    loadWatch();
+    hooks.onWatch?.([...state.watched]);
     renderList(); renderDetail(); renderPending();
   }
 
@@ -594,6 +640,8 @@ window.Catalog = (() => {
       state.limit = 200; renderList();
     });
     $("catList").addEventListener("click", (e) => {
+      const star = e.target.closest("[data-star]");
+      if (star) { e.stopPropagation(); return toggleWatch(star.dataset.star); }
       const b = e.target.closest(".cat-row");
       if (b) select(b.dataset.id);
     });
@@ -669,6 +717,12 @@ window.Catalog = (() => {
     renderList(); renderDetail(); renderPending();
   }
 
-  return { init, select, reveal, renderList, renderDetail,
+  return { init, select, reveal, renderList, renderDetail, watchCount,
+           showWatchlist() {
+             state.onlyWatched = true; state.query = ""; state.limit = 200;
+             $("catSearch").value = "";
+             renderList(); renderDetail();
+           },
+           clearWatchFilter() { state.onlyWatched = false; renderList(); },
            get state() { return state; }, get all() { return all; } };
 })();
