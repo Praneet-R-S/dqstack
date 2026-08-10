@@ -1,0 +1,5 @@
+# Git on Windows would otherwise apply CRLF conversion to these and corrupt them.
+*.pdf   binary
+*.png   binary
+*.parquet binary
+*.arrow binary
