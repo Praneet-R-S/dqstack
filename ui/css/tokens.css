@@ -71,13 +71,21 @@
      selected row, pressed chip and primary button, so blue meant both "demand"
      and "click me" — and a hue that means two unrelated things cannot be learned.
 
-     --ui-accent is a new name with a byte-identical value, so nothing changes
-     visually today and nothing the canvases resolve is touched. What it buys is
-     the ability to move one of the two roles later without dragging the other
-     with it. Purely interactive surfaces point here; anything depicting a
-     forecast keeps pointing at --series-forecast. */
-  --ui-accent:     #4C6FFF;
-  --ui-accent-rgb: 76 111 255;
+     The split was made first with an identical value, so that no pixel moved and
+     the refactor could be verified on its own. This is the second half: the
+     interactive role now has its own hue, and blue means one thing again.
+
+     Violet was chosen because it is far enough from the forecast blue to separate
+     at 16px and at a glance, and it collides with none of the four state hues
+     (risk, attention, override, excess). Measured against the surfaces it sits on:
+     4.30 / 4.06 / 3.72:1 on dark base / surface / raised, and 6.41 / 6.76 / 6.12:1
+     on light. That clears the 3:1 threshold for UI components and focus
+     indicators everywhere, but it does NOT clear 4.5:1 for body-size text on the
+     dark raised surface -- which is why links no longer carry a hue at all (see
+     app.css). Violet is now reserved for the focus ring, selection, and the
+     primary action. */
+  --ui-accent:     #7A5CF0;
+  --ui-accent-rgb: 122 92 240;
 
   /* Read by the canvas renderers via rgba(var(--x-rgb) / a). Space-separated
      because that is the form the modern rgba() syntax takes. */
@@ -92,9 +100,11 @@
   --tint-excess:   rgba(var(--excess-rgb) / 0.13);
   --tint-override: rgba(var(--override-rgb) / 0.13);
 
-  /* One gradient, used on primary actions only. It is built from --ui-accent
-     rather than --series-forecast because a button is a control, not a series. */
-  --grad-accent: linear-gradient(180deg, #5C7CFF 0%, #3E5FF0 100%);
+  /* One gradient, used on primary actions only. Built from --ui-accent because a
+     button is a control, not a series. Deliberately darker than --ui-accent
+     itself: white label text measures 5.66:1 on the top stop and 7.77:1 on the
+     bottom, where the lighter #7A5CF0 would give only 4.55:1 and leave no margin. */
+  --grad-accent: linear-gradient(180deg, #6B4BE0 0%, #5334C9 100%);
 
   /* ---- type ------------------------------------------------------------- */
   --font-ui: "Instrument Sans", "Segoe UI Variable Display", "Segoe UI",
@@ -125,6 +135,21 @@
   --fig-xl: 40px;  --track-fig-xl: -0.03em;
   --fig-lg: 28px;  --track-fig-lg: -0.03em;
   --fig-md: 20px;  --track-fig-md: -0.02em;
+
+  /* Which face a figure is set in depends on whether it has a column to align to.
+     Monospace is in this product for one stated reason -- guaranteed tabular
+     alignment without depending on a font feature surviving every code path -- and
+     in the grid that is decisive. But --fig-xl is the money-at-risk figure, 40px,
+     with nothing beside it to align with; at that size a monospace face reads as a
+     system readout rather than as a quantity of money, and JetBrains Mono is wide.
+
+     Verified rather than assumed: Instrument Sans with `tabular-nums lining-nums`
+     measures a spread of exactly 0px across digit combinations that vary by 83px
+     unset, and renders at precisely JetBrains Mono's width -- so the swap changes
+     no layout and loses no alignment. --fig-md stays monospace because it does
+     often sit in a column. */
+  --face-fig-hero: var(--font-ui);
+  --face-fig-col: var(--font-num);
 
   --lh-dense: 1.35;
   --lh-prose: 1.6;
@@ -224,15 +249,15 @@
   --state-attention: #96690B;
   --state-ok:        #0B7D71;
 
-  --ui-accent:     #3050E8;
-  --ui-accent-rgb: 48 80 232;
+  --ui-accent:     #5B3FD4;
+  --ui-accent-rgb: 91 63 212;
 
   --forecast-rgb: 48 80 232;
   --risk-rgb:     192 57 43;
   --excess-rgb:   11 125 113;
   --override-rgb: 184 116 0;
 
-  --grad-accent: linear-gradient(180deg, #4763F0 0%, #2C49DE 100%);
+  --grad-accent: linear-gradient(180deg, #5B3FD4 0%, #4A2DB8 100%);
 
   --e1: 0 1px 2px rgba(15, 23, 33, 0.07),
         inset 0 1px 0 rgba(255, 255, 255, 0.8);

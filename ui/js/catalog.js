@@ -269,8 +269,8 @@ window.Catalog = (() => {
         median of comparable products in the same category and store &mdash; not a
         forecast from this product's own history, because it does not have one yet.
         The <b>service level is real</b>: it comes from the price, cost and shelf
-        life you entered. The <b>stock level cannot be</b> until there is a forecast
-        to take a quantile of.
+        life you entered. The <b>stock level cannot be</b> until this product has a
+        sales history of its own to forecast from.
       </div>` : ""}
 
       ${removed ? `<div class="cat-note warn">

@@ -97,7 +97,9 @@
    scale rather than tied with the headline at an invented 30px, where only the red
    distinguished them. */
 .rv-money-amt {
-  display: block; font-family: var(--font-num); font-size: var(--fig-xl);
+  display: block; font-family: var(--face-fig-hero);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--fig-xl);
   font-weight: 600; letter-spacing: var(--track-fig-xl); line-height: 1;
   color: var(--state-risk);
 }
@@ -191,7 +193,8 @@
   order: 2; margin-left: auto; text-align: right; flex: none;
 }
 .rc-risk-amt {
-  display: block; font-family: var(--font-num); font-size: var(--fig-md);
+  display: block; font-family: var(--face-fig-hero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--fig-md);
   font-weight: 500; letter-spacing: var(--track-fig-md); color: var(--state-risk);
   line-height: 1;
 }
@@ -348,8 +351,12 @@
   background: rgba(var(--forecast-rgb) / 0.06);
   border-radius: var(--r-card);
 }
-.rc-fig-main .rc-fig-val { font-size: var(--fig-lg); font-weight: 600;
-  letter-spacing: var(--track-fig-lg); }
+.rc-fig-main .rc-fig-val {
+  font-family: var(--face-fig-hero);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--fig-lg); font-weight: 600;
+  letter-spacing: var(--track-fig-lg);
+}
 .rc-up { color: var(--state-excess); }
 .rc-down { color: var(--state-risk); }
 .rc-flat { color: var(--text-secondary); }
@@ -369,11 +376,15 @@
 .btn-quiet:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 .rc-more, .link-btn {
   margin-left: auto; background: none; border: 0; cursor: pointer;
-  color: var(--ui-accent); font-size: var(--fs-12);
+  color: var(--text-secondary); font-size: var(--fs-12);
   text-decoration: underline; text-underline-offset: 3px;
-  text-decoration-thickness: 1px; padding: var(--s3);
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--border-strong); padding: var(--s3);
 }
-.rc-more:hover, .link-btn:hover { text-decoration-thickness: 2px; }
+.rc-more:hover, .link-btn:hover {
+  color: var(--text-primary); text-decoration-thickness: 2px;
+  text-decoration-color: var(--ui-accent);
+}
 .link-btn { margin-left: 0; }
 .rc-done-note { font-size: var(--fs-12); color: var(--text-tertiary); }
 
@@ -784,7 +795,7 @@
 .cat-empty { padding: var(--s7) var(--s5); font-size: var(--fs-12); color: var(--text-tertiary); }
 .cat-more {
   border: 0; border-top: 1px solid var(--border-subtle); background: transparent;
-  color: var(--ui-accent); font-size: var(--fs-12); padding: var(--s4);
+  color: var(--text-secondary); font-size: var(--fs-12); padding: var(--s4);
   cursor: pointer; text-align: center;
 }
 .cat-more:hover { background: var(--bg-hover); }
@@ -1025,7 +1036,7 @@
 .cp-name b { color: var(--text-tertiary); font-weight: 400; }
 .cp-link {
   background: none; border: 0; padding: 0; cursor: pointer;
-  color: var(--ui-accent); text-decoration: underline;
+  color: var(--text-secondary); text-decoration: underline;
   text-underline-offset: 2px; text-decoration-thickness: 1px;
   font: inherit;
 }
@@ -1137,3 +1148,61 @@
 }
 .hint-dismiss:hover { color: var(--text-primary); background: var(--bg-hover); }
 .hint-dismiss:active { transform: translateY(1px); }
+
+
+/* ================================================= the cycle ribbon + evidence */
+
+/* The frame. Quiet by default: a planner should read it once on arrival and then
+   stop seeing it until it changes state. */
+.ribbon {
+  display: flex; align-items: center; gap: var(--s5);
+  margin-left: var(--s6); padding: var(--s2) var(--s5);
+  border: 1px solid var(--border-subtle); border-radius: var(--r-pill);
+  background: var(--bg-inset);
+  font-size: var(--fs-11); color: var(--text-secondary);
+  min-width: 0; white-space: nowrap; overflow: hidden;
+}
+.ribbon-main { overflow: hidden; text-overflow: ellipsis; }
+.ribbon-right {
+  font-family: var(--font-num); color: var(--text-tertiary);
+  padding-left: var(--s5); border-left: 1px solid var(--border-subtle); flex: none;
+}
+/* Attention only when the cycle is actually near its cutoff. A ribbon that is
+   always coloured is a ribbon nobody reads. */
+.ribbon[data-state="closing"] {
+  border-color: var(--state-attention);
+  background: color-mix(in srgb, var(--state-attention) 12%, var(--bg-inset));
+  color: var(--text-primary);
+}
+.ribbon[data-state="closed"] {
+  border-color: var(--border-strong); color: var(--text-tertiary);
+}
+
+.sb-rule { height: 1px; background: var(--border-subtle); margin: var(--s5) var(--s4); }
+#sbEvidence[aria-selected="true"] {
+  background: rgba(var(--ui-accent-rgb) / 0.11);
+  color: var(--ui-accent); font-weight: 500;
+}
+
+/* The evidence tab strip sits at the top of whichever sheet is showing, so the
+   three views read as one destination rather than three. */
+.ev-tabs {
+  display: flex; gap: var(--s2); flex-wrap: wrap;
+  margin: 0 0 var(--s7); padding-bottom: var(--s5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ev-tabs button {
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-pill); padding: var(--s3) var(--s5);
+  font-size: var(--fs-12); color: var(--text-secondary); cursor: pointer;
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.ev-tabs button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ev-tabs button:active { transform: translateY(1px); }
+.ev-tabs button[aria-selected="true"] {
+  background: var(--bg-raised); border-color: var(--border-subtle);
+  color: var(--text-primary); font-weight: 500; box-shadow: var(--e1);
+}
+
+@media (max-width: 1200px) { .ribbon-right { display: none; } }
+@media (max-width: 1000px) { .ribbon { display: none; } }

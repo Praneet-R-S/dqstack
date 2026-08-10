@@ -28,6 +28,7 @@
     view: "workspace",
     scope: "queue",
     filters: new Set(),
+    lastEvidence: "evidence",
     sort: "priority",
     search: "",
     pending: new Map(),                          // "id:week" -> value
@@ -492,6 +493,51 @@
     renderEngine();
   }
 
+  /* ---------------------------------------------------------- the ribbon
+
+     Three things a planner needs before they need anything else: which cycle this
+     is, when it closes, and how much is waiting. The deployment here has no real
+     order cutoff, so the ribbon reports the forecast vintage and the horizon it
+     covers; a deployment that does have one sets `D.run.cutoff` and the closing
+     states below light up without further change. */
+
+  function renderRibbon() {
+    const main = $("ribbonMain"), right = $("ribbonRight"), bar = $("ribbon");
+    if (!main) return;
+
+    // U.isoWeek takes the "YYYY-MM-DD" string, not a Date.
+    const week = U.isoWeek(D.run.origin);
+    const made = D.run.generatedAt ? new Date(D.run.generatedAt) : null;
+    const cutoff = D.run.cutoff ? new Date(D.run.cutoff) : null;
+
+    let stateName = "open";
+    let bits = [`Week ${week}`];
+    if (cutoff) {
+      const hrs = (cutoff - Date.now()) / 36e5;
+      stateName = hrs <= 0 ? "closed" : hrs <= 24 ? "closing" : "open";
+      bits.push(hrs <= 0
+        ? "orders closed"
+        : `orders close ${cutoff.toLocaleString(undefined, { weekday: "long", hour: "2-digit", minute: "2-digit" })}`);
+      if (hrs > 0) bits.push(hrs < 24 ? `${Math.round(hrs)} hours left`
+                                     : `${Math.floor(hrs / 24)} days left`);
+    } else {
+      // No cutoff configured. Say what is true instead of inventing a deadline.
+      bits.push(made
+        ? `forecasts generated ${made.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+        : `forecast dated ${D.run.origin}`);
+      bits.push(`covering ${D.run.horizon} days`);
+    }
+    bar.dataset.state = stateName;
+    main.textContent = bits.join(" · ");
+
+    const left = Review.state
+      ? [...Review.state.reviewed.keys()].length : 0;
+    const waiting = Math.max(0, (Review.rows || []).filter((r) => r.tier === "urgent").length);
+    right.textContent = stateName === "closed"
+      ? "queue is read-only until the next cycle"
+      : `${U.nf(waiting)} flagged · ${U.nf(left)} decided`;
+  }
+
   /* ------------------------------------------------------ engine readout */
 
   function renderEngine() {
@@ -845,9 +891,27 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
   const VIEW_TITLE = {
     today: "Today", products: "Products", workspace: "Spreadsheet",
-    evidence: "How it's doing", decisions: "Ordering decisions",
-    pipeline: "How it works",
+    evidence: "Evidence", decisions: "Evidence", pipeline: "Evidence",
   };
+
+  /* The evidence group. One sidebar entry, three views plus two dialogs behind a
+     tab strip. `state.lastEvidence` remembers which tab you were on, so returning
+     to Evidence does not always dump you on the same sheet. */
+  const EVIDENCE = new Set(["evidence", "decisions", "pipeline"]);
+  const EV_LABEL = { evidence: "Accuracy", decisions: "Ordering decisions", pipeline: "Method" };
+
+  function paintEvidenceTabs(v) {
+    document.querySelectorAll(".ev-tabs").forEach((n) => n.remove());
+    if (!EVIDENCE.has(v)) return;
+    const host = document.querySelector(`#view-${v} .sheet`);
+    if (!host) return;
+    const strip = document.getElementById("evTabsTpl").content.cloneNode(true);
+    strip.querySelectorAll("[data-view]").forEach((b) =>
+      b.setAttribute("aria-selected", String(b.dataset.view === v)));
+    host.insertBefore(strip, host.firstChild);
+    const t = $("chromeTitle");
+    if (t) t.textContent = `Evidence · ${EV_LABEL[v]}`;
+  }
 
   function setView(v) {
     state.view = v;
@@ -859,10 +923,15 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     document.querySelectorAll(".view").forEach((s) => {
       s.dataset.active = s.id === "view-" + v;
     });
+    if (EVIDENCE.has(v)) state.lastEvidence = v;
+    document.getElementById("sbEvidence")
+      ?.setAttribute("aria-selected", String(EVIDENCE.has(v)));
     if (SHEETS.has(v)) Views.render(v);
     else if (v === "workspace") requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
     else if (v === "today") Review.render();
     else if (v === "products") Catalog.renderDetail();
+    paintEvidenceTabs(v);
+    renderRibbon();
     closeMenu();
   }
 
@@ -1036,7 +1105,8 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     if (savedDensity) document.documentElement.dataset.density = savedDensity;
     U.refresh();
 
-    $("originLabel").textContent = D.run.origin;
+    // The forecast vintage moved into the cycle ribbon, which reports it with the
+    // horizon beside it; the sidebar stamp it used to live in is gone.
     paintDensityLabel();
     paintThemeLabel();
     $("crumbScope").textContent =
@@ -1096,6 +1166,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       },
 
       onExport: (rows) => exportDecisions(rows),
+      onRibbon: renderRibbon,
       onCount: (n) => {
         const b = $("sbTodayBadge");
         if (!b) return;
@@ -1166,6 +1237,13 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     document.addEventListener("click", (e) => {
       const b = e.target.closest("[data-menu]");
       if (b) onMenu(b.dataset.menu);
+    });
+    document.getElementById("sbEvidence").addEventListener("click", () =>
+      setView(state.lastEvidence));
+    // The strip is re-created on every view change, so it is delegated.
+    document.addEventListener("click", (e) => {
+      const t = e.target.closest(".ev-tabs [data-view]");
+      if (t) setView(t.dataset.view);
     });
     $("sbCollapse").addEventListener("click", () => setSidebar(!sidebarOpen()));
     $("sbOpen").addEventListener("click", () => setSidebar(true));

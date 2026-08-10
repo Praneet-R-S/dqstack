@@ -757,6 +757,71 @@ commit:**
 **Verified: zero horizontal overflow across six views × two themes × two sidebar
 states, at both 1100px and 1512px. 94 tests pass. 117.0 KB gzipped.**
 
+### C9. External design review, first batch — DONE
+
+An outside review (`DQ-Stack_Interface_Redesign_Report.md`) diagnosed one structural
+fault with five consequences. Two of its recommendations rested on factual claims, so
+those were verified in-browser before acting.
+
+**Verified first, not assumed:**
+
+- *Instrument Sans exposes tabular figures.* True. With
+  `font-variant-numeric: tabular-nums lining-nums` the width spread across digit
+  combinations is **exactly 0px**, against 83px unset — and it renders at *precisely*
+  JetBrains Mono's width, so the swap changes no layout and loses no alignment.
+- *The proposed violet is safe.* Partly. `#7A5CF0` measures 4.30 / 4.06 / **3.72**:1
+  on dark base / surface / raised. That clears 3:1 for UI components but **fails
+  4.5:1 for body-size text**, so the review's "stronger option" — de-hue links, keep
+  violet for the focus ring and primary action — is not merely the more disciplined
+  choice, it is the only compliant one. Adopted on that basis.
+
+**Implemented:**
+
+1. **The structural fault.** Nine sidebar entries serving four audiences became
+   **four**: Work (Today, Products, Spreadsheet) and one **Evidence** destination
+   holding the three reference sheets plus the SQL console and glossary as tabs.
+   `state.lastEvidence` remembers the tab, and the chrome title reads
+   "Evidence · Accuracy". Nothing was deleted — the evidence views are the proof the
+   argument holds — but they left the planner's daily field of view.
+2. **The cycle ribbon**, which the review correctly called the largest omission: not
+   a feature but a frame. No cutoff exists in this deployment, so it reports the
+   vintage and horizon — "Week 32 · forecasts generated 6 Aug 19:53 · covering 28
+   days · 489 flagged · 1 decided" — and lights up `closing` / `closed` automatically
+   if `D.run.cutoff` is ever set.
+3. **The accent split finished.** `--ui-accent` moved to violet (`#7A5CF0` /
+   `#5B3FD4`); the primary-action gradient is darker still because white label text
+   needs 4.5:1 and the lighter violet gives only 4.55 with no margin. Links and text
+   buttons now carry **no hue** — ink plus underline — which is both the disciplined
+   position and the fix for the 3.72:1 problem.
+4. **Hero figures left the numeral face.** `--fig-xl` and `--fig-lg` are Instrument
+   Sans with tabular figures; `--fig-md` stays monospace because it does sit in a
+   column. Two new tokens name the distinction: `--face-fig-hero`, `--face-fig-col`.
+5. **`tests/test_vocabulary.py`** — the review's acceptance test 3, made executable.
+   Scans the three planner-facing files for 25 method terms, with `term:` fields,
+   `title` attributes and comments exempt because those are the permitted disclosure
+   routes. It found **one genuine leak** ("a forecast to take a quantile of" in the
+   new-product banner, now rephrased) and one bug in itself — the stripper missed
+   trailing comments. It also carries a guard that plants a known-bad string, so
+   over-stripping the checker cannot masquerade as passing.
+
+**One defect of my own, caught immediately:** rewriting the sidebar footer dropped
+`#originLabel`, which `boot()` dereferenced — the throw aborted all wiring, so the
+ribbon was blank and Evidence did not switch. The element was genuinely redundant
+once the ribbon reported the vintage, so the reference was removed rather than the
+element restored, and a check now asserts every `$("id")` in app.js resolves.
+
+**Measured: 38 contrast checks across both themes including the new violet and the
+button gradient, 0 failures. 99 tests pass. Zero horizontal overflow across 6 views
+x 2 themes. 119.9 KB gzipped.**
+
+**Deliberately deferred from the review**, in its own priority order: card retiering
+into a three-tier layout with a rung-3 drawer; the cost-curve glyph (its best idea —
+worth doing as inline SVG rather than the proposed new canvas renderer, which
+side-steps the frame-budget risk entirely); override reason codes and the
+plausibility guardrail; `Cmd-Z` undo and the decision log; batch grouping; watchlist;
+track-record panel; first-run walkthrough; command-palette actions; density modes;
+icon set; mobile approvals.
+
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
 features public data cannot exercise.
@@ -793,6 +858,11 @@ for eleven weeks and writing badly for one.
   changed before debugging the logic.
 - **The ARIA mirror is on the render path**, not documentation. A null field there — a
   group header's deliberately-absent target quantile — threw and took down the paint.
+- **Every `$("id")` in app.js must resolve.** A single stale lookup in `boot()`
+  throws and silently aborts all wiring downstream of it — the symptom looks like
+  several unrelated features being broken.
+- **Links carry no hue by design.** `--ui-accent` is 3.72:1 on the dark raised
+  surface, which is fine for a focus ring and not for text.
 - **`min-width: 0` on every grid item that contains a canvas or a table.** Both
   hold their track open otherwise, and the symptom appears on an ancestor.
 - **`margin-inline: auto` on a grid item needs `width: 100%`** or the item stops

@@ -443,6 +443,7 @@ window.Review = (() => {
     // The sidebar badge is the only place the outstanding count appears outside
     // this view, so it is pushed rather than polled.
     hooks.onCount?.(onList);
+    hooks.onRibbon?.();
 
     // Tabs. A tier holding more than a screenful shows "24 of 489" rather than
     // 489, so the number never implies more work than the list actually presents.
