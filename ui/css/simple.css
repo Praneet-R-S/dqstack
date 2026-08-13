@@ -507,6 +507,57 @@
 .rc-also b { color: var(--text-primary); font-weight: 500; }
 .rc-fine { font-size: var(--fs-11) !important; color: var(--text-tertiary) !important; }
 
+/* ==================================================== the cost of being wrong
+
+   The ordering layer's whole argument, as a shape: two products with the same
+   forecast get different recommended levels, because the two ways of being wrong do
+   not cost the same and how unequal they are is a property of the product.
+
+   The curve's minimum is the recommended level by construction, not by fitting --
+   verified at 0.000% offset across all 997 series that have a forecast. If the low
+   point of the drawing sat beside the number printed above it, both would lose the
+   reader.
+
+   Fixed 112x46, not a stretched viewBox, so the marker is a circle. Each curve is
+   normalised to its own peak so the reader compares shape rather than magnitude,
+   which is the comparison that carries the lesson. */
+.rc-curve { margin-top: var(--s4); }
+.rc-curve svg { display: block; overflow: visible; }
+.ccv-base { stroke: var(--border-subtle); stroke-width: 1; }
+.ccv-area { fill: rgba(var(--forecast-rgb) / 0.13); stroke: none; }
+.ccv-line { fill: none; stroke: var(--series-forecast); stroke-width: 1.5; }
+/* The recommendation. Violet, because it is the system's own suggestion, which is
+   what the accent means everywhere else in the application. */
+.ccv-opt { stroke: var(--ui-accent); stroke-width: 1; stroke-dasharray: 2 2; }
+.ccv-dot { fill: var(--ui-accent); stroke: var(--bg-surface); stroke-width: 1.5; }
+
+/* --text-secondary, not --text-tertiary. These are money figures, and tertiary
+   measures 3.86:1 on white and 3.87:1 on the card -- below the 4.5:1 needed for
+   text. The chart tick labels were moved off this token for the same reason; the
+   token itself is fine for non-essential furniture and wrong for anything a reader
+   has to read. */
+.rc-curve-ends {
+  display: flex; justify-content: space-between; gap: var(--s3);
+  width: 112px; margin-top: 2px;
+  font-family: var(--font-num); font-size: var(--fs-10); color: var(--text-secondary);
+}
+/* The middle label names the recommendation, so it is the loudest of the three. Not
+   in the accent: --ui-accent is a component colour held to 3:1, and as text on the
+   card it measures 4.06:1. The violet marker directly above already ties the word to
+   the line, so the colour was carrying no information the position did not. */
+.rc-curve-ends span:nth-child(2) { color: var(--text-primary); font-weight: 500; }
+.rc-curve-say {
+  margin: var(--s3) 0 0; max-width: 132px;
+  font-size: var(--fs-11); line-height: var(--lh-caption);
+  color: var(--text-secondary);
+}
+.rc-curve-say.t-risk { color: var(--state-risk); }
+.rc-curve-say.t-excess { color: var(--state-excess); }
+
+/* The figure holding the curve is taller than its three neighbours, so it anchors to
+   the top rather than letting the browser centre it against them. */
+.rc-fig-stock { align-self: start; }
+
 /* ==================================================== how the last cycle went
 
    A track record, which the product did not have. Every series already carried the
@@ -525,7 +576,9 @@
   text-transform: none; letter-spacing: 0; cursor: help;
   padding: 1px var(--s3); border-radius: var(--r-pill);
   border: 1px solid var(--border-subtle); background: var(--bg-inset);
-  color: var(--text-tertiary);
+  /* Secondary, not tertiary: on the inset background tertiary measures 3.4:1 in
+     light. This chip is the caveat on the whole block, so it has to be legible. */
+  color: var(--text-secondary);
 }
 .rc-out-head {
   font-size: var(--fs-15) !important; font-weight: 500;
@@ -544,8 +597,11 @@
   display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--s5); margin: 0;
 }
+/* Secondary again: these name the figures beneath them, so they are read, not
+   skimmed past. Third instance of the same token being wrong for label text -- see
+   the chart ticks and the curve end labels. */
 .rc-out-figs dt {
-  font-size: var(--fs-11); color: var(--text-tertiary); margin-bottom: 2px;
+  font-size: var(--fs-11); color: var(--text-secondary); margin-bottom: 2px;
 }
 .rc-out-figs dd {
   margin: 0; font-family: var(--font-num); font-size: var(--fs-14) !important;

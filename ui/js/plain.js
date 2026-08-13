@@ -325,6 +325,36 @@ window.Plain = (() => {
     };
   }
 
+  /* ---- the shape of the ordering trade-off, in one sentence -------------
+     The cost curve carries the argument; this is the sentence a planner reads while
+     they are still learning to read the shape. Measured across this assortment the
+     ratio runs from 1.25 to 5.36, and the extremes are the argument itself: the
+     lopsided ones are long-shelf high-margin lines where running out is what costs
+     you, and the flat ones are short-shelf thin-margin food where it barely
+     matters which way you are wrong. */
+  function tradeoff(c) {
+    if (!c || !(c.moreCost > 0) || !(c.lessCost > 0)) return null;
+    const pctSpan = Math.round((c.span || 0.4) * 100);
+    const r = c.lessCost / c.moreCost;
+    const detail = `Ordering ${pctSpan}% below the suggested level would cost about ` +
+      `${money(c.lessCost)} more than getting it right; ${pctSpan}% above, about ` +
+      `${money(c.moreCost)} more.`;
+    if (r >= 2) {
+      return { word: `Running out costs ${r < 10 ? r.toFixed(1) : Math.round(r)}x more than overstocking`,
+               advice: "Lean high on this one.", detail, tone: "risk" };
+    }
+    if (r >= 1.35) {
+      return { word: "Running out costs more than overstocking",
+               advice: "Lean slightly high.", detail, tone: "risk" };
+    }
+    if (r > 0.74) {
+      return { word: "Both mistakes cost about the same",
+               advice: "The suggested level is worth sticking to.", detail, tone: "flat" };
+    }
+    return { word: `Overstocking costs ${(1 / r).toFixed(1)}x more than running out`,
+             advice: "Lean low on this one.", detail, tone: "excess" };
+  }
+
   /* ---- model feature names, in English --------------------------------
      Used by the "why this number" explanation. Patterns rather than a lookup
      table, because the feature set is generated and a missing key would render a
@@ -426,6 +456,6 @@ window.Plain = (() => {
 
   return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, short, quality, confidence,
            service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
-           EXCLUDED, excluded, MODELS, blend, outcome,
+           EXCLUDED, excluded, MODELS, blend, outcome, tradeoff,
            get CUT() { return CUT; } };
 })();

@@ -345,14 +345,15 @@ window.Catalog = (() => {
           <span class="rc-fig-val">${Plain.units(week1(s))}<small>units</small></span>
           <span class="rc-fig-sub">likely between ${Plain.units(b.lo)} and ${Plain.units(b.hi)}</span>
         </div>
-        <div class="rc-fig" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
+        <div class="rc-fig rc-fig-stock" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
           <span class="rc-fig-cap">Stock up to</span>
           ${s.orderUpTo == null
             ? `<span class="rc-fig-word rc-pending">Not yet</span>
                <span class="rc-fig-sub">needs a forecast first &middot; aiming at
                  ${svc.pct}% service</span>`
             : `<span class="rc-fig-val">${Plain.units(s.orderUpTo)}<small>units</small></span>
-               <span class="rc-fig-sub">covers ${COVER()} days, to ${svc.pct}% service</span>`}
+               <span class="rc-fig-sub">covers ${COVER()} days, to ${svc.pct}% service</span>
+               ${Review.costCurve(s)}`}
         </div>
         <div class="rc-fig" title="${e(q.note)}">
           <span class="rc-fig-cap">Data quality</span>

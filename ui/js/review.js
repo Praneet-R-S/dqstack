@@ -375,6 +375,57 @@ window.Review = (() => {
     </div>`;
   }
 
+  /* The cost of being wrong, as a shape.
+
+     This is the argument the ordering layer makes, and it was nowhere on screen. Two
+     products with the same forecast get different recommended levels because the two
+     ways of being wrong do not cost the same, and how unequal they are depends on the
+     product's own margin and shelf life. A paragraph saying that is a paragraph
+     nobody reads. A curve with the recommendation at the bottom of it is learnable in
+     a week without meeting a technical term.
+
+     Fixed 112x46 rather than a stretched viewBox, so the marker is a circle and not
+     an ellipse. Each curve is normalised to its own peak, which is what makes the
+     comparison across products work: a lopsided curve and a symmetric bowl both fill
+     the box, so the reader is comparing shape rather than magnitude. Measured across
+     the assortment the shapes genuinely differ -- a 720-day-shelf hobby line is
+     visibly lopsided, a 21-day-shelf food line is visibly flat. */
+  function costCurve(s) {
+    const c = Curve.points(s, COVER_DAYS);
+    if (!c || !(c.peak > 0)) return "";
+    const t = Plain.tradeoff(c);
+    const W = 112, H = 46, PADX = 2, TOP = 4, BOT = H - 5;
+
+    const x = (q) => PADX + ((W - 2 * PADX) * (q - c.lo)) / (c.hi - c.lo);
+    const y = (v) => BOT - ((BOT - TOP) * v) / c.peak;
+
+    const line = c.pts.map((p, i) =>
+      `${i ? "L" : "M"}${x(p.q).toFixed(1)},${y(p.excess).toFixed(1)}`).join("");
+    const area = `${line}L${x(c.hi).toFixed(1)},${BOT}L${x(c.lo).toFixed(1)},${BOT}Z`;
+    const ox = x(c.opt);
+
+    const label = `Cost of ordering more or less than ${Plain.units(c.opt)} units. ` +
+      (t ? t.word + ". " + t.detail : "");
+
+    return `<div class="rc-curve" title="${U.esc(t ? t.detail : "")}">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img"
+           aria-label="${U.esc(label)}">
+        <line class="ccv-base" x1="${PADX}" y1="${BOT}" x2="${W - PADX}" y2="${BOT}"/>
+        <path class="ccv-area" d="${area}"/>
+        <path class="ccv-line" d="${line}"/>
+        <line class="ccv-opt" x1="${ox.toFixed(1)}" y1="${TOP - 1}"
+              x2="${ox.toFixed(1)}" y2="${BOT}"/>
+        <circle class="ccv-dot" cx="${ox.toFixed(1)}" cy="${BOT}" r="2.6"/>
+      </svg>
+      <div class="rc-curve-ends" aria-hidden="true">
+        <span>${Plain.money(c.lessCost)} worse</span>
+        <span>best</span>
+        <span>${Plain.money(c.moreCost)} worse</span>
+      </div>
+      ${t ? `<p class="rc-curve-say t-${t.tone}">${U.esc(t.word)}</p>` : ""}
+    </div>`;
+  }
+
   /* ----------------------------------------------------------------- cards */
 
   function card(r) {
@@ -434,10 +485,11 @@ window.Review = (() => {
           <span class="rc-fig-word rc-${ch ? ch.dir : "flat"}">${ch ? e(ch.word) : "—"}</span>
           <span class="rc-fig-sub">${e(changeNote(ch))}</span>
         </div>
-        <div class="rc-fig" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
+        <div class="rc-fig rc-fig-stock" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
           <span class="rc-fig-cap">Stock up to</span>
           <span class="rc-fig-val">${Plain.units(s.orderUpTo)}<small>units</small></span>
           <span class="rc-fig-sub">covers ${COVER_DAYS} days, to ${svc.pct}% service</span>
+          ${costCurve(s)}
         </div>
         <div class="rc-fig">
           <span class="rc-fig-cap">Data quality</span>
@@ -1022,7 +1074,7 @@ window.Review = (() => {
   }
 
   return { init, render, decisions, counts, setScope, setWatched, chartKey,
-           outcomeBlock, blendBlock, get evalDays() { return EVAL_DAYS; },
+           outcomeBlock, blendBlock, costCurve, get evalDays() { return EVAL_DAYS; },
            byCause, setCause, undoLast, progress, watchStatus,
            get cause() { return state.cause; },
            get state() { return state; }, get scope() { return scope; },
