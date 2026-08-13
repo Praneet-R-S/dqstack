@@ -13,11 +13,13 @@ Last updated: after commit `644af67` (six verified findings fixed).
 
 The pipeline and its evidence are finished and committed. **All current work is
 interface.** Two external design reviews have been received; v2 supersedes v1 and
-corrects it. Read **C11** first — it holds the in-flight state and the exact next
-step, including a written-but-unapplied script.
+corrects it. **C11** records the review's own eight blocks (all built). **C12** records
+the eight features built after them, including two new modules — `truth.js` and
+`curve.js` — and the traps this work added to the list. Read C12's trap list before
+touching charts, contrast or the sidebar's height budget.
 
     python -m dqstack.serve          # then http://127.0.0.1:8000/
-    python -m pytest -q              # 111 tests
+    python -m pytest -q              # 129 tests
     python docs/build_reference_pdf.py   # regenerate the 20-page reference
 
 Verification habits that have repeatedly paid for themselves:
@@ -967,6 +969,153 @@ actions; since-you-were-last-here; mobile approvals.
 **Already satisfied from v2, do not redo:** the accent split (violet, C9), hero figures
 in Instrument Sans with tabular figures (C9), the vocabulary CI check (C9), the
 watchlist and persistent draft count and ambient feed condition (C10).
+
+### C12. Eight features beyond both reviews — DONE
+
+Asked "what else can we add", answered with a prioritised list, and told "add them
+all". All eight shipped, each with its own commit. Two modules are new: `ui/js/truth.js`
+and `ui/js/curve.js`.
+
+**1. The excluded-day layer (`truth.js`). This was a bug fix, not a feature.**
+`hist[i]` is `null` where the pipeline set a day aside, and both planner-facing charts
+called `y(v)` on it — and `y(null)` is arithmetically `y(0)`. Every excluded day was
+drawn as a day of zero demand, on 16,120 days across 579 of 1,000 products. Food 1-001
+at CA_4 has 96 days it was not stocked and its chart showed a flat line along the floor.
+`chart.js`, the expert surface, had always handled this correctly; the two surfaces built
+for people who cannot read the pipeline were the dishonest ones.
+
+Two exclusions are distinguished because they ask different things of the reader:
+`gap` (not carried, `carried[i] === false`, 14,069 days) takes a neutral wash because
+absence of evidence invites no investigation; `suspect` (carried, till recorded zero,
+2,051 days) takes the amber of the flag that reports it. `chart.js` drew the latter in
+`--series-override` — the colour that means "a planner edited this" — and now uses
+`--state-attention` with the others.
+
+Also fixed here: 57 isolated known days between two excluded ones drew as nothing (a
+one-point subpath paints nothing); the fan hinged on `hist[last]` even when that day was
+excluded; and **every circle on the sparkline was an ellipse** because
+`preserveAspectRatio="none"` stretches it 3.06x. Round-cap zero-length subpaths with
+`non-scaling-stroke` are immune — verified by hit-testing the live stroke, symmetric at
+r=2 and absent at r=5 in every direction. `dot()` in review.js is the helper.
+
+**2. Track record and blend.** `s.ledger` (per-series realised outcome over the
+`evalOrigin`→`origin` window) and `s.weights` were exported from the first run and never
+shown. Both now appear in the card drawer and on Products, from one implementation.
+Labelled "tested" throughout — it is a backtest, and `EVAL_DAYS` is read from the run,
+not written as a literal.
+
+**3. The cost curve (`curve.js`) — the review's headline idea.** The load-bearing
+property is that the drawn minimum IS the recommended level; a low point sitting beside
+the number above it would discredit both, silently. So it is constructed, not fitted:
+`dC/dQ` vanishes at `F(Q) = ` the critical fractile, so the demand distribution is
+rebuilt from two things the bundle states exactly — the mean of the cover window and
+`F(orderUpTo) = targetQ`. Two constraints determine a lognormal (feasible for 809/1000);
+the other 188 drop the mean constraint and keep the quantile one, which is the one that
+places the minimum.
+
+**Cost weights come from `targetQ`, never from raw `underage`/`overage`.** `targetQ` is
+the fractile the recommendation was actually computed at, post-clamp, and the exported
+components are single precision — so the raw ratio differs for nearly every series.
+`test_cost_curve.py` documents this so nobody "simplifies" it back.
+
+Verified: worst minimum offset **0.000%** across all 997 series with a forecast.
+`tests/curve_invariant.js` runs the real module; `tests/test_cost_curve.py` wraps it and
+skips if node is absent.
+
+It differentiates, which was the point: the under/over cost ratio runs 1.25 to 5.36, and
+the extremes are the thesis — 720-day-shelf 44-53%-margin hobby lines are visibly
+lopsided, 21-day-shelf 17%-margin food is visibly flat.
+
+**4. The card in four rungs.** rung 0 position + exposure + age; rung 1 identity + the
+number + the cost curve; rung 2 one sentence + the fan; rung 3 act. Six figures moved
+into the drawer behind `W`, four of which explain the cost curve. Exposure stopped being
+a hero figure — the position readout "1 of 24" says why the card is there. `.rc-top` and
+`.rc-risk` are gone.
+
+**5. Override reason codes, guardrail, impact.** A reason is **required** and enforced at
+the action layer as well as by the disabled button. The guardrail states odds, live as
+typed ("About a 1 in 11 chance demand reaches this level"). `hooks.impactOf` exposes the
+existing `overrideImpact()` to the card, so the spreadsheet cell, the card form and the
+commit summary all quote one estimator. Reason, note and expected effect leave in the
+CSV — the reason is the only part of a decision that cannot be reconstructed later.
+
+**6. Bulk approve and batching.** Fixed thresholds ($10/$50/$250) were measured and
+found useless: the urgent cohort runs $377–$1,861, so everything below $500 cleared
+nothing and $1,000 cleared 88% of items and 72% of the money — approve-all in disguise.
+Thresholds are now percentiles of the live list, and an offer survives only if it clears
+≤45% of items **and** ≤15% of the money. Low priority correctly offers nothing.
+
+**Undo now reverses an action, not a row**: every decision carries a `seq`, so a bulk
+approve of five is one press of undo. Batching is a **window** over the fixed cohort —
+`shownList()` — never a re-slice; verified that cards go 24→5 while the headline, money,
+progress and "1 of 24" all hold.
+
+**7. Saved views, sidebar block 6 — the last of the review's eight.** Scope + cause + tab
+under a chosen name, in `localStorage` key `dq.views`, each row carrying the count it
+would show now. Counts come from the cohort directly, because applying a scope rebuilds
+the queue and would lose the session's place just to fill a badge.
+
+**The rail had exactly zero slack — 507px of content in 507px at 1440x900.** Block 6 paid
+for itself: 31px from capping the queue at five causes (it already collapses its tail, so
+nothing is dropped — verified the five rows still sum to all 72 live items), 30px from
+moving "+ Save" onto the group label, ~5px from tighter spacing. All eight blocks now fit
+on first load, and the rail only scrolls once a planner has actively saved views.
+
+**8. Policy cost panel.** The nine measured arms in `metrics.economics`, named after what
+they mean rather than after the mechanism each removes, ranked by earnings, opened from
+the footer beside Evidence. The blanket-95% row is the whole argument:
+
+    A service level for each product   $833k   94.2% met   112 units held   $4.2k written off
+    One service level for everything   $771k   99.1% met   205 units held    $40k written off
+
+It also reports, unsoftened, that "let the totals disagree" earns $1.5k more than the
+current configuration — reconciliation costs a little margin and buys totals that add up,
+and the row's own note says so.
+
+**New tests (129 total, up from 113).** `test_cost_curve.py` (3, incl. the node-backed
+invariant), `test_markup.py::test_every_module_parses` (11 — `node --check` per module),
+`test_vocabulary.py::test_every_blended_method_has_a_plain_label`, plus `truth.js` and
+`curve.js` joining the vocabulary and control-character checks, and an assertion that
+`index.html` still loads every module the renderers dereference.
+
+**The vocabulary stripper was loosened twice, both times correctly, both times verified
+not to blind the check.** Object keys (`nhits:`) and quoted object keys
+(`"Croston/SBA only":`) are code — they are keyed by the pipeline's own method names
+precisely so they can map to a plain label. Both exemptions are anchored to line start,
+`{` or `,`, so a leak in a `label:` value, in a `note:` value, or in a quoted string that
+is not a key is still caught. Confirmed by test.
+
+**Payload:** 160.7 KB gzipped for all HTML/CSS/JS, up from 127.3 KB.
+
+### Traps added to the list by this work
+
+- **`node --check` belongs in the suite.** A `const shown` collided with an existing
+  binding in the same function; because these are plain scripts, the first symptom was
+  an unrelated `Review is not defined` thrown by *app.js*. A blank shell and an error
+  naming the wrong file. Now tested.
+- **`--text-tertiary` is not a text colour.** It measures 3.86:1 light / 3.87:1 dark.
+  This work hit it six more times (chart ticks, curve end labels, the "tested" chip, the
+  outcome figure labels, the position readout, the required marker). Use
+  `--text-secondary` for anything a reader has to read; tertiary is for furniture.
+- **`--ui-accent` is a component colour held to 3:1.** As text on the card it is 4.06:1.
+- **A contrast harness must composite alpha.** Mine reported six impossible 1.0–1.08
+  ratios because it treated the override form's `rgba(.../0.07)` tint as opaque orange.
+  Walk ancestors and composite until an opaque layer is found.
+- **One keystroke, two handlers.** The card form's Enter sits on `#rvList` and the
+  shortcut handler on `document`; `inField()` only stopped the second while focus
+  happened to be in a text input. With focus on Save, Enter saved *and* approved the
+  cursor's card. Guard on the container (`.rc-edit`), not on the focused tag.
+- **A hidden browser pane suspends `requestAnimationFrame`** — awaiting it hangs the
+  call. It also makes heavy canvas renders slow enough that a six-view sweep in one call
+  exceeds the 30s budget. Use `setTimeout` only, and split sweeps across calls.
+- **Setting `documentElement.dataset.theme` directly bypasses the app's theme path.**
+  Click the app's own control and re-query elements after; never reuse a retained
+  `CSSStyleDeclaration` across a flip.
+- **Verify a feature's premise against the data before designing around it.** Three
+  claims in the original feature list were wrong on inspection: `hist` vs `histRaw` is
+  masking, not a repair; both calendar events *are* in the window; and per-product
+  reliability *is* derivable. Two features I had called blocked were buildable, and one I
+  had called easy was a bug.
 
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
