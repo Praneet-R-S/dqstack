@@ -1736,6 +1736,65 @@
   color: var(--text-tertiary);
 }
 
+/* ---- block 6: saved views ---------------------------------------------
+   The eighth block of the report's eight, and the last one built. A planner who
+   narrows to the same slice every morning should not rebuild it every morning.
+
+   Each row carries the count that view would show right now, for the same reason
+   every other block in this rail carries a live number: a rail where nothing changes
+   between visits is a list of links. The active view is the only raised row, matching
+   the queue block's convention exactly. */
+/* Tighter bottom margin than its sibling blocks, and a tighter empty hint. The rail
+   had zero slack before this block existed, so block 6 pays for itself in millimetres:
+   the queue cap gave 31px, moving the add affordance onto the label gave 30px, and
+   these two give the last few. */
+.sb-views { display: grid; gap: 1px; margin: var(--s2) var(--s4) var(--s4); }
+.sb-views .sb-empty { padding: 2px var(--s4); }
+.sb-view { display: flex; align-items: center; border-radius: 5px; }
+.sb-view[data-active="true"] {
+  background: var(--bg-raised); box-shadow: var(--e1);
+}
+.sb-view-go {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s4);
+  min-height: 30px; padding: 5px var(--s4); cursor: pointer;
+  background: transparent; border: 0; border-radius: 5px; text-align: left;
+  font-size: var(--fs-12); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-view-go:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-view-go:active { transform: translateY(1px); }
+.sb-view[data-active="true"] .sb-view-go { color: var(--text-primary); }
+.sb-view-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-view-n {
+  font-family: var(--font-num); font-size: var(--fs-11); flex: none;
+  color: var(--text-primary); font-weight: 500;
+}
+/* Destructive, so it stays quiet until the row is under the cursor. */
+.sb-view-x {
+  flex: none; width: 20px; height: 20px; margin-right: var(--s3); cursor: pointer;
+  background: transparent; border: 0; border-radius: 4px; opacity: 0;
+  color: var(--text-secondary); font-size: var(--fs-14); line-height: 1;
+  transition: opacity var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-view:hover .sb-view-x, .sb-view-x:focus-visible { opacity: 1; }
+.sb-view-x:hover { color: var(--state-risk); background: var(--bg-hover); }
+/* On the group label rather than under the list. Permanent affordances do not belong
+   in a container that is rebuilt on every render, and moving it here reclaimed the
+   30px that let block 6 fit at all. */
+.sb-group-act { display: flex; align-items: baseline; justify-content: space-between; }
+.sb-view-add {
+  padding: 0 var(--s2); cursor: pointer;
+  background: transparent; border: 0; border-radius: 4px;
+  font-family: var(--font-ui); font-size: var(--fs-10);
+  text-transform: none; letter-spacing: 0;
+  color: var(--text-secondary);
+  transition: color var(--t-feedback) var(--ease), background var(--t-feedback) var(--ease);
+}
+.sb-view-add:hover { color: var(--text-primary); background: var(--bg-hover); }
+.sb-view-add:active { transform: translateY(1px); }
+
 /* ---- block 7: scope --------------------------------------------------- */
 .sb-scope { padding: var(--s2) var(--s4) var(--s5); }
 .sb-scope .sel { width: 100%; max-width: none; font-size: var(--fs-12); }
@@ -1788,6 +1847,8 @@
 :root[data-sidebar="closed"] .sb-cycle,
 :root[data-sidebar="closed"] .sb-scope,
 :root[data-sidebar="closed"] .sb-watch,
+:root[data-sidebar="closed"] .sb-views,
+:root[data-sidebar="closed"] .sb-view-add,
 :root[data-sidebar="closed"] .sb-cycle-chip,
 :root[data-sidebar="closed"] .sb-group,
 :root[data-sidebar="closed"] .sb-session-cap,

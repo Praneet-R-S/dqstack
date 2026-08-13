@@ -540,6 +540,32 @@
       : '<p class="sb-empty">Star a product to watch it</p>';
   }
 
+  /* ---- block 6: saved views ---------------------------------------------
+     The one block of the report's eight that was never built. A view is the scope,
+     the cause filter and the tab under a name the planner chose; each row carries
+     the count it would show right now, which is what keeps this block an instrument
+     and not a bookmark bar. */
+  function paintViews(list) {
+    const host = $("sbViews");
+    if (!host) return;
+    const rows = (list || []).map((v) => `
+      <div class="sb-view" ${v.active ? 'data-active="true"' : ""}>
+        <button class="sb-view-go" data-view-i="${v.i}"
+                title="${U.esc(v.detail)}${v.active ? " — this is what you are looking at now" : ""}">
+          <span class="sb-view-name">${U.esc(v.name)}</span>
+          <span class="sb-view-n">${v.n}</span>
+        </button>
+        <button class="sb-view-x" data-view-del="${v.i}"
+                title="Forget this view" aria-label="Forget ${U.esc(v.name)}">&times;</button>
+      </div>`).join("");
+
+    /* The add affordance sits in the group label rather than in this list. It is
+       permanent, so rebuilding it on every render was wasted work -- and putting it on
+       the label line reclaimed the 30px that let block 6 exist at all. */
+    host.innerHTML = rows ||
+      '<p class="sb-empty">Narrow the list, then save it</p>';
+  }
+
   function paintDrafts() {
     const b = $("sbDraftBadge");
     if (!b) return;
@@ -646,6 +672,7 @@
 
   function paintSidebar() {
     paintDrafts(); paintSession(); paintHealth(); paintCycle(); paintWatchBlock();
+    paintViews(Review.viewList());
   }
 
 
@@ -1301,6 +1328,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       // The whole board, not just the tiers: a decision changes the counts, the
       // session line and the commit/export affordances together.
       onQueue: (groups) => { paintQueue(groups); paintSidebar(); },
+      onViews: paintViews,
       onCount: (n) => {
         const b = $("sbTodayBadge");
         if (!b) return;
@@ -1407,6 +1435,31 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       }
       const w = e.target.closest("[data-watch]");
       if (w) { setView("products"); Catalog.reveal(w.dataset.watch); }
+    });
+
+    /* ---- saved views. One delegated listener, because the block is rebuilt on
+       every render and per-button handlers would go stale. */
+    $("sbViews").addEventListener("click", (e) => {
+      const del = e.target.closest("[data-view-del]");
+      if (del) {
+        const v = Review.deleteView(+del.dataset.viewDel);
+        return v && toast(`Forgot the view “${v.name}”`);
+      }
+      const go = e.target.closest("[data-view-i]");
+      if (go) {
+        setView("today");
+        const v = Review.applyView(+go.dataset.viewI);
+        return v && toast(`Showing “${v.name}”`);
+      }
+    });
+
+    $("sbViewAdd").addEventListener("click", () => {
+      const suggested = Review.describeView(Review.currentView());
+      const name = prompt("Name this view", suggested);
+      if (name === null) return;                   // cancelled, not an empty name
+      const v = Review.addView(name);
+      paintViews(Review.viewList());
+      toast(`Saved “${v.name}”`);
     });
 
     // ---- the undo the product had no answer for

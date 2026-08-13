@@ -174,9 +174,14 @@ window.Review = (() => {
     }
     const rowsOut = [...groups.values()].sort((a, b) => b.exposure - a.exposure || b.n - a.n);
 
-    // Capped at six with the remainder collapsed, per the report.
+    /* Capped at five with the remainder collapsed. The report said six, and six is
+       what this was until block 6 -- saved views -- was built and the rail turned out
+       to have exactly zero pixels of slack: 507 of 507 at 1440x900. Something had to
+       give, and one more cause folded into a row that already exists to collapse the
+       tail costs no information at all, whereas a rail that scrolls on first load
+       hides a block from someone who has never seen it. */
     let head = rowsOut, rest = [];
-    if (rowsOut.length > 6) { head = rowsOut.slice(0, 5); rest = rowsOut.slice(5); }
+    if (rowsOut.length > 5) { head = rowsOut.slice(0, 4); rest = rowsOut.slice(4); }
     if (rest.length) {
       head = head.concat([{
         key: "__rest", label: "Everything else", tone: "info",
@@ -925,6 +930,7 @@ window.Review = (() => {
     hooks.onRibbon?.();
     hooks.onTiers?.(c);
     hooks.onQueue?.(byCause());
+    hooks.onViews?.(viewList());
 
     // Tabs. A tier holding more than a screenful shows "24 of 489" rather than
     // 489, so the number never implies more work than the list actually presents.
@@ -1341,6 +1347,7 @@ window.Review = (() => {
     hooks = h;
     Q50 = D.run.chartQuantiles.indexOf(0.5);
     COVER_DAYS = (D.run.reviewPeriod || 7) + (D.run.leadTime || 2);
+    loadViews();
     if (D.run.evalOrigin && D.run.origin) {
       const d = Math.round(
         (new Date(D.run.origin) - new Date(D.run.evalOrigin)) / 864e5);
@@ -1473,6 +1480,120 @@ window.Review = (() => {
     };
   }
 
+  /* ---- saved views -------------------------------------------------------
+
+     A planner responsible for two stores narrows to the same slice every morning:
+     their scope, one cause, one tab. Rebuilding it daily is the kind of small tax
+     that makes people stop using the narrowing at all and go back to reading the
+     whole list.
+
+     A view is exactly the three pieces of state that define what is on screen, under
+     a name the planner chose. Kept in this browser like the watchlist, and for the
+     same reason: a saved view that vanishes on reload invites you to build it twice
+     and then never again. */
+  const VIEW_KEY = "dq.views";
+  let views = [];
+
+  function loadViews() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(VIEW_KEY) || "[]");
+      views = Array.isArray(raw)
+        ? raw.filter((v) => v && typeof v.name === "string").slice(0, 12)
+        : [];
+    } catch (_) { views = []; }
+  }
+  const saveViews = () => {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(views)); } catch (_) {}
+  };
+
+  /** What the current view would be called if the planner does not name it. Built
+      from the state itself, so the default is descriptive rather than "View 3". */
+  function describeView(v) {
+    const bits = [];
+    bits.push(v.scope ? prettyStore(v.scope) : "All stores");
+    if (v.cause === "__skipped") bits.push("skipped");
+    else if (v.cause === "__rest") bits.push("everything else");
+    else if (v.cause) bits.push(Plain.short(v.cause).toLowerCase());
+    if (v.tab && v.tab !== "urgent") {
+      bits.push(v.tab === "check" ? "worth checking"
+                : v.tab === "later" ? "low priority" : "reviewed");
+    }
+    return bits.join(" · ");
+  }
+
+  const currentView = () => ({ scope, cause: state.cause, tab: state.tab });
+
+  /** Whether a saved view describes exactly what is on screen now, so the rail can
+      show which one the planner is in rather than making them remember. */
+  const viewIsActive = (v) =>
+    (v.scope || "") === (scope || "") &&
+    (v.cause || "") === (state.cause || "") &&
+    (v.tab || "urgent") === (state.tab || "urgent");
+
+  function viewList() {
+    return views.map((v, i) => ({
+      i, name: v.name, detail: describeView(v), active: viewIsActive(v),
+      // How many decisions this view would put in front of them right now. The
+      // figure is what makes the block an instrument rather than a bookmark bar.
+      n: countForView(v),
+    }));
+  }
+
+  /** Items a view would show, without disturbing the live state.
+
+      Counted directly from the cohort rather than by applying the view and reading
+      the result: the cohort is scoped at build time, so applying a different scope to
+      count it would rebuild the queue and lose the session's place. */
+  function countForView(v) {
+    const tab = v.tab || "urgent";
+    const inScope = (r) => !v.scope || r.s.store === v.scope;
+    const base = tab === "done"
+      ? rows.filter((r) => state.reviewed.has(r.id))
+      : cohort[tab].map(byId).filter(Boolean).filter((r) => !state.reviewed.has(r.id));
+    const c = v.cause;
+    return base.filter(inScope).filter((r) => {
+      if (!c) return true;
+      if (c === "__skipped") return state.reviewed.get(r.id)?.action === "skipped";
+      if (c === "__rest") {
+        const g = byCause().find((x) => x.key === "__rest");
+        return !!g && (g.members || []).includes(r.head.key);
+      }
+      return r.head.key === c;
+    }).length;
+  }
+
+  function addView(name) {
+    const v = { ...currentView(), name: (name || "").trim() };
+    if (!v.name) v.name = describeView(v);
+    // Re-saving the same slice renames it rather than making a duplicate.
+    const dup = views.findIndex((x) => viewIsActive(x));
+    if (dup >= 0) views[dup] = v; else views.unshift(v);
+    views = views.slice(0, 12);
+    saveViews();
+    hooks.onViews?.(viewList());
+    return v;
+  }
+
+  function applyView(i) {
+    const v = views[i];
+    if (!v) return null;
+    state.cause = v.cause || "";
+    state.tab = v.tab || "urgent";
+    state.cursor = 0;
+    // setScope rebuilds and renders, which also repaints this block.
+    setScope(v.scope || "");
+    return v;
+  }
+
+  function deleteView(i) {
+    const v = views[i];
+    if (!v) return null;
+    views.splice(i, 1);
+    saveViews();
+    render();
+    return v;
+  }
+
   /** Watched products with the movement a planner pinned them to watch. */
   function watchStatus(limit = 3) {
     const out = [];
@@ -1496,6 +1617,7 @@ window.Review = (() => {
            outcomeBlock, blendBlock, costCurve, get evalDays() { return EVAL_DAYS; },
            byCause, setCause, undoLast, progress, watchStatus,
            bulkOffers, bulkApprove, setBatch, batchInfo,
+           viewList, addView, applyView, deleteView, describeView, currentView,
            get cause() { return state.cause; },
            get state() { return state; }, get scope() { return scope; },
            prettyItem, prettyStore, get rows() { return rows; },
