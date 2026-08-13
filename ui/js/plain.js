@@ -220,6 +220,111 @@ window.Plain = (() => {
     };
   }
 
+  /* ---- how the last cycle actually went -------------------------------
+     Every product carries the result of running these settings over the 28 days
+     before the forecast date: what shoppers wanted, what could be sold, and what
+     the gap cost. Nothing in the interface showed it, so the system asked to be
+     trusted without ever saying how it had done.
+
+     This is a test on held-out days, not a live trading record, and the wording
+     says so. Overstating it would be the same failure as hiding the uncertainty
+     on a forecast. */
+  function outcome(s, days = 28) {
+    const l = s && s.ledger;
+    if (!l || !(l.demand > 0)) return null;
+    const missed = Math.max(0, l.demand - l.sales);
+    const met = l.demand > 0 ? l.sales / l.demand : 1;
+    const perfect = missed < 0.5;
+    return {
+      days, wanted: l.demand, sold: l.sales, missed, met,
+      earned: l.realizedMargin,
+      lost: l.lostMargin, holding: l.holdingCost, waste: l.wasteCost,
+      cost: l.holdingCost + l.wasteCost,
+      perfect,
+      headline: perfect
+        ? "Met every unit of demand"
+        : `Met ${Math.round(met * 100)}% of demand`,
+      note: perfect
+        ? `Over the ${days} days tested, everything shoppers asked for was on the shelf.`
+        : `Over the ${days} days tested, about ${units(missed)} ` +
+          `unit${Math.round(missed) === 1 ? "" : "s"} could not be sold because stock ` +
+          `had run out, costing ${money(l.lostMargin)} of profit.`,
+      tone: perfect ? "ok" : met >= 0.95 ? "info" : met >= 0.85 ? "warn" : "urgent",
+    };
+  }
+
+  /* ---- which methods produced this number, in plain words --------------
+     The blend is the system's central claim, and the weights were exported from the
+     first run onwards without ever being shown. A planner asking "why should I
+     believe this" deserves a truthful answer, and "70% from this product's own
+     sales pattern, 22% from the curve new products follow" is one. Each keeps its
+     real name reachable, like every other plain phrase here. */
+  const MODELS = {
+    lgbm_quantile:    { label: "This product's own sales pattern",
+                        hint: "Learned from its history, and asked for a range rather than a single number.",
+                        term: "LightGBM quantile heads" },
+    lgbm_tweedie:     { label: "Its own pattern, fitted to totals",
+                        hint: "The same history, fitted in a way that copes with many zero days.",
+                        term: "LightGBM Tweedie" },
+    lifecycle_cohort: { label: "The curve new products follow",
+                        hint: "How comparable products behaved at the same age, used where this one has too little history of its own.",
+                        term: "lifecycle cohort model" },
+    croston_sba:      { label: "Built for occasional sellers",
+                        hint: "A method for products that sell in scattered ones and twos rather than every day.",
+                        term: "Croston / SBA" },
+    tsb:              { label: "Occasional sellers, with fading interest",
+                        hint: "For products that sell rarely and may be drifting out of demand altogether.",
+                        term: "Teunter-Syntetos-Babai" },
+    adida:            { label: "Occasional sales, grouped into blocks",
+                        hint: "Adds the quiet days together before forecasting, which steadies a spiky history.",
+                        term: "ADIDA" },
+    nhits:            { label: "Shapes repeated across the range",
+                        hint: "Learned from many products at once, so it can recognise a shape this product has not shown often.",
+                        term: "NHITS" },
+    ets:              { label: "Level, trend and season",
+                        hint: "The classic decomposition: where sales sit, which way they are heading, and the repeating yearly shape.",
+                        term: "exponential smoothing" },
+    seasonal_naive:   { label: "The same period last year",
+                        hint: "A deliberately plain benchmark. Weight here means nothing cleverer beat it.",
+                        term: "seasonal naive" },
+    zeroshot_prior:   { label: "Similar products elsewhere",
+                        hint: "Borrowed from comparable products, for a product with no usable history of its own.",
+                        term: "zero-shot prior" },
+  };
+
+  /** The blend, ordered and trimmed. Contributions under 5% are summed into a
+      remainder rather than listed: a planner reading a list of ten methods learns
+      less than one reading the two that did the work. */
+  function blend(weights, { min = 0.05, max = 4 } = {}) {
+    const all = Object.entries(weights || {})
+      .filter(([, w]) => w > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (!all.length) return null;
+    const kept = all.filter(([, w]) => w >= min).slice(0, max);
+    const restW = all.reduce((a, [, w]) => a + w, 0) -
+                  kept.reduce((a, [, w]) => a + w, 0);
+    const rows = kept.map(([k, w]) => ({
+      key: k, share: w,
+      label: (MODELS[k] || {}).label || k.replace(/_/g, " "),
+      hint: (MODELS[k] || {}).hint || "",
+      term: (MODELS[k] || {}).term || k,
+    }));
+    if (restW > 0.005) {
+      rows.push({ key: "__rest", share: restW, label: "Other methods",
+                  hint: `${all.length - kept.length} further methods, each contributing a little.`,
+                  term: "remaining ensemble members" });
+    }
+    const lead = rows[0];
+    return {
+      rows,
+      lead,
+      sentence: rows.length === 1
+        ? `This number comes entirely from ${lead.label.toLowerCase()}.`
+        : `Mostly ${lead.label.toLowerCase()} (${Math.round(lead.share * 100)}%), ` +
+          `combined with ${rows.length - 1} other${rows.length === 2 ? "" : "s"}.`,
+    };
+  }
+
   /* ---- model feature names, in English --------------------------------
      Used by the "why this number" explanation. Patterns rather than a lookup
      table, because the feature set is generated and a missing key would render a
@@ -313,10 +418,14 @@ window.Plain = (() => {
      "Not an order quantity — a target. It is how much you want on the shelf and in transit combined, to cover demand until the next delivery arrives. It covers a longer window than the weekly forecast, so the two numbers are not directly comparable."],
     ["Why this number",
      "The forecast is not a black box. Each product shows which patterns in its own history pushed the number up or down, and by how much."],
+    ["How the last days went",
+     "A test, not a trading record. The system was given the settings it would have used, run across days it had not seen, and scored on what it would have sold and what it would have missed. It is the closest thing to a track record that can exist before the system runs for real."],
+    ["Where the number came from",
+     "Several forecasting methods run on every product, and each is weighted by how well it has done on products like this one. No method wins everywhere, which is why the answer is a blend. The shares shown are the actual weights used."],
   ];
 
   return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, short, quality, confidence,
            service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
-           EXCLUDED, excluded,
+           EXCLUDED, excluded, MODELS, blend, outcome,
            get CUT() { return CUT; } };
 })();

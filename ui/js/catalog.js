@@ -378,6 +378,10 @@ window.Catalog = (() => {
         <span class="cat-edit-note" id="catSaved"></span>
       </div>
 
+      ${isNewProduct(s) ? "" : Review.outcomeBlock(s, Review.evalDays)}
+
+      ${Review.blendBlock(s)}
+
       ${drivers.length ? `<section class="cat-why">
         <h4>What drives this forecast</h4>
         <ul class="rc-drivers">

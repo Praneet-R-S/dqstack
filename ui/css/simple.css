@@ -507,6 +507,95 @@
 .rc-also b { color: var(--text-primary); font-weight: 500; }
 .rc-fine { font-size: var(--fs-11) !important; color: var(--text-tertiary) !important; }
 
+/* ==================================================== how the last cycle went
+
+   A track record, which the product did not have. Every series already carried the
+   result of running these settings over held-out days, and no screen showed it: the
+   system asked to be trusted without ever saying how it had done.
+
+   The bar is the block. Proportion of demand met is the one number a planner can
+   judge without a baseline to compare against, and the money underneath says what
+   the shortfall was worth. The "tested" chip is not decoration -- overstating a
+   backtest as a trading record would be the same failure as hiding the range on a
+   forecast. */
+.rc-out, .rc-blend { display: block; }
+.rc-out h4 { display: flex; align-items: center; gap: var(--s4); }
+.rc-out-tag {
+  font-family: var(--font-ui); font-size: var(--fs-10); font-weight: 500;
+  text-transform: none; letter-spacing: 0; cursor: help;
+  padding: 1px var(--s3); border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle); background: var(--bg-inset);
+  color: var(--text-tertiary);
+}
+.rc-out-head {
+  font-size: var(--fs-15) !important; font-weight: 500;
+  color: var(--text-primary) !important; margin-bottom: var(--s4) !important;
+}
+.rc-out-bar {
+  height: 8px; border-radius: var(--r-pill); background: var(--bg-inset);
+  overflow: hidden; margin-bottom: var(--s4);
+}
+.rc-out-bar i {
+  display: block; height: 100%; border-radius: var(--r-pill);
+  background: var(--state-excess);
+}
+.rc-out-note { margin-bottom: var(--s5) !important; }
+.rc-out-figs {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--s5); margin: 0;
+}
+.rc-out-figs dt {
+  font-size: var(--fs-11); color: var(--text-tertiary); margin-bottom: 2px;
+}
+.rc-out-figs dd {
+  margin: 0; font-family: var(--font-num); font-size: var(--fs-14) !important;
+  color: var(--text-primary) !important; font-variant-numeric: tabular-nums;
+}
+
+/* ---- where the number came from ---------------------------------------
+   One number decomposed, so the ramp is one hue at falling weight rather than a
+   categorical palette. A rainbow here would imply the methods are unrelated
+   alternatives; they are contributions to a single answer. */
+.rc-blend-bar {
+  display: flex; height: 10px; border-radius: var(--r-pill);
+  overflow: hidden; background: var(--bg-inset); margin-bottom: var(--s5);
+}
+.rc-blend-bar i { display: block; height: 100%; }
+.rc-blend-list { list-style: none; margin: 0 0 var(--s4); padding: 0; display: grid; gap: var(--s3); }
+.rc-blend-list li {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) 44px;
+  align-items: center; gap: var(--s4);
+}
+.rc-blend-list i { width: 10px; height: 10px; border-radius: 3px; }
+.bl-name {
+  color: var(--text-primary); font-size: var(--fs-13); cursor: help;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bl-pct {
+  font-family: var(--font-num); font-size: var(--fs-12); text-align: right;
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.rc-blend-bar .bl-0, .rc-blend-list .bl-0 { background: rgba(var(--forecast-rgb) / 0.92); }
+.rc-blend-bar .bl-1, .rc-blend-list .bl-1 { background: rgba(var(--forecast-rgb) / 0.66); }
+.rc-blend-bar .bl-2, .rc-blend-list .bl-2 { background: rgba(var(--forecast-rgb) / 0.44); }
+.rc-blend-bar .bl-3, .rc-blend-list .bl-3 { background: rgba(var(--forecast-rgb) / 0.28); }
+.rc-blend-bar .bl-4, .rc-blend-list .bl-4 { background: rgba(var(--forecast-rgb) / 0.16); }
+
+/* On Products these two blocks sit outside .rc-detail, so they need its type. */
+.cat-detail .rc-out, .cat-detail .rc-blend {
+  margin-top: var(--s7); padding-top: var(--s6);
+  border-top: 1px solid var(--border-subtle);
+}
+.cat-detail .rc-out h4, .cat-detail .rc-blend h4 {
+  font-size: var(--fs-11); text-transform: uppercase;
+  letter-spacing: var(--tracking-caps); color: var(--text-tertiary);
+  margin-bottom: var(--s4); font-weight: 600;
+}
+.cat-detail .rc-out p, .cat-detail .rc-blend p, .cat-detail .rc-blend li {
+  font-size: var(--fs-13); line-height: var(--lh-prose); color: var(--text-secondary);
+  max-width: 80ch; margin: 0 0 var(--s4);
+}
+
 /* ---- empty state ------------------------------------------------------ */
 .rv-empty {
   text-align: center; padding: var(--s9) var(--s7);

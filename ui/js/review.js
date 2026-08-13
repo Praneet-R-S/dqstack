@@ -226,6 +226,11 @@ window.Review = (() => {
      that look like a bug. */
   let COVER_DAYS = 9;
 
+  /* How long the held-out test in the ledger actually ran, read from the run rather
+     than assumed. Quoting "28 days" from a literal would silently become a lie the
+     first time the evaluation window changed. */
+  let EVAL_DAYS = 28;
+
   function changeNote(ch) {
     if (!ch) return "no earlier version to compare";
     if (ch.dir === "flat") return "no meaningful change";
@@ -481,6 +486,8 @@ window.Review = (() => {
     const maxAbs = Math.max(1e-9, ...drivers.map((d) => Math.abs(d.contribution)));
 
     return `<div class="rc-detail">
+      ${outcomeBlock(s, EVAL_DAYS)}
+
       ${drivers.length ? `
       <section>
         <h4>What pushed this number up or down</h4>
@@ -499,6 +506,8 @@ window.Review = (() => {
         </ul>
         <p class="rc-fine">These come from the model itself, not from a rule someone wrote.</p>
       </section>` : ""}
+
+      ${blendBlock(s)}
 
       <section>
         <h4>How much to trust it</h4>
@@ -548,6 +557,76 @@ window.Review = (() => {
         Open <b>All products</b> to edit this alongside its neighbours.
       </p>
     </div>`;
+  }
+
+  /* How the last cycle actually went.
+
+     The system asked to be trusted and never said how it had done. Every product
+     already carried the result of running these settings across the 28 days before
+     the forecast date -- what shoppers wanted, what could be sold, what the gap
+     cost -- and none of it was on any screen.
+
+     The proportion bar is the point of the block: a planner sees at a glance whether
+     the shelf held up, and the money underneath says what the shortfall was worth.
+     Labelled as a test throughout, because it is one. */
+  function outcomeBlock(s, days) {
+    const o = Plain.outcome(s, days);
+    if (!o) return "";
+    const e = U.esc;
+    const pct = Math.max(0, Math.min(100, o.met * 100));
+    return `<section class="rc-out">
+      <h4>How the last ${o.days} days went
+        <span class="rc-out-tag" title="Measured by running these settings over ${o.days} days that were held back from the forecast. It is a test, not a live trading record.">tested</span>
+      </h4>
+      <p class="rc-out-head rc-q-${o.tone}">${e(o.headline)}</p>
+      <div class="rc-out-bar" role="img"
+           aria-label="${Math.round(pct)}% of demand met">
+        <i style="width:${pct.toFixed(1)}%"></i>
+      </div>
+      <p class="rc-out-note">${e(o.note)}</p>
+      <dl class="rc-out-figs">
+        <div><dt>Shoppers wanted</dt><dd>${Plain.units(o.wanted)} units</dd></div>
+        <div><dt>You could sell</dt><dd>${Plain.units(o.sold)} units</dd></div>
+        <div><dt>Profit earned</dt><dd>${Plain.money(o.earned)}</dd></div>
+        ${o.lost > 0
+          ? `<div><dt>Profit missed</dt><dd class="rc-down">${Plain.money(o.lost)}</dd></div>`
+          : ""}
+        ${o.cost > 0
+          ? `<div><dt title="Cost of holding stock, plus anything that had to be written off.">Stock cost</dt>
+               <dd>${Plain.money(o.cost)}</dd></div>`
+          : ""}
+      </dl>
+    </section>`;
+  }
+
+  /* Where the number came from, as a share of the answer rather than a method list.
+
+     The blend is this system's central claim and its weights were exported from the
+     first run onwards without ever being shown. "Mostly this product's own sales
+     pattern, combined with the curve new products follow" is a truthful answer to
+     "why should I believe this", and it needs no technical vocabulary to land. Each
+     row keeps its real name on hover. */
+  function blendBlock(s) {
+    const b = Plain.blend(s.weights);
+    if (!b) return "";
+    const e = U.esc;
+    return `<section class="rc-blend">
+      <h4>Where this number came from</h4>
+      <div class="rc-blend-bar" role="img" aria-label="${e(b.sentence)}">
+        ${b.rows.map((r, i) => `<i class="bl-${i}" style="width:${(r.share * 100).toFixed(1)}%"
+             title="${e(r.label)} — ${Math.round(r.share * 100)}%"></i>`).join("")}
+      </div>
+      <ul class="rc-blend-list">
+        ${b.rows.map((r, i) => `<li>
+          <i class="bl-${i}"></i>
+          <span class="bl-name" title="${e(r.hint)} (${e(r.term)})">${e(r.label)}</span>
+          <span class="bl-pct">${Math.round(r.share * 100)}%</span>
+        </li>`).join("")}
+      </ul>
+      <p class="rc-fine">Several methods run on every product and are weighted by how
+         well each has done on products like this one. No single method wins
+         everywhere, which is why the number is a blend rather than a pick.</p>
+    </section>`;
   }
 
   /* --------------------------------------------------------------- naming
@@ -841,6 +920,11 @@ window.Review = (() => {
     hooks = h;
     Q50 = D.run.chartQuantiles.indexOf(0.5);
     COVER_DAYS = (D.run.reviewPeriod || 7) + (D.run.leadTime || 2);
+    if (D.run.evalOrigin && D.run.origin) {
+      const d = Math.round(
+        (new Date(D.run.origin) - new Date(D.run.evalOrigin)) / 864e5);
+      if (d > 0) EVAL_DAYS = d;
+    }
     build();
 
     // One delegated listener for the whole list, so re-rendering a card cannot
@@ -938,6 +1022,7 @@ window.Review = (() => {
   }
 
   return { init, render, decisions, counts, setScope, setWatched, chartKey,
+           outcomeBlock, blendBlock, get evalDays() { return EVAL_DAYS; },
            byCause, setCause, undoLast, progress, watchStatus,
            get cause() { return state.cause; },
            get state() { return state; }, get scope() { return scope; },

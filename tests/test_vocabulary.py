@@ -22,6 +22,8 @@ rung of disclosure:
     title="..." attributes  hover disclosure on a figure
     comments                addressed to developers, never rendered
     identifiers             `fractile()`, `maxQuantile`, `s.adi` -- code, not copy
+    object keys             `nhits:`, `adida:` -- the pipeline's own method names,
+                            keyed precisely so they can map to a plain label
 """
 
 from __future__ import annotations
@@ -57,6 +59,12 @@ def strip_non_prose(src: str) -> str:
     # Identifiers: a banned word touching a dot, a paren, or camelCase is code.
     src = re.sub(r"\b\w+\.\w+\b", " ", src)
     src = re.sub(r"\b\w*[a-z]\w*\(", " ", src)
+    # Object keys are identifiers too. The model lookup is keyed by the pipeline's own
+    # method names -- `nhits:`, `adida:`, `tsb:` -- whose whole purpose is to map to a
+    # plain label, so the key is code in exactly the way `fractile()` is. Anchored to
+    # a line start, a brace or a comma, which is where a JS key sits and where prose
+    # never does, so "Warning: shelf empty" inside a string is still checked.
+    src = re.sub(r"(^|[{,]\s*)([A-Za-z_$][\w$]*)\s*:", r"\1 ", src, flags=re.M)
     return src
 
 
@@ -105,5 +113,30 @@ def test_plain_language_vocabulary_is_actually_used():
     src = (ROOT / "ui" / "js" / "plain.js").read_text(encoding="utf-8")
     for phrase in ("Sells steadily", "Sells in bursts", "Likely to run out",
                    "May have been out of stock", "Hard to predict",
-                   "Too new to judge", "Winding down"):
+                   "Too new to judge", "Winding down",
+                   # The excluded-day layer and the blend, whose whole job is to say
+                   # these things without the method names behind them.
+                   "Not stocked", "Shelf probably empty",
+                   "This product's own sales pattern",
+                   "The curve new products follow",
+                   "Built for occasional sellers"):
         assert phrase in src, f"plain.js lost the phrase {phrase!r}"
+
+
+def test_every_blended_method_has_a_plain_label():
+    """A method with no entry in MODELS renders its raw key to a planner.
+
+    The ensemble is configurable, so a method added to the pipeline arrives in the
+    exported weights without anyone touching the interface. The fallback prints
+    `croston_sba` with the underscore swapped for a space, which is both ugly and
+    exactly the vocabulary this file exists to keep off the screen.
+    """
+    import json
+
+    bundle = json.loads((ROOT / "ui" / "data" / "bundle.json").read_text(encoding="utf-8"))
+    used = {k for s in bundle["series"] for k, w in s["weights"].items() if w > 0}
+    src = (ROOT / "ui" / "js" / "plain.js").read_text(encoding="utf-8")
+    missing = sorted(k for k in used if f"{k}:" not in src)
+    assert not missing, (
+        f"these methods carry weight but have no plain label in plain.js: {missing}"
+    )
