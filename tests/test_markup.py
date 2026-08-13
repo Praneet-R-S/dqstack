@@ -85,6 +85,11 @@ def test_the_landmarks_the_shell_depends_on_are_present():
                    'class="sb-nav"', 'class="sb-foot"', 'id="app"',
                    'id="sbQueue"', 'id="sbSession"'):
         assert needle in src, f"index.html lost {needle}"
+    # Every module the renderers dereference at paint time. A dropped tag here is a
+    # ReferenceError inside a template literal, which renders as a blank card.
+    for src_file in ("js/plain.js", "js/truth.js", "js/util.js", "js/review.js",
+                     "js/catalog.js", "js/app.js"):
+        assert f'src="{src_file}' in src, f"index.html no longer loads {src_file}"
     for view in ("today", "products", "workspace", "evidence", "decisions", "pipeline"):
         assert f'id="view-{view}"' in src, f"index.html lost view-{view}"
 
@@ -106,7 +111,8 @@ def test_ids_referenced_by_app_js_all_exist():
 
 @pytest.mark.parametrize("rel", ["ui/js/app.js", "ui/js/review.js", "ui/js/catalog.js",
                                  "ui/js/plain.js", "ui/js/duck.js", "ui/js/grid.js",
-                                 "ui/js/chart.js", "ui/js/views.js", "ui/js/util.js"])
+                                 "ui/js/chart.js", "ui/js/views.js", "ui/js/util.js",
+                                 "ui/js/truth.js"])
 def test_no_stray_control_characters(rel):
     """Heredoc round-trips have twice written a literal backspace or a raw BOM into
     a source file, where it is invisible in a diff and breaks a regex or a parse."""

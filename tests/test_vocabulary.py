@@ -13,6 +13,7 @@ What counts as planner-facing:
     ui/js/plain.js      every word a non-specialist reads
     ui/js/review.js     Today, the decision queue
     ui/js/catalog.js    Products
+    ui/js/truth.js      the excluded-day layer every chart reads
 
 What is deliberately exempt, because the design permits the real term at the deepest
 rung of disclosure:
@@ -31,7 +32,7 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SURFACES = ("ui/js/plain.js", "ui/js/review.js", "ui/js/catalog.js")
+SURFACES = ("ui/js/plain.js", "ui/js/review.js", "ui/js/catalog.js", "ui/js/truth.js")
 
 # Whole words only, so "SBA" does not fire inside "rvProgressBar" and "ADI" does not
 # fire inside "predictable".

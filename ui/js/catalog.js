@@ -156,13 +156,14 @@ window.Catalog = (() => {
   function chart(s, w = 720, h = 220) {
     const PAD = { l: 46, r: 12, t: 12, b: 26 };
     const HIST = 56;
-    const hist = (s.hist || []).slice(-HIST);
+    const from = Math.max(0, (s.hist || []).length - HIST);
+    const hist = (s.hist || []).slice(from);
     const fan = s.fan || [];
     const n = hist.length + fan.length;
     if (!n) return '<p class="cat-nochart">No history to draw yet.</p>';
 
     let hi = 0;
-    for (const v of hist) hi = Math.max(hi, v);
+    for (const v of hist) if (v != null) hi = Math.max(hi, v);
     for (const f of fan) hi = Math.max(hi, f[5]);
     hi = Math.max(hi, 1);
     // A 1/2/5 ladder rather than pure powers of ten: the latter rounds a peak of
@@ -178,11 +179,37 @@ window.Catalog = (() => {
       `<line x1="${PAD.l}" y1="${y(v).toFixed(1)}" x2="${w - PAD.r}" y2="${y(v).toFixed(1)}" class="cc-grid"/>
        <text x="${PAD.l - 8}" y="${(y(v) + 4).toFixed(1)}" class="cc-tick">${Plain.units(v)}</text>`).join("");
 
-    const histLine = hist.map((v, i) =>
-      `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    /* Excluded days break the line and get shaded, on this surface for the same
+       reason as on the card: `y(null)` equals `y(0)`, so a day the pipeline had set
+       aside was drawn as a day nobody wanted the product. This is the surface a
+       planner opens to interrogate one product, so it also carries the labels. */
+    const hl = Truth.line(hist, x, y);
+    const histLine = hl.d;
+    const dayW = iw / Math.max(1, n - 1);
+
+    const spans = Truth.runs(s, from, HIST).map((r) => {
+      const x0 = Math.max(PAD.l, x(r.i0) - dayW / 2);
+      const x1 = Math.min(w - PAD.r, x(r.i1) + dayW / 2);
+      const meta = Plain.EXCLUDED[r.kind];
+      const days = r.i1 - r.i0 + 1;
+      return `<rect class="cc-${r.kind}" x="${x0.toFixed(1)}" y="${PAD.t}"
+                    width="${Math.max(1.5, x1 - x0).toFixed(1)}" height="${ih}"
+              ><title>${U.esc(meta.label)} — ${days} day${days === 1 ? "" : "s"}. ${
+                U.esc(meta.note)}</title></rect>`;
+    }).join("");
+
+    const evs = Truth.events(D.dates, D.events, from, HIST).map((ev) => {
+      const xi = x(ev.i);
+      return `<g class="cc-ev">
+        <line x1="${xi.toFixed(1)}" y1="${PAD.t}" x2="${xi.toFixed(1)}" y2="${PAD.t + ih}"/>
+        <circle cx="${xi.toFixed(1)}" cy="${PAD.t + 4}" r="3"/>
+        <title>${U.esc(Truth.eventLabel(ev.name))} — ${U.esc(ev.date)}. A date the forecast already accounts for.</title>
+      </g>`;
+    }).join("");
 
     const j0 = hist.length - 1;
-    const anchorY = y(hist[j0] ?? 0);
+    const known = Truth.lastKnown(hist);
+    const anchorY = y(known ? known.v : 0);
 
     // Same three nested levels as review.js and chart.js. One statistical object,
     // one rendering, on every surface that draws it.
@@ -219,12 +246,18 @@ window.Catalog = (() => {
       <rect class="fan-future" x="${x(j0).toFixed(1)}" y="${PAD.t}"
             width="${(w - PAD.r - x(j0)).toFixed(1)}" height="${ih}"/>
       ${ticks}
+      ${spans}
       ${bands}
       ${prior ? `<path d="${prior}" class="cc-prior"/>` : ""}
       <path d="${histLine}" class="cc-hist"/>
+      ${hl.dots.map(([cx, cy]) =>
+        `<circle class="cc-dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="1.7"/>`).join("")}
       ${mid.length ? `<path d="${mid.join("")}" class="cc-fc"/>` : ""}
+      ${evs}
       <line x1="${x(j0).toFixed(1)}" y1="${PAD.t}" x2="${x(j0).toFixed(1)}" y2="${PAD.t + ih}" class="cc-now"/>
-      <circle cx="${x(j0).toFixed(1)}" cy="${anchorY.toFixed(1)}" r="3" class="cc-last"/>
+      ${known && known.i === j0
+        ? `<circle cx="${x(j0).toFixed(1)}" cy="${anchorY.toFixed(1)}" r="3" class="cc-last"/>`
+        : ""}
       <text x="${(x(j0) + 6).toFixed(1)}" y="${PAD.t + 12}" class="cc-nowlab">today</text>
       <text x="${PAD.l}" y="${h - 8}" class="cc-tick cc-start">${hist.length} days of sales</text>
       <text x="${w - PAD.r}" y="${h - 8}" class="cc-tick cc-end">${fan.length}-day forecast</text>
@@ -297,12 +330,13 @@ window.Catalog = (() => {
 
       <div class="cat-chartbox">
         ${chart(s)}
-        <div class="rc-chart-key">
-          <span><i class="k-hist"></i>sold so far</span>
-          <span><i class="k-fc"></i>forecast</span>
-          <span><i class="k-band"></i>likely range</span>
-          <span><i class="k-prior"></i>last week's version</span>
-        </div>
+        ${Review.chartKey(s, { window: 56, prior: true })}
+        ${(() => {
+          /* The one place a planner comes to interrogate a single product, so the
+             shaded spans get a sentence rather than only a tooltip. */
+          const ex = Plain.excluded(Truth.audit(s));
+          return ex ? `<p class="cat-excl">${e(ex.full)}</p>` : "";
+        })()}
       </div>
 
       <div class="rc-figs">

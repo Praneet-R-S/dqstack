@@ -181,8 +181,14 @@ const Chart = (() => {
       if (series.hist[i] !== null) continue;
       const px = s.x(i);
       const notCarried = series.carried && series.carried[i] === false;
+      /* --state-attention, not --series-override. This chart was the only surface
+         that drew masked days at all, and it borrowed the colour that means "a
+         planner edited this" for a condition of the data. Today and Products now
+         shade the same two exclusions, and they take their colour from the tone of
+         the flag that reports them, which is warn. Override amber goes back to
+         meaning one thing. */
       ctx.fillStyle = U.rgba(
-        notCarried ? U.tk("--text-tertiary") : U.tk("--series-override"), 0.5
+        notCarried ? U.tk("--text-tertiary") : U.tk("--state-attention"), 0.5
       );
       ctx.fillRect(px - 0.5, PAD.t + s.plotH - 5, 1.4, 5);
     }

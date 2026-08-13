@@ -237,24 +237,64 @@ window.Review = (() => {
      Inline SVG rather than canvas: one of these per card, they must survive
      being re-rendered on every action, and at this size the fan reads better as
      a filled path than as the grid's 40x14 glyph. */
+  /* A round dot on a chart that is deliberately stretched.
+
+     The sparkline sets `preserveAspectRatio="none"` so it fills whatever width the
+     card gives it, which at 1014px for a 300-unit viewBox is a 3.4x horizontal
+     stretch. Every `<circle>` on it was therefore painted as an ellipse — including
+     the hinge dot marking the last actual sale, which is the single point the whole
+     chart is a claim about.
+
+     A zero-length subpath with a round cap is immune, because the stroke is applied
+     after the viewBox transform when `non-scaling-stroke` is set. Verified by
+     rasterising one: 8x8 painted pixels under a 3x stretch. Radius comes from the
+     stroke width in CSS, so the shape stays a single source of truth. */
+  const dot = (cx, cy) => `M${cx.toFixed(1)},${cy.toFixed(1)}L${cx.toFixed(1)},${cy.toFixed(1)}`;
+
   function spark(s, w = 300, h = 104) {
     const HIST = 35;
-    const hist = s.hist.slice(-HIST);
+    const from = Math.max(0, (s.hist || []).length - HIST);
+    const hist = (s.hist || []).slice(from);
     const fan = s.fan;                     // 28 days x 7 quantiles
     const n = hist.length + fan.length;
 
     let hi = 0;
-    for (const v of hist) hi = Math.max(hi, v);
+    for (const v of hist) if (v != null) hi = Math.max(hi, v);
     for (const f of fan) hi = Math.max(hi, f[5]);
     hi = hi || 1;
 
     const x = (i) => (w * i) / (n - 1);
     const y = (v) => h - 5 - ((h - 14) * v) / hi;
 
-    const histLine = hist.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    /* Excluded days break the line rather than dropping it to the floor.
+
+       `y(null)` is arithmetically `y(0)`, so every day the pipeline set aside used
+       to be drawn as a day on which nobody wanted the product — the precise
+       confusion the pipeline exists to resolve, reintroduced by the chart. */
+    const hl = Truth.line(hist, x, y);
+    const histLine = hl.d;
+
+    const spans = Truth.runs(s, from, HIST).map((r) => {
+      const x0 = x(r.i0) - (w / (n - 1)) / 2;
+      const x1 = x(r.i1) + (w / (n - 1)) / 2;
+      const meta = Plain.EXCLUDED[r.kind];
+      const days = r.i1 - r.i0 + 1;
+      return `<rect class="spark-${r.kind}" x="${Math.max(0, x0).toFixed(1)}" y="0"
+                    width="${Math.max(1.5, x1 - x0).toFixed(1)}" height="${h}"
+              ><title>${U.esc(meta.label)} — ${days} day${days === 1 ? "" : "s"}</title></rect>`;
+    }).join("");
+
+    /* Calendar events the pipeline already models and the interface never showed.
+       A planner looking at a spike could not tell a holiday from a data problem. */
+    const evs = Truth.events(D.dates, D.events, from, HIST).map((ev) =>
+      `<g class="spark-ev"><line x1="${x(ev.i).toFixed(1)}" y1="0"
+             x2="${x(ev.i).toFixed(1)}" y2="${h}"/>
+        <path d="${dot(x(ev.i), 4)}"/>
+        <title>${U.esc(Truth.eventLabel(ev.name))} — ${U.esc(ev.date)}</title></g>`).join("");
 
     const j0 = hist.length - 1;
-    const anchorY = y(hist[j0] ?? 0);
+    const known = Truth.lastKnown(hist);
+    const anchorY = y(known ? known.v : 0);
 
     /* Three nested bands, not one slab.
 
@@ -281,16 +321,53 @@ window.Review = (() => {
     const mid = fan.map((f, k) =>
       `${k ? "L" : "M"}${x(j0 + 1 + k).toFixed(1)},${y(f[Q50]).toFixed(1)}`).join("");
 
+    const a = Truth.audit(s, from, HIST);
+    const ex = Plain.excluded(a);
+
     return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"
-                 role="img" aria-label="Sales for the last ${hist.length} days and the forecast for the next ${fan.length}, with its likely range">
+                 role="img" aria-label="Sales for the last ${hist.length} days and the forecast for the next ${fan.length}, with its likely range${
+                   ex ? `. ${ex.short} are set aside` : ""}">
       <rect class="fan-future" x="${x(j0).toFixed(1)}" y="0"
             width="${(w - x(j0)).toFixed(1)}" height="${h}"/>
+      ${spans}
       ${bands}
       <path d="${histLine}" class="spark-hist"/>
+      ${hl.dots.length
+        ? `<path class="spark-dot" d="${hl.dots.map(([cx, cy]) => dot(cx, cy)).join("")}"/>`
+        : ""}
       <path d="${mid}" class="spark-fc"/>
+      ${evs}
       <line x1="${x(j0).toFixed(1)}" y1="2" x2="${x(j0).toFixed(1)}" y2="${h - 2}" class="spark-now"/>
-      <circle cx="${x(j0).toFixed(1)}" cy="${anchorY.toFixed(1)}" r="2.6" class="spark-last"/>
+      ${known && known.i === j0
+        ? `<path class="spark-last-halo" d="${dot(x(j0), anchorY)}"/>
+           <path class="spark-last" d="${dot(x(j0), anchorY)}"/>`
+        : ""}
     </svg>`;
+  }
+
+  /* The legend, built from what the chart actually drew.
+
+     A fixed legend listing every possible layer teaches a planner to ignore it,
+     because most entries describe nothing on screen. These appear only when the
+     product has the thing they name. */
+  function chartKey(s, { window: win = 35, prior = false } = {}) {
+    const from = Math.max(0, (s.hist || []).length - win);
+    const a = Truth.audit(s, from, win);
+    const nEv = Truth.events(D.dates, D.events, from, win).length;
+    const e = U.esc;
+    const item = (cls, label, hint) =>
+      `<span title="${e(hint)}"><i class="${cls}"></i>${e(label)}</span>`;
+
+    return `<div class="rc-chart-key">
+      ${item("k-hist", "sold so far", "Units recorded through the till each day.")}
+      ${item("k-fc", "forecast", "The middle of the forecast: as likely to be above as below.")}
+      ${item("k-band", "likely range", "Where the outcome is expected to fall. Wider means less certain.")}
+      ${prior ? item("k-prior", "last week's version", "The forecast this product had in the previous cycle.") : ""}
+      ${a.suspects ? item("k-suspect", Plain.EXCLUDED.suspect.short, Plain.EXCLUDED.suspect.note) : ""}
+      ${a.gaps ? item("k-gap", Plain.EXCLUDED.gap.short, Plain.EXCLUDED.gap.note) : ""}
+      ${nEv ? item("k-ev", nEv === 1 ? "holiday" : "holidays",
+                   "A date the forecast already accounts for. Shown so an unusual day has an explanation.") : ""}
+    </div>`;
   }
 
   /* ----------------------------------------------------------------- cards */
@@ -338,11 +415,7 @@ window.Review = (() => {
 
       <div class="rc-chart">
         ${spark(s)}
-        <div class="rc-chart-key">
-          <span><i class="k-hist"></i>sold so far</span>
-          <span><i class="k-fc"></i>forecast</span>
-          <span><i class="k-band"></i>likely range</span>
-        </div>
+        ${chartKey(s)}
       </div>
 
       <div class="rc-figs">
@@ -432,14 +505,22 @@ window.Review = (() => {
         <dl class="rc-dl">
           <dt>Data quality</dt><dd>${e(q.word)} — ${e(q.note)}</dd>
           <dt>Confidence</dt><dd>${e(conf.word)} — ${e(conf.note)}</dd>
-          ${s.censoredDays ? `<dt>Possible stock-outs</dt>
-            <dd>${s.censoredDays} day${s.censoredDays === 1 ? "" : "s"} in the history
-                recorded no sales while the product was probably unavailable.
-                Real demand was higher than the sales figures show.</dd>` : ""}
-          ${s.ooaDays ? `<dt>Not stocked</dt>
-            <dd>${s.ooaDays} day${s.ooaDays === 1 ? "" : "s"} when this product was not
-                carried at this store at all. Those days are excluded rather than
-                counted as zero demand.</dd>` : ""}
+          ${(() => {
+            /* Counted from the same history the chart draws, rather than read from
+               the pipeline's own tally over its longer training window. Two
+               different numbers for one idea is how a planner learns to distrust
+               both. */
+            const a = Truth.audit(s);
+            const out = [];
+            if (a.suspects) out.push(`<dt>${e(Plain.EXCLUDED.suspect.label)}</dt>
+              <dd>${a.suspects} day${a.suspects === 1 ? "" : "s"}. ${e(Plain.EXCLUDED.suspect.note)}</dd>`);
+            if (a.gaps) out.push(`<dt>${e(Plain.EXCLUDED.gap.label)}</dt>
+              <dd>${a.gaps} day${a.gaps === 1 ? "" : "s"}. ${e(Plain.EXCLUDED.gap.note)}</dd>`);
+            if (out.length) out.push(`<dt>History used</dt>
+              <dd>${a.known} of the last ${a.total} days are treated as evidence.
+                  The rest are shaded on the chart above.</dd>`);
+            return out.join("");
+          })()}
         </dl>
       </section>
 
@@ -856,7 +937,7 @@ window.Review = (() => {
     return { shown: out.slice(0, limit), total: out.length };
   }
 
-  return { init, render, decisions, counts, setScope, setWatched,
+  return { init, render, decisions, counts, setScope, setWatched, chartKey,
            byCause, setCause, undoLast, progress, watchStatus,
            get cause() { return state.cause; },
            get state() { return state; }, get scope() { return scope; },

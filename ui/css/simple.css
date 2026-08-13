@@ -284,7 +284,16 @@
 
 /* The hinge the whole chart is a claim about. A background-coloured halo punches
    it out of the band so it stays legible where the fan is densest. */
-.spark-last { fill: var(--series-actual); stroke: var(--bg-inset); stroke-width: 1.5; }
+/* Round-cap zero-length subpaths rather than circles. The sparkline is stretched
+   3.4x horizontally by preserveAspectRatio="none", which painted every circle on it
+   as an ellipse -- this dot most of all, and it is the one point the chart is a
+   claim about. Two paths so the halo survives the change: the wide one punches the
+   dot out of the fan, the narrow one is the dot. */
+.spark-last-halo, .spark-last, .spark-dot, .spark-ev path {
+  fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke;
+}
+.spark-last-halo { stroke: var(--bg-inset); stroke-width: 7.5; }
+.spark-last { stroke: var(--series-actual); stroke-width: 4.5; }
 .cc-last { fill: var(--series-actual); stroke: var(--bg-surface); stroke-width: 1.5; }
 
 .cc-prior {
@@ -312,6 +321,56 @@
 .rc-chart-key .k-hist { background: var(--series-actual); }
 .rc-chart-key .k-fc { background: var(--series-forecast); }
 .rc-chart-key .k-band { background: rgba(var(--forecast-rgb) / 0.3); }
+
+/* ==================================================== days the history sets aside
+
+   Two exclusions, drawn differently because they mean different things and ask
+   different things of the reader.
+
+   `gap` -- not stocked -- is the absence of evidence. It is drawn as a neutral wash
+   that recedes: there is nothing here to investigate, and colouring it would invite
+   an investigation that has no subject.
+
+   `suspect` -- stocked, recorded zero, judged probably unavailable -- is a claim,
+   and one a planner can check against what happened in store. It takes the same
+   amber the "May have been out of stock" flag uses on the card, so the shading and
+   the flag are visibly the same fact rather than two coincidences.
+
+   Both sit above the future wash and below the fan and the lines, so nothing that
+   carries a number is ever dimmed by them. */
+.spark-gap, .cc-gap { fill: var(--text-tertiary); opacity: 0.12; }
+.spark-suspect, .cc-suspect { fill: var(--state-attention); opacity: 0.17; }
+
+/* An isolated known day between two excluded ones. A one-point subpath draws
+   nothing, so without these the day would disappear -- a quieter version of the
+   same dishonesty the shading exists to correct. 57 such days exist across the
+   assortment, so this is not a hypothetical case. */
+.spark-dot { stroke: var(--series-actual); stroke-width: 3.2; }
+.cc-dot { fill: var(--series-actual); }
+
+/* Calendar dates the forecast already accounts for. Deliberately the quietest
+   layer on the chart: it is an answer to "why is that day odd", not a finding. */
+.spark-ev line, .cc-ev line {
+  stroke: var(--text-tertiary); stroke-width: 1; stroke-opacity: 0.4;
+  stroke-dasharray: 2 3; vector-effect: non-scaling-stroke;
+}
+.spark-ev path { stroke: var(--text-tertiary); stroke-width: 4.2; opacity: 0.75; }
+.cc-ev circle { fill: var(--text-tertiary); opacity: 0.75; }
+
+.rc-chart-key .k-suspect {
+  background: var(--state-attention); opacity: 0.55; height: 8px; border-radius: 2px;
+}
+.rc-chart-key .k-gap {
+  background: var(--text-tertiary); opacity: 0.4; height: 8px; border-radius: 2px;
+}
+.rc-chart-key .k-ev {
+  width: 3px; height: 8px; border-radius: 1px; background: var(--text-tertiary);
+}
+
+.cat-excl {
+  margin: var(--s4) 0 0; font-size: var(--fs-12); line-height: var(--lh-prose-sm);
+  color: var(--text-secondary); max-width: var(--measure);
+}
 
 /* ---- the four figures ------------------------------------------------- */
 .rc-figs {

@@ -104,6 +104,44 @@ window.Plain = (() => {
   const others = (reasons) =>
     REASONS.filter((r) => reasons.includes(r.key)).slice(1);
 
+  /* ---- days the history cannot vouch for -------------------------------
+     Two exclusions that look identical in a sales report and mean opposite things.
+     Both are drawn on every chart; neither used to be, so a day the pipeline had
+     deliberately set aside was rendered as a day of zero demand. */
+  const EXCLUDED = {
+    gap: {
+      label: "Not stocked", short: "not stocked", tone: "info",
+      note: "This product was not on sale at this store on these days. They are left out of the history rather than counted as days nobody wanted it.",
+      term: "out-of-assortment",
+    },
+    suspect: {
+      label: "Shelf probably empty", short: "probably out of stock", tone: "warn",
+      note: "The till recorded nothing on these days while the product was meant to be on sale. A zero here most likely means shoppers could not buy it, not that they did not want it — so these days are set aside instead of being learned from.",
+      term: "censored demand",
+    },
+  };
+
+  /** One sentence about how much of a product's history is usable. Returns null
+      when nothing was excluded, so a clean product shows no caveat at all rather
+      than a reassuring sentence nobody needs to read. */
+  function excluded(a) {
+    if (!a || (!a.gaps && !a.suspects)) return null;
+    const bits = [];
+    if (a.suspects) {
+      bits.push(`${a.suspects} day${a.suspects === 1 ? "" : "s"} when the shelf was probably empty`);
+    }
+    if (a.gaps) {
+      bits.push(`${a.gaps} day${a.gaps === 1 ? "" : "s"} when it was not stocked here`);
+    }
+    const share = a.total ? Math.round(((a.gaps + a.suspects) / a.total) * 100) : 0;
+    return {
+      short: bits.join(" and "),
+      full: `Of the last ${a.total} days, ${bits.join(" and ")} — ${share}% of the ` +
+            `history — are set aside. The forecast is built from the remaining ${a.known}.`,
+      share,
+    };
+  }
+
   /* ---- thresholds, calibrated from this assortment ---------------------
      Hardcoded cutoffs were the first attempt and they were useless: guessing that
      a relative interval width above 1.1 means "low confidence" put 24 of 24 cards
@@ -279,5 +317,6 @@ window.Plain = (() => {
 
   return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, short, quality, confidence,
            service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
+           EXCLUDED, excluded,
            get CUT() { return CUT; } };
 })();
