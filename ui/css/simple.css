@@ -553,7 +553,7 @@
    height; the chrome and the views occupy column two. The .view rule in app.css
    pins every view to column 1, which was correct for a single-column shell and has
    to be overridden here — otherwise every view renders underneath the sidebar. */
-:root { --sidebar-w: 248px; --sidebar-w-collapsed: 60px; }
+:root { --sidebar-w: 288px; --sidebar-w-collapsed: 64px; }
 
 /* No transition on grid-template-columns. It is not reliably interpolable across
    engines, and animating the track that the canvas grid measures itself against
@@ -1150,62 +1150,6 @@
 .hint-dismiss:active { transform: translateY(1px); }
 
 
-/* ================================================= the cycle ribbon + evidence */
-
-/* The frame. Quiet by default: a planner should read it once on arrival and then
-   stop seeing it until it changes state. */
-.ribbon {
-  display: flex; align-items: center; gap: var(--s5);
-  margin-left: var(--s6); padding: var(--s2) var(--s5);
-  border: 1px solid var(--border-subtle); border-radius: var(--r-pill);
-  background: var(--bg-inset);
-  font-size: var(--fs-11); color: var(--text-secondary);
-  min-width: 0; white-space: nowrap; overflow: hidden;
-}
-.ribbon-main { overflow: hidden; text-overflow: ellipsis; }
-.ribbon-right {
-  font-family: var(--font-num); color: var(--text-tertiary);
-  padding-left: var(--s5); border-left: 1px solid var(--border-subtle); flex: none;
-}
-/* Attention only when the cycle is actually near its cutoff. A ribbon that is
-   always coloured is a ribbon nobody reads. */
-.ribbon[data-state="closing"] {
-  border-color: var(--state-attention);
-  background: color-mix(in srgb, var(--state-attention) 12%, var(--bg-inset));
-  color: var(--text-primary);
-}
-.ribbon[data-state="closed"] {
-  border-color: var(--border-strong); color: var(--text-tertiary);
-}
-
-.sb-rule { height: 1px; background: var(--border-subtle); margin: var(--s5) var(--s4); }
-#sbEvidence[aria-selected="true"] {
-  background: rgba(var(--ui-accent-rgb) / 0.11);
-  color: var(--ui-accent); font-weight: 500;
-}
-
-/* The evidence tab strip sits at the top of whichever sheet is showing, so the
-   three views read as one destination rather than three. */
-.ev-tabs {
-  display: flex; gap: var(--s2); flex-wrap: wrap;
-  margin: 0 0 var(--s7); padding-bottom: var(--s5);
-  border-bottom: 1px solid var(--border-subtle);
-}
-.ev-tabs button {
-  background: transparent; border: 1px solid transparent;
-  border-radius: var(--r-pill); padding: var(--s3) var(--s5);
-  font-size: var(--fs-12); color: var(--text-secondary); cursor: pointer;
-  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
-}
-.ev-tabs button:hover { background: var(--bg-hover); color: var(--text-primary); }
-.ev-tabs button:active { transform: translateY(1px); }
-.ev-tabs button[aria-selected="true"] {
-  background: var(--bg-raised); border-color: var(--border-subtle);
-  color: var(--text-primary); font-weight: 500; box-shadow: var(--e1);
-}
-
-@media (max-width: 1200px) { .ribbon-right { display: none; } }
-@media (max-width: 1000px) { .ribbon { display: none; } }
 
 
 /* ============================================ the sidebar as a status board
@@ -1317,3 +1261,205 @@
 :root[data-sidebar="closed"] .sb-health span:last-child,
 :root[data-sidebar="closed"] .sb-foot .kbd { display: none; }
 :root[data-sidebar="closed"] .sb-health { justify-content: center; padding: var(--s3) 0; }
+
+
+/* ==================================================== the working sidebar (v2)
+
+   Eight blocks of the planner's own work. Geometry from the report: 288px expanded,
+   64px collapsed, 30px rows, 10px/0.06em section labels, 5px status dots, 11px mono
+   badges at radius 9px, 13px between blocks, half-pixel dividers.
+
+   Every block below carries a live number. That is the whole distinction the report
+   draws between an instrument and a menu: a rail where nothing changes between
+   visits is a list of links; a rail where six numbers moved overnight is the first
+   thing a planner reads each morning. */
+
+.sidebar { grid-template-rows: auto auto 1fr auto auto; }
+
+/* ---- block 1: lockup and the cycle chip -------------------------------- */
+.sb-brand { gap: var(--s3); padding: 0 var(--s4) 0 var(--s5); }
+.sb-cycle-chip {
+  margin-left: auto; flex: none; cursor: pointer;
+  font-family: var(--font-num); font-size: var(--fs-10); line-height: 1;
+  padding: 3px var(--s3); border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle); background: var(--bg-inset);
+  color: var(--text-secondary); white-space: nowrap;
+}
+.sb-cycle-chip[data-state="closing"] {
+  border-color: var(--state-attention); color: var(--state-attention);
+  background: color-mix(in srgb, var(--state-attention) 14%, var(--bg-inset));
+}
+.sb-cycle-chip[data-state="closed"] { color: var(--text-tertiary); }
+
+/* ---- block 2: the cycle bar ------------------------------------------- */
+.sb-cycle { padding: var(--s4) var(--s5) var(--s5); cursor: default; }
+.sb-cycle-top {
+  display: flex; justify-content: space-between; gap: var(--s4);
+  font-size: var(--fs-10); color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  margin-bottom: var(--s3); white-space: nowrap; overflow: hidden;
+}
+.sb-cycle-top span:first-child { color: var(--text-secondary); }
+.sb-cycle-track {
+  height: 3px; border-radius: var(--r-pill); background: var(--bg-inset);
+  overflow: hidden;
+}
+.sb-cycle-bar {
+  height: 100%; width: 0%; border-radius: var(--r-pill);
+  background: var(--grad-accent);
+}
+.sb-cycle[data-state="closing"] .sb-cycle-bar { background: var(--state-attention); }
+.sb-cycle[data-state="closed"] .sb-cycle-bar { background: var(--border-strong); }
+
+/* ---- shared row shape for the two list blocks ------------------------- */
+.sb-queue, .sb-watch { display: grid; gap: 1px; margin: var(--s2) var(--s4) var(--s5); }
+.sb-queue button, .sb-watch button {
+  display: flex; align-items: center; gap: var(--s4);
+  width: 100%; min-height: 30px; padding: 5px var(--s4);
+  background: transparent; border: 0; cursor: pointer;
+  border-radius: 5px; text-align: left;
+  font-size: var(--fs-12); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-queue button:hover, .sb-watch button:hover {
+  background: var(--bg-hover); color: var(--text-primary);
+}
+.sb-queue button:active, .sb-watch button:active { transform: translateY(1px); }
+/* The active filter is the only raised row in the block. */
+.sb-queue button[aria-pressed="true"] {
+  background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--e1);
+}
+
+/* A 5px dot in the cause's own semantic colour: a pre-attentive read on the shape of
+   the day before a single word has been read. Never alone -- always beside a label
+   and a count, because an icon-only status is a glossary the user has to memorise. */
+.sb-q-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+.sb-q-label {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-q-n {
+  font-family: var(--font-num); font-size: var(--fs-11); flex: none;
+  color: var(--text-primary); font-weight: 500;
+}
+/* Exposure, not just a count. A planner deciding where to start needs to know that
+   three data problems may matter more than twelve promotion endings. */
+.sb-q-x {
+  font-family: var(--font-num); font-size: var(--fs-10); flex: none;
+  color: var(--text-tertiary); min-width: 34px; text-align: right;
+}
+.sb-queue button[aria-pressed="true"] .sb-q-x { color: var(--text-secondary); }
+
+/* ---- block 5: watching ------------------------------------------------ */
+.sb-w-star { color: var(--series-override); font-size: var(--fs-11); flex: none; }
+.sb-w-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-w-move {
+  font-family: var(--font-num); font-size: var(--fs-10); flex: none;
+  color: var(--text-tertiary);
+}
+.sb-w-move.rc-up { color: var(--state-excess); }
+.sb-w-move.rc-down { color: var(--state-risk); }
+.sb-w-all {
+  justify-content: center; color: var(--text-tertiary) !important;
+  font-size: var(--fs-11) !important;
+}
+.sb-empty {
+  margin: 0; padding: var(--s3) var(--s4); font-size: var(--fs-11);
+  color: var(--text-tertiary);
+}
+
+/* ---- block 7: scope --------------------------------------------------- */
+.sb-scope { padding: var(--s2) var(--s4) var(--s5); }
+.sb-scope .sel { width: 100%; max-width: none; font-size: var(--fs-12); }
+
+/* ---- block 8: session, with the undo the product had no answer for ----- */
+.sb-session {
+  margin: 0 var(--s4) var(--s4); padding: var(--s4) var(--s5);
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card);
+}
+.sb-session-cap {
+  margin: 0 0 var(--s2); font-size: var(--fs-10); color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+}
+.sb-session-fig {
+  margin: 0 0 var(--s4); display: flex; align-items: baseline; gap: var(--s3);
+  flex-wrap: wrap;
+}
+.sb-session-fig b {
+  font-family: var(--face-fig-hero); font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--fig-md); font-weight: 600; letter-spacing: var(--track-fig-md);
+  color: var(--text-primary); line-height: 1;
+}
+.sb-session-fig span { font-size: var(--fs-11); color: var(--text-tertiary); }
+.sb-session-cov {
+  font-family: var(--font-num);
+  margin-left: auto; color: var(--state-excess) !important;
+}
+.sb-session-act { display: flex; gap: var(--s3); }
+.sb-undo {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--s3); padding: var(--s2) var(--s3); cursor: pointer;
+  font-size: var(--fs-11); color: var(--text-secondary);
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-undo svg { width: 12px; height: 12px; flex: none; }
+.sb-undo:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.sb-undo:active:not(:disabled) { transform: translateY(1px); }
+.sb-undo:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sb-foot { border-top: 1px solid var(--border-subtle); }
+.sb-badge.draft { background: var(--series-override); color: #1A1206; }
+
+/* ---- collapsed rail: navigation, badges, queue dots, session count -----
+   A collapsed rail is for a planner who wants the canvas, not for one who wants
+   their work state, so the trade is deliberate: everything narrative goes, and the
+   numbers stay. */
+:root[data-sidebar="closed"] .sb-cycle,
+:root[data-sidebar="closed"] .sb-scope,
+:root[data-sidebar="closed"] .sb-watch,
+:root[data-sidebar="closed"] .sb-cycle-chip,
+:root[data-sidebar="closed"] .sb-group,
+:root[data-sidebar="closed"] .sb-session-cap,
+:root[data-sidebar="closed"] .sb-session-act,
+:root[data-sidebar="closed"] .sb-session-fig span,
+:root[data-sidebar="closed"] .sb-q-label,
+:root[data-sidebar="closed"] .sb-q-x,
+:root[data-sidebar="closed"] .sb-health span:last-child,
+:root[data-sidebar="closed"] .sb-foot .kbd { display: none; }
+:root[data-sidebar="closed"] .sb-queue button { justify-content: center; padding: 5px 0; }
+:root[data-sidebar="closed"] .sb-session { padding: var(--s3); text-align: center; }
+:root[data-sidebar="closed"] .sb-health { justify-content: center; padding: var(--s3) 0; }
+
+
+/* ---- restored: the Evidence tab strip and the sidebar rule ---------------
+   These were collateral in removing the ribbon block and are unrelated to it. */
+.sb-rule { height: 1px; background: var(--border-subtle); margin: var(--s5) var(--s4); }
+#sbEvidence[aria-selected="true"] {
+  background: rgba(var(--ui-accent-rgb) / 0.11);
+  color: var(--ui-accent); font-weight: 500;
+}
+
+/* The evidence tab strip sits at the top of whichever sheet is showing, so the
+   three views read as one destination rather than three. */
+.ev-tabs {
+  display: flex; gap: var(--s2); flex-wrap: wrap;
+  margin: 0 0 var(--s7); padding-bottom: var(--s5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ev-tabs button {
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-pill); padding: var(--s3) var(--s5);
+  font-size: var(--fs-12); color: var(--text-secondary); cursor: pointer;
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.ev-tabs button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ev-tabs button:active { transform: translateY(1px); }
+.ev-tabs button[aria-selected="true"] {
+  background: var(--bg-raised); border-color: var(--border-subtle);
+  color: var(--text-primary); font-weight: 500; box-shadow: var(--e1);
+}
+

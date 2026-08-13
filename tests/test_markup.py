@@ -81,8 +81,9 @@ def test_the_landmarks_the_shell_depends_on_are_present():
     region with no height, which is the failure mode already recorded three times.
     """
     src = INDEX.read_text(encoding="utf-8")
-    for needle in ('class="sidebar"', 'class="chrome"', 'id="ribbon"',
-                   'class="sb-nav"', 'class="sb-foot"', 'id="app"'):
+    for needle in ('class="sidebar"', 'class="chrome"', 'class="sb-cycle"',
+                   'class="sb-nav"', 'class="sb-foot"', 'id="app"',
+                   'id="sbQueue"', 'id="sbSession"'):
         assert needle in src, f"index.html lost {needle}"
     for view in ("today", "products", "workspace", "evidence", "decisions", "pipeline"):
         assert f'id="view-{view}"' in src, f"index.html lost view-{view}"

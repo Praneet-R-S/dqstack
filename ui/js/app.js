@@ -500,20 +500,44 @@
      many drafts are uncommitted, what this session has achieved, and whether the
      data underneath is current. */
 
-  function paintTiers(c) {
-    const host = $("sbTiers");
+  /* ---- block 4: the queue, by cause, with exposure ----------------------
+     A planner choosing where to start needs to know that three data problems may be
+     worth more than twelve promotion endings. Counts alone hide that, and counts
+     alone are what every incumbent shows. */
+  const TONE_VAR = { urgent: "--state-risk", warn: "--state-attention",
+                     info: "--series-forecast", ok: "--state-excess" };
+
+  function paintQueue(groups) {
+    const host = $("sbQueue");
     if (!host) return;
-    for (const b of host.querySelectorAll("[data-tier]")) {
-      const t = b.dataset.tier;
-      const n = c[t] ?? 0;
-      b.querySelector("b").textContent = n;
-      b.hidden = t === "done" && n === 0;
-      b.dataset.empty = String(n === 0);
-      b.setAttribute("aria-current", String(state.view === "today" && Review.state.tab === t));
-      if (t !== "done" && c[t + "Behind"]) {
-        b.title = `${n} on today's list · ${c[t + "Behind"].toLocaleString()} more behind them`;
-      }
-    }
+    const active = Review.cause;
+    host.innerHTML = (groups || []).map((g) => `
+      <button data-cause="${U.esc(g.key)}" aria-pressed="${active === g.key}"
+              title="${U.esc(g.label)} - ${g.n} item${g.n === 1 ? "" : "s"}${
+                g.exposure > 0 ? `, ${Plain.money(g.exposure)} at stake` : ""}">
+        <span class="sb-q-dot" style="background:var(${TONE_VAR[g.tone] || "--border-strong"})"></span>
+        <span class="sb-q-label">${U.esc(g.label)}</span>
+        <span class="sb-q-n">${g.n}</span>
+        ${g.exposure > 0 ? `<span class="sb-q-x">${Plain.money(g.exposure)}</span>` : ""}
+      </button>`).join("")
+      || '<p class="sb-empty">Queue is clear</p>';
+  }
+
+  /* ---- block 5: watching ------------------------------------------------- */
+  function paintWatchBlock() {
+    const host = $("sbWatch");
+    if (!host) return;
+    const { shown, total } = Review.watchStatus(3);
+    host.innerHTML = shown.length
+      ? shown.map((w) => `
+          <button data-watch="${U.esc(w.id)}" title="${U.esc(w.name)} - ${U.esc(w.store)}">
+            <span class="sb-w-star">&#9733;</span>
+            <span class="sb-w-name">${U.esc(w.name)}</span>
+            <span class="sb-w-move rc-${w.dir}">${U.esc(w.word)}</span>
+          </button>`).join("") +
+        (total > shown.length
+          ? `<button class="sb-w-all" data-watch-all="1">See all ${total}</button>` : "")
+      : '<p class="sb-empty">Star a product to watch it</p>';
   }
 
   function paintDrafts() {
@@ -525,31 +549,63 @@
     b.title = `${n} uncommitted edit${n === 1 ? "" : "s"}`;
   }
 
-  /* The session block. A planner who cannot see what the session has achieved has
-     no way to feel the tool is working, because most of its work is invisible. */
+  /* ---- block 8: session, with the undo the product had no answer for ----- */
   function paintSession() {
-    const line = $("sbSessionLine");
-    if (!line) return;
-    const pending = [...Review.state.reviewed.keys()]
-      .filter((id) => !Review.state.committed.has(id));
-    const decided = Review.state.reviewed.size;
-    const impact = totalPendingImpact();
-
-    line.innerHTML = decided === 0
-      ? "Nothing decided yet"
-      : `<b>${decided}</b> decided` +
-        (Grid.overrideCount
-          ? ` · <b class="${impact >= 0 ? "rc-up" : "rc-down"}">` +
-            `${Plain.money(impact, { sign: true })}</b> effect`
-          : " · no numbers changed");
-    $("sbCommit").disabled = pending.length === 0;
-    $("sbExport").disabled = decided === 0;
+    const pr = Review.progress();
+    const n = $("sbSessionN"), of = $("sbSessionOf"), cov = $("sbSessionCov");
+    if (!n) return;
+    n.textContent = pr.decided;
+    of.textContent = `of ${pr.size}`;
+    cov.textContent = pr.covered > 0 ? `${Plain.money(pr.covered)} covered` : "";
+    $("sbUndo").disabled = !pr.canUndo;
+    $("sbExport").disabled = pr.decided === 0;
   }
 
   function paintWatch(ids) {
-    const el = $("sbWatchCount");
-    if (el) el.textContent = (ids || []).length;
     Review.setWatched(ids || []);
+    paintWatchBlock();
+  }
+
+  /* ---- blocks 1 and 2: the cycle chip and the cycle bar -----------------
+     The frame the product was missing. No order cutoff exists in this deployment, so
+     it reports the vintage and the position of the forecast within its own horizon;
+     a deployment that sets `D.run.cutoff` gets the closing states for free. */
+  function paintCycle() {
+    const chip = $("sbChip"), week = $("sbCycleWeek"), when = $("sbCycleWhen"),
+          bar = $("sbCycleBar"), box = $("sbCycle");
+    if (!chip) return;
+
+    const made = D.run.generatedAt ? new Date(D.run.generatedAt) : null;
+    const cutoff = D.run.cutoff ? new Date(D.run.cutoff) : null;
+    week.textContent = `Week ${U.isoWeek(D.run.origin)}`;
+
+    let pct, state, chipText;
+    if (cutoff) {
+      const hrs = (cutoff - Date.now()) / 36e5;
+      state = hrs <= 0 ? "closed" : hrs <= 24 ? "closing" : "open";
+      chipText = hrs <= 0 ? "closed"
+        : hrs < 24 ? `${Math.max(1, Math.round(hrs))}h left`
+        : `${Math.floor(hrs / 24)}d left`;
+      when.textContent = hrs <= 0 ? "next cycle opens Monday"
+        : `closes ${cutoff.toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })}`;
+      pct = Math.max(0, Math.min(100, 100 - (hrs / (7 * 24)) * 100));
+    } else {
+      state = "open";
+      chipText = made
+        ? made.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+        : D.run.origin;
+      when.textContent = `${D.run.horizon}-day horizon`;
+      // Elapsed share of the horizon this forecast covers.
+      const days = made ? (Date.now() - made) / 864e5 : 0;
+      pct = Math.max(2, Math.min(100, (days / (D.run.horizon || 28)) * 100));
+    }
+    chip.dataset.state = state;
+    chip.textContent = chipText;
+    box.dataset.state = state;
+    bar.style.width = pct.toFixed(1) + "%";
+    box.title = made
+      ? `Forecasts generated ${made.toLocaleString()} - ${D.run.horizon}-day horizon`
+      : `Forecast dated ${D.run.origin}`;
   }
 
   /* Feed condition, from the Stage-0 records the pipeline already writes. Silence is
@@ -588,52 +644,10 @@
     }
   }
 
-  function paintSidebar() { paintDrafts(); paintSession(); paintHealth(); }
-
-  /* ---------------------------------------------------------- the ribbon
-
-     Three things a planner needs before they need anything else: which cycle this
-     is, when it closes, and how much is waiting. The deployment here has no real
-     order cutoff, so the ribbon reports the forecast vintage and the horizon it
-     covers; a deployment that does have one sets `D.run.cutoff` and the closing
-     states below light up without further change. */
-
-  function renderRibbon() {
-    const main = $("ribbonMain"), right = $("ribbonRight"), bar = $("ribbon");
-    if (!main) return;
-
-    // U.isoWeek takes the "YYYY-MM-DD" string, not a Date.
-    const week = U.isoWeek(D.run.origin);
-    const made = D.run.generatedAt ? new Date(D.run.generatedAt) : null;
-    const cutoff = D.run.cutoff ? new Date(D.run.cutoff) : null;
-
-    let stateName = "open";
-    let bits = [`Week ${week}`];
-    if (cutoff) {
-      const hrs = (cutoff - Date.now()) / 36e5;
-      stateName = hrs <= 0 ? "closed" : hrs <= 24 ? "closing" : "open";
-      bits.push(hrs <= 0
-        ? "orders closed"
-        : `orders close ${cutoff.toLocaleString(undefined, { weekday: "long", hour: "2-digit", minute: "2-digit" })}`);
-      if (hrs > 0) bits.push(hrs < 24 ? `${Math.round(hrs)} hours left`
-                                     : `${Math.floor(hrs / 24)} days left`);
-    } else {
-      // No cutoff configured. Say what is true instead of inventing a deadline.
-      bits.push(made
-        ? `forecasts generated ${made.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
-        : `forecast dated ${D.run.origin}`);
-      bits.push(`covering ${D.run.horizon} days`);
-    }
-    bar.dataset.state = stateName;
-    main.textContent = bits.join(" · ");
-
-    const left = Review.state
-      ? [...Review.state.reviewed.keys()].length : 0;
-    const waiting = Math.max(0, (Review.rows || []).filter((r) => r.tier === "urgent").length);
-    right.textContent = stateName === "closed"
-      ? "queue is read-only until the next cycle"
-      : `${U.nf(waiting)} flagged · ${U.nf(left)} decided`;
+  function paintSidebar() {
+    paintDrafts(); paintSession(); paintHealth(); paintCycle(); paintWatchBlock();
   }
+
 
   /* ------------------------------------------------------ engine readout */
 
@@ -1028,7 +1042,6 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     else if (v === "today") Review.render();
     else if (v === "products") Catalog.renderDetail();
     paintEvidenceTabs(v);
-    renderRibbon();
     if (typeof paintSidebar === "function") paintSidebar();
     closeMenu();
   }
@@ -1264,10 +1277,9 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       },
 
       onExport: (rows) => exportDecisions(rows),
-      onRibbon: renderRibbon,
       // The whole board, not just the tiers: a decision changes the counts, the
       // session line and the commit/export affordances together.
-      onTiers: (c) => { paintTiers(c); paintSidebar(); },
+      onQueue: (groups) => { paintQueue(groups); paintSidebar(); },
       onCount: (n) => {
         const b = $("sbTodayBadge");
         if (!b) return;
@@ -1358,24 +1370,31 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       toast(v ? `Scope set to ${Review.prettyStore(v)}` : "Scope cleared - all stores");
     });
 
-    // ---- the queue tiers, straight from the rail
-    $("sbTiers").addEventListener("click", (e) => {
-      const b = e.target.closest("[data-tier]");
+    // ---- the queue, filtered by cause straight from the rail
+    $("sbQueue").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-cause]");
       if (!b) return;
       setView("today");
-      Review.setTab(b.dataset.tier);
+      Review.setCause(b.dataset.cause);
     });
 
-    $("sbWatch").addEventListener("click", () => {
-      if (!Catalog.watchCount()) {
-        return toast("Nothing on your watchlist yet - star a product in Products");
+    // ---- watching
+    $("sbWatch").addEventListener("click", (e) => {
+      if (e.target.closest("[data-watch-all]")) {
+        setView("products");
+        return Catalog.showWatchlist();
       }
-      setView("products");
-      Catalog.showWatchlist();
+      const w = e.target.closest("[data-watch]");
+      if (w) { setView("products"); Catalog.reveal(w.dataset.watch); }
     });
 
+    // ---- the undo the product had no answer for
+    $("sbUndo").addEventListener("click", () => {
+      const name = Review.undoLast();
+      toast(name ? `Undid the decision on ${name}` : "Nothing left to undo");
+      paintSidebar();
+    });
     $("sbExport").addEventListener("click", () => exportDecisions(Review.decisions()));
-    $("sbCommit").addEventListener("click", () => $("rvCommit").click());
     $("sbHealth").addEventListener("click", () => { setView("pipeline"); });
 
     document.getElementById("sbEvidence").addEventListener("click", () =>
@@ -1468,6 +1487,18 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     $("keysBtn")?.addEventListener("click", () => toggleKeys(true));
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { toggleKeys(false); closeSql(); closeGlossary(); closeMenu(); }
+      // Undo the last decision from anywhere in Today. `mod` is computed here rather
+      // than borrowed: this is a different listener from the grid's key handler and
+      // does not share its scope.
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && e.key.toLowerCase() === "z" && !e.shiftKey &&
+          state.view === "today" &&
+          !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+        e.preventDefault();
+        const name = Review.undoLast();
+        toast(name ? `Undid the decision on ${name}` : "Nothing left to undo");
+        paintSidebar();
+      }
       if (e.key === "?" && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) {
         toggleKeys(true);
       }
