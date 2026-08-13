@@ -489,6 +489,73 @@
 .link-btn { margin-left: 0; }
 .rc-done-note { font-size: var(--fs-12); color: var(--text-tertiary); }
 
+/* ============================================ what each policy would earn
+
+   The same nine measured runs the Evidence page carries for an analyst, named after
+   what they mean instead of after the mechanism each one removes, and ranked by what
+   they earned. The blanket-95% row is why the panel exists: it is the habit this
+   system replaces, and the comparison is measured rather than argued. */
+.policy-body {
+  padding: var(--s7); overflow-y: auto; display: grid; gap: var(--s6);
+}
+.policy-lede {
+  margin: 0; font-size: var(--fs-15); line-height: var(--lh-prose);
+  color: var(--text-primary); max-width: var(--measure);
+}
+.policy-rows { display: grid; gap: var(--s5); }
+.policy-row {
+  padding: var(--s6); border-radius: var(--r-card);
+  border: 1px solid var(--border-subtle); background: var(--bg-surface);
+}
+/* The row describing how it runs today is the reader's anchor, so it is the one with
+   an accent edge. "Best earner" is a separate claim and gets a tag, not a border --
+   they are usually the same row, and when they are not, that is the finding. */
+.policy-row[data-current="true"] { border-left: 3px solid var(--ui-accent); }
+.policy-head {
+  display: flex; align-items: baseline; gap: var(--s5); flex-wrap: wrap;
+  margin-bottom: var(--s3);
+}
+.policy-head h4 {
+  margin: 0; flex: 1; min-width: 140px;
+  font-size: var(--fs-15); font-weight: 600; color: var(--text-primary);
+}
+.policy-tag {
+  margin-left: var(--s4); font-size: var(--fs-10); font-weight: 500;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  padding: 1px var(--s3); border-radius: var(--r-pill);
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.policy-money { text-align: right; flex: none; }
+.policy-earned {
+  display: block; font-family: var(--face-fig-hero);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--fig-md); font-weight: 500; letter-spacing: var(--track-fig-md);
+  color: var(--text-primary); line-height: 1;
+}
+.policy-gap {
+  display: block; margin-top: 3px; font-family: var(--font-num);
+  font-size: var(--fs-11); color: var(--text-secondary);
+}
+.policy-gap.neg { color: var(--state-risk); }
+.policy-note {
+  margin: 0 0 var(--s5); font-size: var(--fs-13); line-height: var(--lh-prose);
+  color: var(--text-secondary); max-width: var(--measure);
+}
+.policy-figs {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--s5); margin: 0;
+}
+.policy-figs dt { font-size: var(--fs-11); color: var(--text-secondary); margin-bottom: 2px; }
+.policy-figs dd {
+  margin: 0; font-family: var(--font-num); font-size: var(--fs-14);
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.policy-fine {
+  margin: 0; font-size: var(--fs-12); line-height: var(--lh-prose-sm);
+  color: var(--text-secondary); max-width: var(--measure);
+}
+
 /* ==================================================== the work bar
 
    Two ways to spend attention where it is worth spending, above the list rather than

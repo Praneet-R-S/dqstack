@@ -864,6 +864,61 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     $(box).dataset.open = String(open);
     $(backdrop).dataset.open = String(open);
   };
+  /* ---- what each way of running this would earn -------------------------
+     Nine measured configurations, already in the bundle and already on the Evidence
+     page for an analyst. This is the same nine for whoever decides policy: named
+     after what they mean rather than after the mechanism each one removes, ranked by
+     what they earned, with the gap to the best stated in money.
+
+     The blanket-95% row is the reason the panel exists. It is the habit this system
+     replaces, and the comparison against it is measured rather than argued. */
+  function renderPolicy() {
+    const p = Plain.policies(D.metrics.economics);
+    const body = $("policyBody");
+    if (!p) { body.innerHTML = "<p>No comparison available in this run.</p>"; return; }
+
+    $("policySub").textContent =
+      `Nine ways of running it, each tested over the same ${Review.evalDays} days`;
+
+    body.innerHTML = `
+      ${p.headline ? `<p class="policy-lede">${U.esc(p.headline)}</p>` : ""}
+      <div class="policy-rows">
+        ${p.rows.map((r) => `
+          <article class="policy-row" ${r.isBest ? 'data-best="true"' : ""}
+                   ${r.key === "DQ-Stack (full)" ? 'data-current="true"' : ""}>
+            <div class="policy-head">
+              <h4>${U.esc(r.label)}
+                ${r.key === "DQ-Stack (full)" ? '<span class="policy-tag">how it runs now</span>' : ""}
+                ${r.isBest && r.key !== "DQ-Stack (full)" ? '<span class="policy-tag">best earner</span>' : ""}
+              </h4>
+              <div class="policy-money">
+                <span class="policy-earned">${Plain.money(r.earned)}</span>
+                <span class="policy-gap ${r.gap < 0 ? "neg" : "flat"}">${
+                  r.isBest ? "best" : `${Plain.money(r.gap, { sign: true })} against the best`}</span>
+              </div>
+            </div>
+            <p class="policy-note">${U.esc(r.note)}</p>
+            <dl class="policy-figs">
+              <div><dt>Demand met</dt><dd>${(r.met * 100).toFixed(1)}%</dd></div>
+              <div><dt>Profit missed</dt><dd>${Plain.money(r.lost)}</dd></div>
+              <div><dt>Stock held</dt><dd>${Plain.units(r.stock)} units</dd></div>
+              <div><dt title="Stock that had to be written off.">Written off</dt>
+                   <dd>${Plain.money(r.waste)}</dd></div>
+            </dl>
+          </article>`).join("")}
+      </div>
+      <p class="policy-fine">
+        Every figure here comes from running that policy over days held back from the
+        forecast, on this assortment. They are outcomes of a test, not projections. A
+        policy that earns more while holding less stock is better on both counts; one
+        that earns more by holding much more is a judgement about how much cash you
+        want on a shelf.
+      </p>`;
+  }
+
+  const openPolicy = () => { renderPolicy(); setModal("policyBox", "glossBackdrop", true); };
+  const closePolicy = () => setModal("policyBox", "glossBackdrop", false);
+
   const openGlossary = () => { renderGlossary(); setModal("glossBox", "glossBackdrop", true); };
   const closeGlossary = () => setModal("glossBox", "glossBackdrop", false);
 
@@ -1480,8 +1535,10 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     });
     $("sbCollapse").addEventListener("click", () => setSidebar(!sidebarOpen()));
     $("sbOpen").addEventListener("click", () => setSidebar(true));
+    $("policyClose").addEventListener("click", closePolicy);
+    $("policyOpen").addEventListener("click", openPolicy);
     $("glossClose").addEventListener("click", closeGlossary);
-    $("glossBackdrop").addEventListener("click", closeGlossary);
+    $("glossBackdrop").addEventListener("click", () => { closeGlossary(); closePolicy(); });
 
     $("sortBy").addEventListener("change", (e) => {
       state.sort = e.target.value;
@@ -1560,7 +1617,9 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     });
     $("keysBtn")?.addEventListener("click", () => toggleKeys(true));
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { toggleKeys(false); closeSql(); closeGlossary(); closeMenu(); }
+      if (e.key === "Escape") {
+        toggleKeys(false); closeSql(); closeGlossary(); closePolicy(); closeMenu();
+      }
       // Undo the last decision from anywhere in Today. `mod` is computed here rather
       // than borrowed: this is a different listener from the grid's key handler and
       // does not share its scope.

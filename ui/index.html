@@ -140,6 +140,13 @@
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 13V3"/><path d="M2.5 13h11"/><path d="M5 10.5l2.5-3 2 2 3-4"/></svg><span>Evidence</span>
         <span class="sb-dot" id="sbEngineDot" data-status="idle" aria-hidden="true"></span>
       </button>
+      <!-- The policy comparison. Beside Evidence because it is the same nine measured
+           runs, but it answers a manager's question rather than an analyst's, so it
+           gets its own door. -->
+      <button class="sb-item sb-small" id="policyOpen"
+              title="What each way of running this would earn, measured over the same held-out days">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8v12.4"/><path d="M3.2 5.4h9.6"/><path d="M3.2 5.4L1.6 9.2h3.2z"/><path d="M12.8 5.4l-1.6 3.8h3.2z"/></svg><span>Policy cost</span>
+      </button>
       <button class="sb-item sb-small" data-menu="theme">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.4M8 13v1.4M1.6 8h1.4M13 8h1.4M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1"/></svg><span id="sbThemeLabel">Dark mode</span>
       </button>
@@ -752,6 +759,23 @@
     <button class="btn" id="glossClose">Close</button>
   </div>
   <div class="gloss-body" id="glossBody"></div>
+</div>
+
+<!-- ================================================ what each policy would cost
+     Evidence already carries this comparison for an analyst, in the vocabulary of
+     the method. This is the same nine measured configurations for whoever decides
+     policy: what each way of running the system earned, and what the habit it
+     replaces would have cost. -->
+<div class="sheet-modal" id="policyBox" data-open="false" role="dialog" aria-modal="true"
+     aria-labelledby="policyTitle">
+  <div class="sqlbox-head">
+    <div>
+      <div class="sqlbox-title" id="policyTitle">What each way of running this would earn</div>
+      <div class="sqlbox-sub" id="policySub">Measured, not estimated</div>
+    </div>
+    <button class="btn" id="policyClose">Close</button>
+  </div>
+  <div class="policy-body" id="policyBody"></div>
 </div>
 
 <!-- ========================================================== SQL console -->

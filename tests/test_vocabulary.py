@@ -65,6 +65,12 @@ def strip_non_prose(src: str) -> str:
     # a line start, a brace or a comma, which is where a JS key sits and where prose
     # never does, so "Warning: shelf empty" inside a string is still checked.
     src = re.sub(r"(^|[{,]\s*)([A-Za-z_$][\w$]*)\s*:", r"\1 ", src, flags=re.M)
+    # Quoted keys too. The policy lookup is keyed by the exact strings the pipeline
+    # writes into the metrics -- "Croston/SBA only", "no reconciliation" -- because
+    # matching on them is the only way to attach a plain label to each. Same anchor as
+    # above, so a quoted string anywhere other than key position is still checked, and
+    # the label and note values beside these keys are still checked.
+    src = re.sub(r'(^|[{,]\s*)"[^"\n]*"\s*:', r"\1 ", src, flags=re.M)
     return src
 
 

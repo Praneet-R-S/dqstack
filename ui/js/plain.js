@@ -435,6 +435,96 @@ window.Plain = (() => {
              advice: "Lean low on this one.", detail, tone: "excess" };
   }
 
+  /* ---- the nine ways of running this, in plain words -------------------
+     Evidence carries this comparison for an analyst, named after the mechanism each
+     arm removes. Whoever decides policy needs the same nine measured runs named after
+     what they mean: "one service level for everything" is a decision a manager
+     recognises, "full, blanket 95% service" is not.
+
+     The blanket-95% arm is the one that matters most, because it is the habit this
+     system exists to replace and the comparison is measured rather than argued. */
+  const POLICIES = {
+    "DQ-Stack (full)": {
+      // Names the policy, not its status. The "how it runs now" tag carries the
+      // status, and a label that said the same thing made the pair read as a stutter.
+      label: "A service level for each product",
+      note: "Every product gets its own, worked out from its margin, its shelf life and how predictable it is.",
+    },
+    "full, blanket 95% service": {
+      label: "One service level for everything",
+      note: "The common habit: aim to meet 95% of demand on every product regardless of what it earns or how fast it spoils. Overstocks the cheap and perishable, and still leaves money on the table elsewhere.",
+    },
+    "no censoring correction": {
+      label: "Treat every empty shelf as no demand",
+      note: "Take the sales history at face value, including the days a product was unavailable. The forecast then learns that demand is lower than it is.",
+    },
+    "no calibration": {
+      label: "Trust the ranges as they come out",
+      note: "Skip the step that checks the forecast ranges against what actually happened and corrects them.",
+    },
+    "no reconciliation": {
+      label: "Let the totals disagree",
+      note: "Forecast each product on its own and accept that the store and category totals will not add up.",
+    },
+    "best single (LGBM-Q)": {
+      label: "Use only the best single method",
+      note: "Pick the one method that scores best overall and use it everywhere, instead of blending several.",
+    },
+    "Tweedie only": {
+      label: "Use only the totals-fitted method",
+      note: "One method, chosen for coping with many zero-sales days.",
+    },
+    "Croston/SBA only": {
+      label: "Use only the occasional-seller method",
+      note: "One method, built for products that sell in scattered ones and twos.",
+    },
+    "seasonal naive": {
+      label: "Repeat the same period last year",
+      note: "The plainest possible benchmark. Anything that cannot beat this is not earning its keep.",
+    },
+  };
+
+  /** The nine arms, ranked by what they earned, each with the gap to the best.
+
+      Returns money differences rather than only levels, because "this policy earns
+      $832,735" means nothing without something to compare it against, and the
+      comparison is the whole point of the panel. */
+  function policies(econ) {
+    if (!econ || !econ.length) return null;
+    const rows = econ.map((e) => {
+      const meta = POLICIES[e.method] || { label: e.method, note: "" };
+      return {
+        key: e.method, label: meta.label, note: meta.note,
+        earned: e.realized_margin,
+        met: e.fill_rate, lost: e.lost_margin,
+        holding: e.holding_cost, waste: e.waste_cost,
+        stock: e.avg_inventory,
+        aim: e.mean_target_q,
+      };
+    }).sort((a, b) => b.earned - a.earned);
+
+    const best = rows[0];
+    for (const r of rows) {
+      r.gap = r.earned - best.earned;               // 0 for the winner, negative below
+      r.isBest = r === best;
+    }
+    const current = rows.find((r) => r.key === "DQ-Stack (full)") || best;
+    const blanket = rows.find((r) => r.key === "full, blanket 95% service");
+    return {
+      rows, best, current, blanket,
+      // The headline claim, stated as a measured difference.
+      // money() already signs a negative, so the magnitude is passed and the
+      // direction is carried by the word. "-$62k less" said it twice and backwards.
+      headline: blanket
+        ? `Running one service level for everything would earn ` +
+          `${money(Math.abs(blanket.earned - current.earned))} ` +
+          `${blanket.earned < current.earned ? "less" : "more"}, ` +
+          `and hold ${units(Math.abs(blanket.stock - current.stock))} ` +
+          `${blanket.stock > current.stock ? "more" : "fewer"} units of stock to do it.`
+        : null,
+    };
+  }
+
   /* ---- model feature names, in English --------------------------------
      Used by the "why this number" explanation. Patterns rather than a lookup
      table, because the feature set is generated and a missing key would render a
@@ -537,6 +627,6 @@ window.Plain = (() => {
   return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, short, quality, confidence,
            service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
            EXCLUDED, excluded, MODELS, blend, outcome, tradeoff,
-           OVERRIDE_REASONS, OVERRIDE_BY_KEY, plausibility,
+           OVERRIDE_REASONS, OVERRIDE_BY_KEY, plausibility, POLICIES, policies,
            get CUT() { return CUT; } };
 })();
