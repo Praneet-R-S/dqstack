@@ -325,6 +325,86 @@ window.Plain = (() => {
     };
   }
 
+  /* ---- why the planner changed the number -------------------------------
+     An override with no stated reason is the one piece of information the system
+     cannot reconstruct later. Everything else about a decision is derivable -- what
+     the model said, what was chosen, what it was worth -- but "because the display
+     goes up on Tuesday" exists only in the head of the person who typed it, and it
+     is the part that would let next quarter's model learn something.
+
+     Six codes, because a list long enough to be exhaustive is a list nobody reads to
+     the end. They are the reasons a planner actually gives, not a taxonomy of
+     forecast error. Free text sits alongside for everything else. */
+  const OVERRIDE_REASONS = [
+    { key: "promo", label: "Promotion or display", hint: "A price promotion, an end cap, or a feature that the forecast does not know about." },
+    { key: "local", label: "Local event or weather", hint: "Something happening near this store: a match, a festival, a heatwave, roadworks." },
+    { key: "supply", label: "Supply problem", hint: "A supplier or delivery constraint means the suggested level cannot be met, or must be brought forward." },
+    { key: "price", label: "Price change", hint: "A price move that has not reached the data the forecast was built from." },
+    { key: "range", label: "Range or space change", hint: "Shelf space, a new neighbour product, or a listing coming in or out." },
+    { key: "judgement", label: "I know this line better", hint: "Local knowledge with no single cause to point at. Recorded as exactly that, rather than dressed up as something more specific." },
+  ];
+  const OVERRIDE_BY_KEY = Object.fromEntries(OVERRIDE_REASONS.map((r) => [r.key, r]));
+
+  /* ---- is this number plausible? ----------------------------------------
+     A guardrail, not a block. The planner is allowed to be right when the model is
+     wrong -- that is the entire reason an override exists -- but they should be told
+     when they have left the range the forecast considers likely, and how far.
+
+     Stated as odds rather than as a probability, because "about a 1 in 20 chance
+     demand gets this high" is a sentence a person can act on and "you are above the
+     95th percentile" is not. */
+  function plausibility(row, v) {
+    if (!row || !(v >= 0)) return null;
+    // The exported ladder, low to high, with the probability each corresponds to.
+    const QS = [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95];
+    const lo = row[1], hi = row[5], mid = row[3];          // p10, p90, p50
+
+    // Where does v sit on the ladder? Linear between the two quantiles it falls
+    // between; flat beyond the ends, where all we honestly know is "past p95".
+    let F = null;
+    if (v <= row[0]) F = null;
+    else if (v >= row[6]) F = null;
+    else {
+      for (let i = 0; i < row.length - 1; i++) {
+        if (v >= row[i] && v <= row[i + 1]) {
+          const span = row[i + 1] - row[i];
+          const t = span > 1e-9 ? (v - row[i]) / span : 0;
+          F = QS[i] + t * (QS[i + 1] - QS[i]);
+          break;
+        }
+      }
+    }
+
+    const odds = (p) => `about a 1 in ${Math.max(2, Math.round(1 / Math.max(p, 1e-6)))} chance`;
+
+    if (v > row[6]) {
+      return { tone: "warn", inside: false,
+               word: "Above the likely range",
+               note: `The forecast puts less than ${odds(0.05).replace("about ", "")} of demand ` +
+                     `reaching ${units(row[6])} units, and you have gone higher. Fine if you know ` +
+                     `something it does not — worth a second look otherwise.` };
+    }
+    if (v < row[0]) {
+      return { tone: "warn", inside: false,
+               word: "Below the likely range",
+               note: `The forecast puts less than ${odds(0.05).replace("about ", "")} of demand ` +
+                     `falling as low as ${units(row[0])} units. Ordering to this level risks ` +
+                     `empty shelves.` };
+    }
+    if (v > hi || v < lo) {
+      const tail = v > hi ? 1 - F : F;
+      return { tone: "info", inside: false,
+               word: v > hi ? "Near the top of the range" : "Near the bottom of the range",
+               note: `${odds(tail)[0].toUpperCase() + odds(tail).slice(1)} demand ` +
+                     `${v > hi ? "reaches" : "falls to"} this level. Still inside what the ` +
+                     `forecast considers possible.` };
+    }
+    return { tone: "ok", inside: true,
+             word: "Inside the likely range",
+             note: `The forecast expects between ${units(lo)} and ${units(hi)} units, ` +
+                   `with ${units(mid)} in the middle.` };
+  }
+
   /* ---- the shape of the ordering trade-off, in one sentence -------------
      The cost curve carries the argument; this is the sentence a planner reads while
      they are still learning to read the shape. Measured across this assortment the
@@ -457,5 +537,6 @@ window.Plain = (() => {
   return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, short, quality, confidence,
            service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
            EXCLUDED, excluded, MODELS, blend, outcome, tradeoff,
+           OVERRIDE_REASONS, OVERRIDE_BY_KEY, plausibility,
            get CUT() { return CUT; } };
 })();

@@ -210,7 +210,9 @@
 }
 .rc-pos {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary); flex: none;
+  /* Secondary, not tertiary. "3 of 24" is the figure that replaced exposure as the
+     glance, so it is read rather than skimmed past -- and tertiary measures 3.86:1. */
+  color: var(--text-secondary); flex: none;
 }
 .rc-exp { flex: none; }
 .rc-exp b {
@@ -487,16 +489,80 @@
 .link-btn { margin-left: 0; }
 .rc-done-note { font-size: var(--fs-12); color: var(--text-tertiary); }
 
-/* ---- inline edit ------------------------------------------------------ */
+/* ---- inline edit ------------------------------------------------------
+   A bare number field became a number, a reason and a guardrail. The reason is
+   required because an optional audit field is an empty audit field, and the guardrail
+   updates as the number is typed because leaving the range the forecast considers
+   likely should be a deliberate act rather than an accident. */
 .rc-edit {
-  display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap;
-  padding: var(--s5); border-radius: var(--r-card);
+  display: grid; gap: var(--s5);
+  padding: var(--s6); border-radius: var(--r-card);
   background: rgba(var(--override-rgb) / 0.07);
   border: 1px solid rgba(var(--override-rgb) / 0.3);
 }
+.rc-edit-row {
+  display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap;
+}
+.rc-edit-act { display: flex; gap: var(--s4); }
 .rc-edit label {
   font-size: var(--fs-12); color: var(--text-secondary); font-weight: 500;
 }
+.rc-edit-impact {
+  margin-left: auto; font-family: var(--font-num); font-size: var(--fs-12);
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.rc-edit-impact[data-sign="pos"] { color: var(--state-excess); }
+.rc-edit-impact[data-sign="neg"] { color: var(--state-risk); }
+
+/* The guardrail. Quiet when the number is unremarkable, and it has to stay quiet --
+   a warning that fires on every edit is a warning nobody reads. */
+.rc-guard {
+  margin: 0; font-size: var(--fs-12); line-height: var(--lh-prose-sm);
+  color: var(--text-secondary); max-width: var(--measure);
+  padding-left: var(--s5); border-left: 2px solid var(--border-strong);
+}
+.rc-guard b { color: var(--text-primary); font-weight: 600; }
+.rc-guard[data-tone="ok"] { border-left-color: var(--state-excess); }
+.rc-guard[data-tone="info"] { border-left-color: var(--series-forecast); }
+.rc-guard[data-tone="warn"] { border-left-color: var(--state-risk); }
+.rc-guard[data-tone="warn"] b { color: var(--state-risk); }
+
+.rc-reasons { border: 0; padding: 0; margin: 0; min-width: 0; }
+.rc-reasons legend {
+  padding: 0; margin-bottom: var(--s4);
+  font-size: var(--fs-12); color: var(--text-secondary); font-weight: 500;
+}
+/* Not in override amber: over the form's own amber tint it measures 3.5:1 in light.
+   The word does the work anyway, with the disabled Save button behind it. */
+.rc-req {
+  font-size: var(--fs-10); text-transform: uppercase;
+  letter-spacing: var(--tracking-caps); color: var(--text-secondary);
+  margin-left: var(--s3);
+}
+.rc-reason-chips { display: flex; flex-wrap: wrap; gap: var(--s3); margin-bottom: var(--s4); }
+.rc-reason {
+  font-size: var(--fs-12); padding: var(--s3) var(--s5); cursor: pointer;
+  border-radius: var(--r-pill); border: 1px solid var(--border-strong);
+  background: var(--bg-surface); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease),
+              border-color var(--t-feedback) var(--ease);
+}
+.rc-reason:hover { background: var(--bg-hover); color: var(--text-primary); }
+.rc-reason:active { transform: translateY(1px); }
+.rc-reason[aria-pressed="true"] {
+  background: var(--series-override); border-color: var(--series-override);
+  color: #1A1206; font-weight: 500;
+}
+.rc-note {
+  width: 100%; max-width: 420px; background: var(--bg-surface);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  padding: var(--s3) var(--s5); font-size: var(--fs-13); color: var(--text-primary);
+}
+.rc-note:focus {
+  outline: none; border-color: var(--series-override);
+  box-shadow: 0 0 0 3px rgba(var(--override-rgb) / 0.2);
+}
+.rc-edit-act .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .rc-input {
   width: 108px; background: var(--bg-surface);
   border: 1px solid var(--series-override); border-radius: var(--r-input);
@@ -506,7 +572,7 @@
 .rc-input:focus {
   outline: none; box-shadow: 0 0 0 3px rgba(var(--override-rgb) / 0.28);
 }
-.rc-edit-unit { font-size: var(--fs-12); color: var(--text-tertiary); margin-right: auto; }
+.rc-edit-unit { font-size: var(--fs-12); color: var(--text-secondary); }
 
 /* ---- the expansion --------------------------------------------------- */
 .rc-detail {

@@ -37,6 +37,11 @@ window.Review = (() => {
     committed: new Set(),        // ids already committed; still reviewed, not pending
     expanded: new Set(),
     editing: null,
+    // Held across the re-render that opening the form causes, so a reason chosen
+    // before a keystroke is not lost by the keystroke.
+    editReason: "",
+    editNote: "",
+    editValue: null,
     limit: 24,
     cause: "",                   // sidebar filter: a headline-reason key
     cursor: 0,                   // keyboard position within the visible list
@@ -513,15 +518,7 @@ window.Review = (() => {
         ${chartKey(s)}
       </div>
 
-      ${editing ? `
-      <div class="rc-edit">
-        <label for="ed-${e(r.id)}">Use this number instead</label>
-        <input id="ed-${e(r.id)}" class="rc-input" type="number" min="0" step="1"
-               value="${Math.round(now)}" inputmode="numeric">
-        <span class="rc-edit-unit">units next week</span>
-        <button class="btn btn-primary" data-act="save">Save</button>
-        <button class="btn btn-quiet" data-act="cancel">Cancel</button>
-      </div>` : `
+      ${editing ? editForm(r, s, now) : `
       <div class="rc-actions">
         ${done ? `
           ${state.committed.has(r.id) ? "" :
@@ -543,6 +540,98 @@ window.Review = (() => {
 
       ${open ? detail(s, secondary, q, conf, svc, r) : ""}
     </article>`;
+  }
+
+  /* The override form: a number, a reason, and a guardrail.
+
+     Changing a forecast used to be a bare number field. Three things were missing and
+     each of them matters more than the field did.
+
+     A reason. Every other fact about a decision is reconstructable later -- what the
+     model said, what was chosen, what it was worth -- but "because the display goes up
+     on Tuesday" exists only in the head of whoever typed the number, and it is the
+     part that could teach next quarter's model something. It is required, because an
+     optional audit field is an empty audit field.
+
+     A guardrail. The planner is allowed to be right when the model is wrong; that is
+     what an override is for. But leaving the range the forecast considers likely
+     should be a deliberate act, so the form says where the number sits, in odds, and
+     updates as it is typed.
+
+     The consequence. What the change is worth, from the same estimator the
+     spreadsheet's impact figure and the commit summary use, so the three cannot
+     disagree.
+
+     The reason chips and the guardrail update the DOM in place rather than through
+     render(), because a re-render mid-edit would discard whatever is half-typed. */
+  function editForm(r, s, now) {
+    const e = U.esc;
+    const row = s.weekly[0];
+    const val = state.editValue != null ? state.editValue : Math.round(now);
+
+    return `<div class="rc-edit">
+      <div class="rc-edit-row">
+        <label for="ed-${e(r.id)}">Use this number instead</label>
+        <input id="ed-${e(r.id)}" class="rc-input" type="number" min="0" step="1"
+               value="${val}" inputmode="numeric" data-model="${Math.round(now)}">
+        <span class="rc-edit-unit">units next week</span>
+        <span class="rc-edit-impact" data-role="impact"></span>
+      </div>
+
+      <p class="rc-guard" data-role="guard" data-tone=""></p>
+
+      <fieldset class="rc-reasons">
+        <legend>Why are you changing it? <span class="rc-req">needed</span></legend>
+        <div class="rc-reason-chips" data-role="reasons">
+          ${Plain.OVERRIDE_REASONS.map((x) => `
+            <button type="button" class="rc-reason" data-reason="${e(x.key)}"
+                    aria-pressed="${state.editReason === x.key}"
+                    title="${e(x.hint)}">${e(x.label)}</button>`).join("")}
+        </div>
+        <input class="rc-note" type="text" maxlength="140" data-role="note"
+               value="${e(state.editNote || "")}"
+               placeholder="Anything worth adding (optional)">
+      </fieldset>
+
+      <div class="rc-edit-act">
+        <button class="btn btn-primary" data-act="save">Save</button>
+        <button class="btn btn-quiet" data-act="cancel">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  /** Paint the guardrail and the impact figure for whatever is currently typed.
+
+      Called on every keystroke and once when the form opens. Writes into the two
+      placeholder elements rather than re-rendering, so the caret stays put. */
+  function paintEditFeedback(cardEl) {
+    const inp = cardEl.querySelector(".rc-input");
+    if (!inp) return;
+    const s = rows.find((x) => x.id === cardEl.dataset.id)?.s;
+    if (!s) return;
+
+    const v = Math.max(0, Math.round(+inp.value || 0));
+    const model = +inp.dataset.model;
+    const guard = cardEl.querySelector('[data-role="guard"]');
+    const imp = cardEl.querySelector('[data-role="impact"]');
+
+    const p = Plain.plausibility(s.weekly[0], v);
+    if (guard && p) {
+      guard.dataset.tone = p.tone;
+      guard.innerHTML = `<b>${U.esc(p.word)}.</b> ${U.esc(p.note)}`;
+    }
+
+    if (imp) {
+      const changed = Math.abs(v - model) > 0.5;
+      const d = changed && hooks.impactOf ? hooks.impactOf(s, v) : 0;
+      imp.textContent = changed
+        ? `${Plain.money(d, { sign: true })} expected effect`
+        : "same as the forecast";
+      imp.dataset.sign = !changed ? "flat" : d >= 0 ? "pos" : "neg";
+    }
+
+    const save = cardEl.querySelector('[data-act="save"]');
+    if (save) save.disabled = !state.editReason;
   }
 
   /** The expansion. Everything here was previously the only way to see any of
@@ -768,8 +857,12 @@ window.Review = (() => {
     if (d.action === "approved") return `Approved at ${Plain.units(orig)} units.`;
     if (d.action === "skipped") return "Skipped — left as it was.";
     const ch = Plain.change(d.value, orig);
+    // The reason is read back, so a planner scrolling their own decisions sees why
+    // rather than only what.
+    const why = d.reason ? ` — ${Plain.OVERRIDE_BY_KEY[d.reason]?.label || d.reason}` : "";
     return `Changed to ${Plain.units(d.value)} units` +
-           (ch && ch.dir !== "flat" ? ` (${ch.word}).` : ".");
+           (ch && ch.dir !== "flat" ? ` (${ch.word})` : "") + why +
+           (d.note ? `: “${d.note}”` : ".");
   }
 
   /* --------------------------------------------------------------- render */
@@ -841,7 +934,12 @@ window.Review = (() => {
 
     if (state.editing) {
       const inp = $("rvList").querySelector(".rc-input");
-      if (inp) { inp.focus(); inp.select(); }
+      if (inp) {
+        inp.focus(); inp.select();
+        // The guardrail and the impact figure are correct from the moment the form
+        // opens, rather than only after the first keystroke.
+        paintEditFeedback(inp.closest(".rc"));
+      }
     }
   }
 
@@ -895,6 +993,13 @@ window.Review = (() => {
         yourValue: d.action === "changed" ? d.value : Math.round(model),
         change: d.action === "changed" ? Math.round(d.value - model) : 0,
         moneyAtRisk: Math.round(r.risk),
+        // The audit trail. This is the only part of a decision that cannot be
+        // reconstructed from the data afterwards, so it is the part most worth
+        // getting out of the browser.
+        reason: d.reason ? (Plain.OVERRIDE_BY_KEY[d.reason]?.label || d.reason) : "",
+        note: d.note || "",
+        expectedEffect: d.action === "changed" && hooks.impactOf
+          ? Math.round(hooks.impactOf(r.s, d.value)) : 0,
       });
     }
     return out;
@@ -957,6 +1062,17 @@ window.Review = (() => {
     if (state.tab === "done") return;
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
 
+    /* Anything originating inside an open override form belongs to that form.
+
+       Guarding on inField() alone was not enough. The form's own Enter handler sits
+       on #rvList and this one sits on document, so a single Enter bubbles through
+       both -- and inField() only stops the second when focus happens to be in a text
+       field. With focus on the Save button, Enter saved the change here and then
+       approved whatever card the cursor was on, two decisions from one keystroke.
+       The container is the right test, because it covers the buttons and the reason
+       chips as well as the inputs. */
+    if (ev.target.closest && ev.target.closest(".rc-edit")) return;
+
     // Inside the inline editor only Enter and Escape mean anything; the rest is
     // someone typing a number.
     if (inField()) return;
@@ -995,7 +1111,11 @@ window.Review = (() => {
 
   /* -------------------------------------------------------------- actions */
 
-  function act(id, action, value) {
+  const clearEdit = () => {
+    state.editing = null; state.editReason = ""; state.editNote = ""; state.editValue = null;
+  };
+
+  function act(id, action, value, meta) {
     const r = rows.find((x) => x.id === id);
     if (!r) return;
 
@@ -1003,8 +1123,10 @@ window.Review = (() => {
       state.expanded.has(id) ? state.expanded.delete(id) : state.expanded.add(id);
       return render();
     }
-    if (action === "edit") { state.editing = id; return render(); }
-    if (action === "cancel") { state.editing = null; return render(); }
+    if (action === "edit") {
+      clearEdit(); state.editing = id; return render();
+    }
+    if (action === "cancel") { clearEdit(); return render(); }
     if (action === "undo") {
       state.reviewed.delete(id);
       hooks.onUndo?.(r.s);
@@ -1014,10 +1136,18 @@ window.Review = (() => {
     if (action === "approve") state.reviewed.set(id, { action: "approved" });
     if (action === "skip") state.reviewed.set(id, { action: "skipped" });
     if (action === "changed") {
-      state.reviewed.set(id, { action: "changed", value });
+      // A change with no reason is not saved. The chips enforce this in the UI; this
+      // is the same rule at the one place every path has to pass through.
+      if (!meta || !meta.reason) {
+        hooks.onToast?.("Pick a reason for the change first");
+        return;
+      }
+      state.reviewed.set(id, {
+        action: "changed", value, reason: meta.reason, note: (meta.note || "").trim(),
+      });
       hooks.onChange?.(r.s, value);
     }
-    state.editing = null;
+    clearEdit();
     state.expanded.delete(id);
 
     // Announce for screen readers and confirm for everyone else, then advance.
@@ -1051,6 +1181,17 @@ window.Review = (() => {
       const goto = ev.target.closest("[data-goto]");
       if (goto) { state.tab = goto.dataset.goto; return render(); }
 
+      /* Reason chips are handled without a render, so a half-typed number survives
+         being given a reason. */
+      const chip = ev.target.closest("[data-reason]");
+      if (chip) {
+        const cardEl = chip.closest(".rc");
+        state.editReason = state.editReason === chip.dataset.reason ? "" : chip.dataset.reason;
+        cardEl.querySelectorAll("[data-reason]").forEach((b) =>
+          b.setAttribute("aria-pressed", String(b.dataset.reason === state.editReason)));
+        return paintEditFeedback(cardEl);
+      }
+
       const btn = ev.target.closest("[data-act]");
       if (!btn) return;
       const cardEl = btn.closest(".rc");
@@ -1058,7 +1199,8 @@ window.Review = (() => {
       const a = btn.dataset.act;
       if (a === "save") {
         const v = Math.max(0, Math.round(+cardEl.querySelector(".rc-input").value || 0));
-        return act(id, "changed", v);
+        const note = cardEl.querySelector('[data-role="note"]')?.value || "";
+        return act(id, "changed", v, { reason: state.editReason, note });
       }
       if (a === "open") return hooks.onOpenProduct?.(id);
       // A mouse click also moves the keyboard cursor, so the two never disagree.
@@ -1068,14 +1210,37 @@ window.Review = (() => {
     });
 
     $("rvList").addEventListener("keydown", (ev) => {
-      if (!ev.target.classList.contains("rc-input")) return;
       const cardEl = ev.target.closest(".rc");
+      if (!cardEl) return;
+      const inNote = ev.target.classList.contains("rc-note");
+      if (!ev.target.classList.contains("rc-input") && !inNote) return;
       if (ev.key === "Enter") {
         ev.preventDefault();
-        act(cardEl.dataset.id, "changed",
-            Math.max(0, Math.round(+ev.target.value || 0)));
+        // Belt as well as braces: this key has been handled, so it does not travel on
+        // to the document listener that reads Enter as "approve".
+        ev.stopPropagation();
+        const v = Math.max(0, Math.round(+cardEl.querySelector(".rc-input").value || 0));
+        const note = cardEl.querySelector('[data-role="note"]')?.value || "";
+        act(cardEl.dataset.id, "changed", v, { reason: state.editReason, note });
       }
-      if (ev.key === "Escape") { ev.preventDefault(); act(cardEl.dataset.id, "cancel"); }
+      if (ev.key === "Escape") {
+        ev.preventDefault(); ev.stopPropagation(); act(cardEl.dataset.id, "cancel");
+      }
+    });
+
+    /* Live guardrail and impact. Both are written into the open form rather than
+       re-rendered, so the caret and any partial input survive. The typed value is
+       mirrored into state so that a render triggered from elsewhere -- the sidebar,
+       a scope change -- does not reset the field to the model's number. */
+    $("rvList").addEventListener("input", (ev) => {
+      const cardEl = ev.target.closest(".rc");
+      if (!cardEl) return;
+      if (ev.target.classList.contains("rc-input")) {
+        state.editValue = Math.max(0, Math.round(+ev.target.value || 0));
+      }
+      if (ev.target.classList.contains("rc-note")) state.editNote = ev.target.value;
+      if (ev.target.classList.contains("rc-input") ||
+          ev.target.classList.contains("rc-note")) paintEditFeedback(cardEl);
     });
 
     document.querySelectorAll(".rv-tab").forEach((b) =>

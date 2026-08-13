@@ -878,20 +878,30 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
   function exportDecisions(rows) {
     if (!rows.length) return toast("Nothing to export yet");
     const cat = Catalog.state;
+    /* The override reason and note ride out with the numbers.
+
+       Everything else in this file can be recomputed from the bundle later. The
+       reason a planner overrode a forecast cannot -- it exists only in the head of
+       whoever typed it, and it is the column that would let a later run learn
+       anything from this cycle. The expected effect comes along too, from the same
+       estimator the card and the commit summary quote. */
     const head = ["product", "store", "category", "why_flagged", "action",
                   "model_forecast_units", "your_value_units", "change_units",
+                  "override_reason", "override_note", "expected_effect",
                   "money_at_risk", "forecast_made", "exported_for_week_of"];
     const lines = [head.join(",")];
     for (const r of rows) {
       lines.push([r.product, r.store, r.category, r.flag, r.action,
-                  r.modelForecast, r.yourValue, r.change, r.moneyAtRisk,
+                  r.modelForecast, r.yourValue, r.change,
+                  r.reason || "", r.note || "", r.expectedEffect ?? "",
+                  r.moneyAtRisk,
                   D.run.origin, D.dates.future[0]].map(csvCell).join(","));
     }
     // Range changes ride along in the same file: they are part of the same
     // decision set and a second download would just get lost.
     for (const [id, p] of cat.added) {
       lines.push([p._name || p.item, Review.prettyStore(p.store), Plain.catWord(p.cat),
-                  "new product", "added", "", "", "", "",
+                  "new product", "added", "", "", "", "", "", "", "",
                   D.run.origin, D.dates.future[0]].map(csvCell).join(","));
     }
     for (const id of cat.removed) {
@@ -899,7 +909,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       if (!p) continue;
       lines.push([p._name || Review.prettyItem(p.item), Review.prettyStore(p.store),
                   Plain.catWord(p.cat), "removed from range", "removed",
-                  "", "", "", Math.round(p.ledger?.realizedMargin || 0),
+                  "", "", "", "", "", "", Math.round(p.ledger?.realizedMargin || 0),
                   D.run.origin, D.dates.future[0]].map(csvCell).join(","));
     }
     const extra = cat.added.size + cat.removed.size;
@@ -1258,6 +1268,17 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       // The summary bar quotes the same estimator the spreadsheet's impact figure
       // uses, so the two surfaces can never disagree about what a change is worth.
       impact: totalPendingImpact,
+
+      /* And so does the live figure inside the override form on a card. Three
+         surfaces now quote an expected effect -- the spreadsheet's cell, the card's
+         form, and the commit summary -- and all three call this one function, which
+         is the only way they stay consistent. The grid's estimator wants a grid row,
+         so a series is wrapped to look like one; week 0 because a card only ever
+         edits next week. */
+      impactOf: (s, v) => {
+        const row = BY_ID.get(s.id);
+        return row ? overrideImpact(row, 0, v) : 0;
+      },
 
       onOpenProduct: (id) => { setView("products"); Catalog.reveal(id); },
 
