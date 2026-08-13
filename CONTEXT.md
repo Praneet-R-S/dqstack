@@ -9,6 +9,30 @@ Last updated: after commit `644af67` (six verified findings fixed).
 
 ---
 
+## 0. Start here
+
+The pipeline and its evidence are finished and committed. **All current work is
+interface.** Two external design reviews have been received; v2 supersedes v1 and
+corrects it. Read **C11** first — it holds the in-flight state and the exact next
+step, including a written-but-unapplied script.
+
+    python -m dqstack.serve          # then http://127.0.0.1:8000/
+    python -m pytest -q              # 111 tests
+    python docs/build_reference_pdf.py   # regenerate the 20-page reference
+
+Verification habits that have repeatedly paid for themselves:
+
+- `pytest tests/test_markup.py` after **any** edit to `index.html`. Tag balance,
+  layout landmarks, and every `$("id")` in app.js resolving. Two commits in a row ate
+  structural `</div>`s and browsers auto-closed them, so nothing complained.
+- `pytest tests/test_vocabulary.py` after any copy change on a Work surface.
+- The contrast harness after any colour change; the overflow sweep across
+  6 views x 2 themes x 2 rail states after any layout change.
+- Measure in the browser rather than assuming. Every visual claim in this file that
+  says "measured" was, and several assumptions turned out wrong when checked.
+
+---
+
 ## 1. What this is
 
 An operational demand-planning platform: a seven-stage batch ML pipeline producing
@@ -874,6 +898,86 @@ file, where it is invisible in a diff).
 
 **Measured: 111 tests pass. Zero horizontal overflow across 3 views x 2 themes x 2 rail
 states, plus Evidence. 124.1 KB gzipped.**
+
+### C11. External design review v2 — IN FLIGHT
+
+`DQ-Stack_Interface_Redesign_v2.md` (in the user's Downloads; **copied to
+`docs/reviews/` so it survives**) supersedes v1 and **corrects its own central
+recommendation**. Read that correction before doing anything else in this area:
+
+> v1 said cut the sidebar from nine items to four. That was right about the problem
+> and wrong about the cure. The fault was never that the sidebar had too many things
+> in it — it was that the things in it belonged to the **application** rather than to
+> the **planner**. So the rule is not *fewer items*. It is: **the sidebar holds the
+> planner's work, not the application's features.**
+
+Under that rule the rail gets **denser** (eight blocks) while *navigation* shrinks to
+three destinations. Every block carries a live number, which is what separates an
+instrument from a menu.
+
+**v2's eight blocks, and where each stands:**
+
+| # | Block | Status |
+|---|---|---|
+| 1 | Lockup + cycle chip ("2d left") | markup written, **not applied** |
+| 2 | Cycle bar — week + 3px progress | markup written, **not applied** |
+| 3 | Navigation: 3 destinations, Today badge + amber draft badge | **DONE** (C10) |
+| 4 | **Your queue** — by *cause*, count **and exposure**, click to filter | JS **DONE**, UI pending |
+| 5 | Watching — pinned items with live movement (+41% / steady) | JS **DONE**, UI pending |
+| 6 | Saved views | not started (v2 puts it in Phase 4) |
+| 7 | Scope — store switcher | **DONE** (C10) |
+| 8 | Session — *n* of *N*, exposure covered, **Undo last** | JS **DONE**, UI pending |
+| — | Footer: system condition, **Evidence moved here**, theme, density, shortcuts | health **DONE**; Evidence move pending |
+
+**The axis change that matters.** C10 grouped the queue by *severity* (urgent /
+check / later). v2 groups it by **cause** with exposure attached, and it is right:
+"three data problems may be worth more than twelve promotion endings" is a judgement
+a severity tier cannot express, and counts alone are what every incumbent shows.
+
+**Committed and working already (this is the safe base):**
+
+- `plain.js` gained `short:` labels per reason plus `Plain.short(key)` — the full
+  labels ("May have been out of stock") do not fit a 288px rail row.
+- `review.js` gained, all tested-parse and additive, nothing consuming them yet:
+  - `byCause()` — groups the live cohort by headline reason, sums exposure, orders by
+    it, caps at six with `Everything else`, and appends `Skipped earlier`.
+  - `setCause(key)` + `matchesCause()` — the filter, applied on top of the tier inside
+    `forTab()`. `__skipped` switches the tab to `done`, since it is the one filter that
+    shows already-reviewed items.
+  - `undoLast()` — the safety gap. Map insertion order gives the most recent decision;
+    **committed decisions are deliberately not undoable**, because the planner has
+    already been told they were final.
+  - `progress()` — decided, cohort size, **exposure covered**, changed count, canUndo.
+  - `watchStatus(limit)` — watched products with their movement word.
+  - `hooks.onQueue` fires with `byCause()` on every render.
+
+**Exact next step.** `docs/reviews/pending-v2-sidebar.py` holds the finished markup
+for blocks 1, 2, 4, 5, 8 and the Evidence-to-footer move, written but **not applied**
+because context ran short. It rewrites the whole `<aside class="sidebar">` block and
+removes the chrome ribbon (blocks 1–2 replace it). After applying it you must:
+
+1. Add the CSS for `.sb-cycle*`, `.sb-queue`, `.sb-watch`, `.sb-session-*`, `.sb-undo`,
+   `.sb-cycle-chip` — v2 §2.10 gives exact measurements (288/64px rail, 30px rows,
+   10px/0.06em section labels, 5px dots, 11px mono badges radius 9px, 13px block gap,
+   0.5px dividers).
+2. Wire in `app.js`: `onQueue` → paint the cause rows; `#sbQueue` click → `setCause`;
+   `#sbUndo` → `undoLast()`; `#sbWatch` → `watchStatus()`; `#sbChip`/`#sbCycle` →
+   the week and progress; `#sbEvidence` still → `setView(state.lastEvidence)`.
+3. **Run `pytest tests/test_markup.py` immediately** — that file exists precisely
+   because this kind of sidebar rewrite has already eaten structural tags twice.
+4. Re-run the contrast harness and the overflow sweep.
+
+**v2 items beyond Phase 1, in its own priority order:** card retiering into four tiers
+with the rung-3 drawer; **the cost curve** (its headline idea — 112×46 glyph, and note
+it is better as inline SVG than v2's proposed new canvas renderer, which removes the
+frame-budget risk entirely since the card already renders its sparkline that way);
+override reason codes + plausibility guardrail + impact; batch grouping; density modes;
+card transitions; saved views; alert rules; notes; history timeline; command-palette
+actions; since-you-were-last-here; mobile approvals.
+
+**Already satisfied from v2, do not redo:** the accent split (violet, C9), hero figures
+in Instrument Sans with tabular figures (C9), the vocabulary CI check (C9), the
+watchlist and persistent draft count and ambient feed condition (C10).
 
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as

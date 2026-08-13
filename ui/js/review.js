@@ -38,6 +38,7 @@ window.Review = (() => {
     expanded: new Set(),
     editing: null,
     limit: 24,
+    cause: "",                   // sidebar filter: a headline-reason key
     cursor: 0,                   // keyboard position within the visible list
     keyboard: false,             // only paint the ring once a key has been used
   };
@@ -112,12 +113,80 @@ window.Review = (() => {
 
   const byId = (id) => rows.find((r) => r.id === id);
 
-  const forTab = (tab) => {
-    if (tab === "done") {
-      return rows.filter((r) => state.reviewed.has(r.id));
+  function matchesCause(r) {
+    const c = state.cause;
+    if (!c) return true;
+    if (c === "__skipped") return state.reviewed.get(r.id)?.action === "skipped";
+    if (c === "__rest") {
+      const g = byCause().find((x) => x.key === "__rest");
+      return !!g && g.members.includes(r.head.key);
     }
-    return cohort[tab].filter((id) => !state.reviewed.has(id)).map(byId).filter(Boolean);
+    return r.head.key === c;
+  }
+
+  const forTab = (tab) => {
+    const base = tab === "done"
+      ? rows.filter((r) => state.reviewed.has(r.id))
+      : cohort[tab].filter((id) => !state.reviewed.has(id)).map(byId).filter(Boolean);
+    return base.filter(matchesCause);
   };
+
+  /* The queue broken down by cause, each row carrying a count and the exposure
+     behind it.
+
+     Grouping by cause rather than by severity is the change v2 of the review asked
+     for, and it is right: a planner choosing where to start needs to know that three
+     data problems may be worth more than twelve promotion endings, and a severity
+     tier cannot tell them that. Counts alone are what every incumbent shows.
+
+     Rows are generated from the same headline-reason taxonomy the cards use, ordered
+     by exposure, so a reason added to plain.js appears here without further work. */
+  function byCause() {
+    const live = cohort.urgent.concat(cohort.check, cohort.later)
+      .filter((id) => !state.reviewed.has(id)).map(byId).filter(Boolean);
+
+    const groups = new Map();
+    for (const r of live) {
+      const k = r.head.key;
+      let g = groups.get(k);
+      if (!g) groups.set(k, (g = { key: k, label: Plain.short(k), tone: r.head.tone,
+                                   n: 0, exposure: 0 }));
+      g.n += 1;
+      g.exposure += r.risk;
+    }
+    const rowsOut = [...groups.values()].sort((a, b) => b.exposure - a.exposure || b.n - a.n);
+
+    // Capped at six with the remainder collapsed, per the report.
+    let head = rowsOut, rest = [];
+    if (rowsOut.length > 6) { head = rowsOut.slice(0, 5); rest = rowsOut.slice(5); }
+    if (rest.length) {
+      head = head.concat([{
+        key: "__rest", label: "Everything else", tone: "info",
+        n: rest.reduce((a, g) => a + g.n, 0),
+        exposure: rest.reduce((a, g) => a + g.exposure, 0),
+        members: rest.map((g) => g.key),
+      }]);
+    }
+
+    // Skipped earlier is a session fact rather than a reason, but it is the row a
+    // planner asks for most often, so it sits with them.
+    const skipped = [...state.reviewed.entries()]
+      .filter(([, d]) => d.action === "skipped").map(([id]) => id);
+    if (skipped.length) {
+      head = head.concat([{ key: "__skipped", label: "Skipped earlier", tone: "info",
+                            n: skipped.length, exposure: 0 }]);
+    }
+    return head;
+  }
+
+  function setCause(key) {
+    state.cause = state.cause === key ? "" : key;
+    state.cursor = 0;
+    // The skipped row is the one filter that shows already-reviewed items.
+    if (state.cause === "__skipped") state.tab = "done";
+    else if (state.tab === "done") state.tab = "urgent";
+    render();
+  }
 
   /** `left` is what is still on today's list; `behind` is everything in the tier
       that did not make the cut. They are reported separately and never added. */
@@ -467,6 +536,7 @@ window.Review = (() => {
     hooks.onCount?.(onList);
     hooks.onRibbon?.();
     hooks.onTiers?.(c);
+    hooks.onQueue?.(byCause());
 
     // Tabs. A tier holding more than a screenful shows "24 of 489" rather than
     // 489, so the number never implies more work than the list actually presents.
@@ -627,6 +697,24 @@ window.Review = (() => {
     if (k === "w") { ev.preventDefault(); state.keyboard = true; return act(r.id, "toggle"); }
   }
 
+  /* Undo the most recent decision.
+
+     The largest safety gap in the product: a planner who approves thirty items and
+     then learns the price feed was stale had no recourse. A Map preserves insertion
+     order, so the most recent decision is simply its last key -- but a *committed*
+     decision is not undone here, because the planner has already been told it was
+     final. */
+  function undoLast() {
+    const undoable = [...state.reviewed.keys()].filter((id) => !state.committed.has(id));
+    if (!undoable.length) return null;
+    const id = undoable[undoable.length - 1];
+    const r = byId(id);
+    state.reviewed.delete(id);
+    hooks.onUndo?.(r ? r.s : null);
+    render();
+    return r ? prettyItem(r.s.item) : id;
+  }
+
   /* -------------------------------------------------------------- actions */
 
   function act(id, action, value) {
@@ -735,7 +823,42 @@ window.Review = (() => {
     render();
   }
 
+  /** Exposure the session has covered, and the size of the day's list. Both are
+      figures the sidebar reports and neither existed anywhere before. */
+  function progress() {
+    const size = cohort.urgent.length;
+    const decidedIds = [...state.reviewed.keys()];
+    return {
+      decided: decidedIds.length,
+      size,
+      covered: decidedIds.map(byId).filter(Boolean).reduce((a, r) => a + r.risk, 0),
+      changed: [...state.reviewed.values()].filter((d) => d.action === "changed").length,
+      canUndo: decidedIds.some((id) => !state.committed.has(id)),
+    };
+  }
+
+  /** Watched products with the movement a planner pinned them to watch. */
+  function watchStatus(limit = 3) {
+    const out = [];
+    for (const id of watched) {
+      const s2 = D.series.find((x) => x.id === id);
+      if (!s2) continue;
+      const now = week1(s2);
+      const ch = Plain.change(now, priorWeek1(s2));
+      out.push({
+        id, name: prettyItem(s2.item), store: prettyStore(s2.store),
+        word: !ch || ch.dir === "flat" ? "steady"
+              : `${ch.pct != null ? (ch.dir === "up" ? "+" : "-") + ch.pct + "%" : ch.word}`,
+        dir: ch ? ch.dir : "flat",
+      });
+    }
+    out.sort((a, b) => (a.dir === "flat") - (b.dir === "flat"));
+    return { shown: out.slice(0, limit), total: out.length };
+  }
+
   return { init, render, decisions, counts, setScope, setWatched,
+           byCause, setCause, undoLast, progress, watchStatus,
+           get cause() { return state.cause; },
            get state() { return state; }, get scope() { return scope; },
            prettyItem, prettyStore, get rows() { return rows; },
            setTab(t) { state.tab = t; state.cursor = 0; render(); } };

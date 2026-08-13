@@ -51,37 +51,37 @@ window.Plain = (() => {
      Ordered by how much a planner should care. The first matching reason is the
      headline; the rest become secondary notes. */
   const REASONS = [
-    { key: "risk", label: "Likely to run out",
+    { key: "risk", label: "Likely to run out", short: "Running out",
       detail: "At the stock level currently planned, demand is expected to exceed supply before the next delivery.",
       action: "Raising the order protects sales. Lowering it saves cash but risks empty shelves.",
       term: "stock-out risk", tone: "urgent" },
 
-    { key: "censored", label: "May have been out of stock",
+    { key: "censored", label: "May have been out of stock", short: "Shelf looked empty",
       detail: "Some days recorded zero sales while the product was probably not on the shelf. Those zeros mean 'could not buy', not 'did not want' — so real demand is higher than the sales history suggests.",
       action: "The forecast has already been corrected for this. Worth a sanity check against what actually happened in store.",
       term: "censored demand", tone: "warn" },
 
-    { key: "stale", label: "Sales pattern changed",
+    { key: "stale", label: "Sales pattern changed", short: "Pattern changed",
       detail: "This product's behaviour shifted recently, so older history is a poorer guide than usual.",
       action: "If you know what changed — a price move, a new competitor, a range change — that context is worth more than the history.",
       term: "regime change", tone: "warn" },
 
-    { key: "swing", label: "Big change since last week",
+    { key: "swing", label: "Big change since last week", short: "Moved a lot",
       detail: "The forecast has moved substantially from the version you saw last week.",
       action: "Check the movement is explainable before acting on it.",
       term: "forecast revision", tone: "warn" },
 
-    { key: "wide", label: "Hard to predict",
+    { key: "wide", label: "Hard to predict", short: "Hard to predict",
       detail: "The range of plausible outcomes is unusually wide, so any single number here is a weak guide.",
       action: "Your own knowledge is worth more than usual on this one.",
       term: "wide prediction interval", tone: "info" },
 
-    { key: "cold-start", label: "Too new to judge",
+    { key: "cold-start", label: "Too new to judge", short: "Too new",
       detail: "Not enough sales history to learn this product's own pattern, so the forecast borrows from similar products.",
       action: "Expect to correct this one by hand for a few weeks.",
       term: "cold start", tone: "info" },
 
-    { key: "terminal", label: "Winding down",
+    { key: "terminal", label: "Winding down", short: "Winding down",
       detail: "Sales are trending towards zero, most likely a planned exit from the range.",
       action: "Order conservatively. Leftover stock on a discontinued line usually gets written off.",
       term: "terminal decline", tone: "info" },
@@ -96,6 +96,10 @@ window.Plain = (() => {
     return { key: "ok", label: "Looks fine", detail: "Nothing unusual about this one.",
              action: "No action needed.", term: "no exception", tone: "ok" };
   }
+
+  /** The short form, for the sidebar's 288px rows. Falls back to the full label so a
+      reason added later is never blank. */
+  const short = (key) => (REASON_BY_KEY[key]?.short) || REASON_BY_KEY[key]?.label || key;
 
   const others = (reasons) =>
     REASONS.filter((r) => reasons.includes(r.key)).slice(1);
@@ -273,7 +277,7 @@ window.Plain = (() => {
      "The forecast is not a black box. Each product shows which patterns in its own history pushed the number up or down, and by how much."],
   ];
 
-  return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, quality, confidence,
+  return { CLASS, CAT, catWord, REASONS, REASON_BY_KEY, headline, others, short, quality, confidence,
            service, feature, money, units, change, calibrate, qualityUnknown, GLOSSARY,
            get CUT() { return CUT; } };
 })();
