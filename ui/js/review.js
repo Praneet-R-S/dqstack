@@ -448,22 +448,61 @@ window.Review = (() => {
     const list = forTab(state.tab);
     const isFocus = state.keyboard && list[Math.min(state.cursor, list.length - 1)]?.id === r.id;
 
+    const pos = list.findIndex((x) => x.id === r.id);
+
+    /* Four rungs, in the order a decision is actually made.
+
+       The card previously presented one flat surface: a money figure, an identity, a
+       reason, a chart and four equal figures, all competing. A planner clearing
+       twenty-four of these reads the same layout twenty-four times, so what sits
+       where matters more here than anywhere else in the application.
+
+       rung 0  is this worth my attention -- position in the day's list, exposure
+       rung 1  what am I deciding -- the product, the number, and what it costs to
+               get it wrong
+       rung 2  why is it in front of me -- one sentence, and the shape behind it
+       rung 3  do it
+
+       Everything else moved into the drawer behind W. Six figures came off the face
+       of the card, and four of them explain the cost curve rather than the
+       decision, which is exactly what a second rung is for. */
     return `<article class="rc" data-id="${e(r.id)}" data-tone="${r.head.tone}"
              ${isFocus ? 'data-focus="true"' : ""}
              ${done ? `data-done="${e(done.action)}"` : ""}>
 
-      <header class="rc-top">
-        <div class="rc-risk" title="Profit expected to be lost if nothing changes">
-          <span class="rc-risk-amt">${Plain.money(r.risk)}</span>
-          <span class="rc-risk-cap">at risk</span>
-        </div>
+      <div class="rc-rung0">
+        ${pos >= 0 ? `<span class="rc-pos" title="Position in today's list">
+          ${pos + 1} of ${list.length}</span>` : ""}
+        <span class="rc-exp" title="Profit expected to be lost if nothing changes">
+          <b>${Plain.money(r.risk)}</b> at risk
+        </span>
+        ${s.ageWeeks != null && s.ageWeeks < 26
+          ? `<span class="rc-chip" title="How long this product has been selling here. A short history is why a forecast can be unsure.">
+               selling ${Math.max(1, Math.round(s.ageWeeks))} week${Math.round(s.ageWeeks) === 1 ? "" : "s"}</span>`
+          : ""}
+        <span class="rc-rung0-end">
+          ${r.pinned ? '<span class="rc-stamp watch">Watched</span>' : ""}
+          ${done ? `<span class="rc-stamp">${e(doneWord(done))}</span>` : ""}
+        </span>
+      </div>
+
+      <div class="rc-rung1">
         <div class="rc-id">
           <h3>${e(prettyItem(s.item))}</h3>
           <p>${e(prettyStore(s.store))} · ${e(catWord(s.cat))} · ${e(Plain.CLASS[s.cls]?.label || s.cls)}</p>
         </div>
-        ${r.pinned ? '<div class="rc-stamp watch">Watched</div>' : ""}
-        ${done ? `<div class="rc-stamp">${e(doneWord(done))}</div>` : ""}
-      </header>
+        <div class="rc-fig rc-fig-main">
+          <span class="rc-fig-cap">Forecast for next week</span>
+          <span class="rc-fig-val">${Plain.units(shown)}<small>units</small></span>
+          <span class="rc-fig-sub">likely between ${Plain.units(b.lo)} and ${Plain.units(b.hi)}</span>
+        </div>
+        <div class="rc-fig rc-fig-stock" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
+          <span class="rc-fig-cap">Stock up to</span>
+          <span class="rc-fig-val">${Plain.units(s.orderUpTo)}<small>units</small></span>
+          <span class="rc-fig-sub">covers ${COVER_DAYS} days, to ${svc.pct}% service</span>
+          ${costCurve(s)}
+        </div>
+      </div>
 
       <p class="rc-why" title="${e(r.head.term)}">
         <span class="rc-dot"></span><b>${e(r.head.label)}</b> — ${e(r.head.detail)}
@@ -472,30 +511,6 @@ window.Review = (() => {
       <div class="rc-chart">
         ${spark(s)}
         ${chartKey(s)}
-      </div>
-
-      <div class="rc-figs">
-        <div class="rc-fig rc-fig-main">
-          <span class="rc-fig-cap">Forecast for next week</span>
-          <span class="rc-fig-val">${Plain.units(shown)}<small>units</small></span>
-          <span class="rc-fig-sub">likely between ${Plain.units(b.lo)} and ${Plain.units(b.hi)}</span>
-        </div>
-        <div class="rc-fig">
-          <span class="rc-fig-cap">Versus last week</span>
-          <span class="rc-fig-word rc-${ch ? ch.dir : "flat"}">${ch ? e(ch.word) : "—"}</span>
-          <span class="rc-fig-sub">${e(changeNote(ch))}</span>
-        </div>
-        <div class="rc-fig rc-fig-stock" title="Order-up-to level: the predictive quantile of total demand over the review period plus lead time, at this product's own critical fractile.">
-          <span class="rc-fig-cap">Stock up to</span>
-          <span class="rc-fig-val">${Plain.units(s.orderUpTo)}<small>units</small></span>
-          <span class="rc-fig-sub">covers ${COVER_DAYS} days, to ${svc.pct}% service</span>
-          ${costCurve(s)}
-        </div>
-        <div class="rc-fig">
-          <span class="rc-fig-cap">Data quality</span>
-          <span class="rc-fig-word rc-q-${q.tone}">${e(q.word)}</span>
-          <span class="rc-fig-sub">confidence ${e(conf.word.toLowerCase())}</span>
-        </div>
       </div>
 
       ${editing ? `
@@ -522,7 +537,7 @@ window.Review = (() => {
         <button class="btn btn-quiet" data-act="open"
                 title="Open this product's own page">Full details</button>
         <button class="rc-more" data-act="toggle" aria-expanded="${open}">
-          ${open ? "Hide detail" : "Why this number?"}
+          ${open ? "Hide detail" : "Why this number?"} <span class="kbd">W</span>
         </button>
       </div>`}
 
@@ -536,8 +551,59 @@ window.Review = (() => {
     const e = U.esc;
     const drivers = (s.why || []).slice(0, 5);
     const maxAbs = Math.max(1e-9, ...drivers.map((d) => Math.abs(d.contribution)));
+    const ch = Plain.change(week1(s), priorWeek1(s));
+
+    /* The six figures the face of the card shed.
+
+       Ordered deliberately: the two that qualify the decision come first, then the
+       four that explain the cost curve's shape. A planner who has just been told
+       "running out costs 2.2x more than overstocking" and wants to know why finds
+       the margin and the shelf life here, which is where the answer actually is. */
+    const shed = `<section class="rc-shed">
+      <h4>The rest of the numbers</h4>
+      <div class="rc-figs">
+        <div class="rc-fig">
+          <span class="rc-fig-cap">Versus last week</span>
+          <span class="rc-fig-word rc-${ch ? ch.dir : "flat"}">${ch ? e(ch.word) : "—"}</span>
+          <span class="rc-fig-sub">${e(changeNote(ch))}</span>
+        </div>
+        <div class="rc-fig" title="${e(q.note)}">
+          <span class="rc-fig-cap">Data quality</span>
+          <span class="rc-fig-word rc-q-${q.tone}">${e(q.word)}</span>
+          <span class="rc-fig-sub">confidence ${e(conf.word.toLowerCase())}</span>
+        </div>
+        <div class="rc-fig">
+          <span class="rc-fig-cap">Sells for</span>
+          <span class="rc-fig-val">$${(s.price || 0).toFixed(2)}</span>
+          <span class="rc-fig-sub">costs $${(s.cost || 0).toFixed(2)} ·
+            ${Math.round((s.marginRate || 0) * 100)}% margin</span>
+        </div>
+        <div class="rc-fig" title="Why the two mistakes cost what they do: a product that keeps for years can be overstocked cheaply, one that spoils in a week cannot.">
+          <span class="rc-fig-cap">Keeps for</span>
+          <span class="rc-fig-val">${Plain.units(s.shelfLife || 0)}<small>days</small></span>
+          <span class="rc-fig-sub">${(s.shelfLife || 0) <= 14
+            ? "leftovers are usually wasted"
+            : (s.shelfLife || 0) <= 90 ? "some room to hold stock"
+            : "holding stock costs little"}</span>
+        </div>
+        <div class="rc-fig">
+          <span class="rc-fig-cap">Sales a year</span>
+          <span class="rc-fig-val">${Plain.money(s.revenue || 0)}</span>
+          <span class="rc-fig-sub">how much this line is worth to you</span>
+        </div>
+        <div class="rc-fig" title="${e(Plain.CLASS[s.cls]?.hint || "")}">
+          <span class="rc-fig-cap">How it sells</span>
+          <span class="rc-fig-word">${e(Plain.CLASS[s.cls]?.label || s.cls)}</span>
+          <span class="rc-fig-sub">${(s.adi || 0) <= 1.1
+            ? "sells most days"
+            : `a sale about every ${Math.round(s.adi || 1)} days`}</span>
+        </div>
+      </div>
+    </section>`;
 
     return `<div class="rc-detail">
+      ${shed}
+
       ${outcomeBlock(s, EVAL_DAYS)}
 
       ${drivers.length ? `
