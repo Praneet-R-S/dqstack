@@ -16,11 +16,17 @@ from __future__ import annotations
 
 import html.parser
 import pathlib
+import shutil
+import subprocess
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 INDEX = ROOT / "ui" / "index.html"
+
+MODULES = ["ui/js/app.js", "ui/js/review.js", "ui/js/catalog.js", "ui/js/plain.js",
+           "ui/js/duck.js", "ui/js/grid.js", "ui/js/chart.js", "ui/js/views.js",
+           "ui/js/util.js", "ui/js/truth.js", "ui/js/curve.js"]
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "source", "track", "wbr"}
@@ -109,10 +115,26 @@ def test_ids_referenced_by_app_js_all_exist():
     assert not missing, f"app.js references ids that do not exist: {missing}"
 
 
-@pytest.mark.parametrize("rel", ["ui/js/app.js", "ui/js/review.js", "ui/js/catalog.js",
-                                 "ui/js/plain.js", "ui/js/duck.js", "ui/js/grid.js",
-                                 "ui/js/chart.js", "ui/js/views.js", "ui/js/util.js",
-                                 "ui/js/truth.js", "ui/js/curve.js"])
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on PATH")
+@pytest.mark.parametrize("rel", MODULES)
+def test_every_module_parses(rel):
+    """A syntax error in any module takes the whole application down silently.
+
+    These files are plain scripts, not modules, so one bad token stops that file
+    executing and every later file that dereferences its global throws in turn. What
+    reaches the browser is a blank shell and a console the developer may not be
+    looking at. It happened here: a `const shown` collided with an existing binding
+    in the same function, and the first symptom was an unrelated "Review is not
+    defined" from app.js.
+
+    `node --check` catches the whole class in milliseconds.
+    """
+    proc = subprocess.run([shutil.which("node"), "--check", str(ROOT / rel)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, f"{rel} does not parse:\n{proc.stderr}"
+
+
+@pytest.mark.parametrize("rel", MODULES)
 def test_no_stray_control_characters(rel):
     """Heredoc round-trips have twice written a literal backspace or a raw BOM into
     a source file, where it is invisible in a diff and breaks a regex or a parse."""

@@ -217,6 +217,21 @@
         </button>
       </div>
 
+      <!-- The work bar: clear the small ones in one go, and work the list in
+           batches. Both act on the cohort fixed at build time, so neither can move
+           the finish line. Populated by review.js; hidden when it has nothing to
+           offer. -->
+      <div class="rv-work" id="rvWork" hidden>
+        <div class="rv-work-bulk">
+          <span class="rv-work-cap">Clear the small ones</span>
+          <span class="rv-work-btns" id="rvBulk"></span>
+        </div>
+        <div class="rv-work-batch">
+          <span class="rv-work-cap" id="rvBatchCap">Work in batches</span>
+          <span class="rv-work-btns" id="rvBatch"></span>
+        </div>
+      </div>
+
       <div class="rv-summary" id="rvSummary" hidden>
         <span class="rv-summary-text" id="rvSummaryText"></span>
         <span class="rv-summary-act">

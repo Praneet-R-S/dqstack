@@ -489,6 +489,53 @@
 .link-btn { margin-left: 0; }
 .rc-done-note { font-size: var(--fs-12); color: var(--text-tertiary); }
 
+/* ==================================================== the work bar
+
+   Two ways to spend attention where it is worth spending, above the list rather than
+   buried in a menu.
+
+   A planner with twenty-four cards and forty minutes spends the same click on a $9
+   item as on a $16,000 one, which is the wrong allocation of the only scarce thing in
+   the process. Approve-all fixes that by discarding the judgement; a threshold keeps
+   the judgement exactly where the money is. Each button carries its own count, so the
+   proposition is stated before it is accepted.
+
+   Batching is a window over the cohort, never a re-slice of it. The counts and the
+   progress denominator keep describing the whole day's work, because a denominator
+   that moves while you work is the failure the fixed cohort exists to prevent. */
+.rv-work {
+  display: flex; flex-wrap: wrap; gap: var(--s5) var(--s7);
+  align-items: center; padding: var(--s5) var(--s6);
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card);
+}
+.rv-work-bulk, .rv-work-batch {
+  display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; min-width: 0;
+}
+.rv-work-batch { margin-left: auto; }
+.rv-work-cap {
+  font-size: var(--fs-11); color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+}
+.rv-work-btns { display: flex; gap: var(--s3); flex-wrap: wrap; }
+.rv-work-btn {
+  display: inline-flex; align-items: center; gap: var(--s3); cursor: pointer;
+  font-size: var(--fs-12); padding: var(--s3) var(--s5);
+  border-radius: var(--r-pill); border: 1px solid var(--border-strong);
+  background: var(--bg-surface); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.rv-work-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.rv-work-btn:active { transform: translateY(1px); }
+.rv-work-btn[aria-pressed="true"] {
+  background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--e1);
+  border-color: var(--ui-accent);
+}
+.rv-work-n {
+  font-family: var(--font-num); font-size: var(--fs-11); font-weight: 600;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+
 /* ---- inline edit ------------------------------------------------------
    A bare number field became a number, a reason and a guardrail. The reason is
    required because an optional audit field is an empty audit field, and the guardrail

@@ -44,6 +44,7 @@ window.Review = (() => {
     editValue: null,
     limit: 24,
     cause: "",                   // sidebar filter: a headline-reason key
+    batch: 0,                    // 0 = whole list; otherwise how many at a time
     cursor: 0,                   // keyboard position within the visible list
     keyboard: false,             // only paint the ring once a key has been used
   };
@@ -118,6 +119,9 @@ window.Review = (() => {
 
   const byId = (id) => rows.find((r) => r.id === id);
 
+  /* One number per action, so undo can reverse a bulk approve as a single unit. */
+  let seqCounter = 0;
+
   function matchesCause(r) {
     const c = state.cause;
     if (!c) return true;
@@ -134,6 +138,15 @@ window.Review = (() => {
       ? rows.filter((r) => state.reviewed.has(r.id))
       : cohort[tab].filter((id) => !state.reviewed.has(id)).map(byId).filter(Boolean);
     return base.filter(matchesCause);
+  };
+
+  /* What is actually on screen: the tab's list, cut to the batch window if one is
+     set. Kept separate from forTab() on purpose -- counts, the progress denominator
+     and the "3 of 24" readout all describe the day's work and must not shrink when
+     the planner chooses to look at eight of it at a time. */
+  const shownList = () => {
+    const all = forTab(state.tab);
+    return state.batch > 0 ? all.slice(0, state.batch) : all;
   };
 
   /* The queue broken down by cause, each row carrying a count and the exposure
@@ -450,8 +463,12 @@ window.Review = (() => {
     const secondary = Plain.others(s.reasons);
     const shown = done && done.action === "changed" ? done.value : now;
 
+    // Focus tracks what is on screen; position tracks the day's whole list, so
+    // batching changes which cards are visible and never what "3 of 24" means.
+    const onScreen = shownList();
     const list = forTab(state.tab);
-    const isFocus = state.keyboard && list[Math.min(state.cursor, list.length - 1)]?.id === r.id;
+    const isFocus = state.keyboard &&
+      onScreen[Math.min(state.cursor, onScreen.length - 1)]?.id === r.id;
 
     const pos = list.findIndex((x) => x.id === r.id);
 
@@ -926,11 +943,12 @@ window.Review = (() => {
 
     renderSummary();
 
-    const list = forTab(state.tab);
+    const list = shownList();
     if (state.cursor >= list.length) state.cursor = Math.max(0, list.length - 1);
     $("rvList").innerHTML = list.length
       ? list.map(card).join("")
       : emptyState(c);
+    paintWork();
 
     if (state.editing) {
       const inp = $("rvList").querySelector(".rc-input");
@@ -941,6 +959,49 @@ window.Review = (() => {
         paintEditFeedback(inp.closest(".rc"));
       }
     }
+  }
+
+  /* The work bar. Two ways to spend attention where it is worth spending.
+
+     Each bulk button states its own count and total before it is pressed, because
+     "approve 9 items worth $214 between them" and "approve all" are different
+     propositions and only one of them is honest. The bar hides itself when it has
+     nothing to offer -- a list of three items does not need batching, and a list
+     where every item is small does not need a threshold, it needs a different tool. */
+  const BATCH_SIZES = [5, 10];
+
+  function paintWork() {
+    const bar = $("rvWork");
+    if (!bar) return;
+    if (state.tab === "done") { bar.hidden = true; return; }
+
+    const offers = bulkOffers();
+    const all = forTab(state.tab);
+    const canBatch = all.length > BATCH_SIZES[0];
+    bar.hidden = !offers.length && !canBatch;
+    if (bar.hidden) return;
+
+    const bulk = $("rvBulk");
+    bulk.parentElement.hidden = !offers.length;
+    bulk.innerHTML = offers.map((o) => `
+      <button class="rv-work-btn" data-bulk="${o.limit}"
+              title="Approves the ${o.n} item${o.n === 1 ? "" : "s"} on this list with less than ${
+                Plain.money(o.limit)} of profit at risk — ${Plain.money(o.sum)} between them, ${
+                Math.round(o.share * 100)}% of what is at stake here. One press of Undo reverses all of it.">
+        ${o.n} under ${Plain.money(o.limit)}
+        <span class="rv-work-n">${Plain.money(o.sum)}</span>
+      </button>`).join("");
+
+    const batch = $("rvBatch");
+    batch.parentElement.hidden = !canBatch;
+    $("rvBatchCap").textContent = state.batch
+      ? `Showing ${Math.min(state.batch, all.length)} of ${all.length}`
+      : "Work in batches";
+    batch.innerHTML = BATCH_SIZES.filter((n) => n < all.length).map((n) => `
+      <button class="rv-work-btn" data-batch="${n}" aria-pressed="${state.batch === n}"
+              title="Show ${n} at a time. The rest of today's list stays on it — this only changes how much is on screen.">
+        ${n} at a time
+      </button>`).join("");
   }
 
   /* Decisions used to accumulate with nowhere to go: you could clear the whole
@@ -1044,7 +1105,7 @@ window.Review = (() => {
     /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || "");
 
   function moveCursor(delta) {
-    const list = forTab(state.tab);
+    const list = shownList();
     if (!list.length) return;
     state.keyboard = true;
     state.cursor = Math.max(0, Math.min(list.length - 1, state.cursor + delta));
@@ -1054,7 +1115,7 @@ window.Review = (() => {
   }
 
   function focused() {
-    const list = forTab(state.tab);
+    const list = shownList();
     return list[Math.min(state.cursor, list.length - 1)] || null;
   }
 
@@ -1101,12 +1162,120 @@ window.Review = (() => {
   function undoLast() {
     const undoable = [...state.reviewed.keys()].filter((id) => !state.committed.has(id));
     if (!undoable.length) return null;
-    const id = undoable[undoable.length - 1];
-    const r = byId(id);
-    state.reviewed.delete(id);
-    hooks.onUndo?.(r ? r.s : null);
+
+    /* Undo the last *act*, not the last row.
+
+       Once one click can approve nine items, undoing one of them nine times is not an
+       undo, it is a chore -- and a planner who bulk-approved by mistake would give up
+       partway and be left in a state they never chose. Every decision carries the
+       sequence number of the action that made it, so a bulk approve is one unit here
+       exactly as it was one click there. */
+    const last = state.reviewed.get(undoable[undoable.length - 1]);
+    const seq = last && last.seq;
+    const group = seq
+      ? undoable.filter((id) => state.reviewed.get(id).seq === seq)
+      : [undoable[undoable.length - 1]];
+
+    const names = [];
+    for (const id of group) {
+      const r = byId(id);
+      state.reviewed.delete(id);
+      hooks.onUndo?.(r ? r.s : null);
+      if (r) names.push(prettyItem(r.s.item));
+    }
     render();
-    return r ? prettyItem(r.s.item) : id;
+    if (!names.length) return group[0];
+    return names.length === 1
+      ? names[0]
+      : `${names.length} decisions`;
+  }
+
+  /* ---- clearing the small ones in one go --------------------------------
+
+     A planner with twenty-four cards and forty minutes spends the same click on a
+     $9 item as on a $16,000 one, which is the wrong allocation of the only scarce
+     thing in the process. Approve-all would fix that by throwing away the judgement
+     entirely; a threshold keeps the judgement exactly where the money is.
+
+     The offers are computed from the cohort actually in front of the planner, and
+     each states its own count and total before it is pressed. A button that says
+     "approve 9 items worth $214 between them" is a different proposition from one
+     that says "approve all", and only one of them is honest. */
+  /* Thresholds come from the list, not from round numbers someone liked.
+
+     Fixed steps of $10 / $50 / $250 were the first attempt and they were useless
+     here. The urgent tier is ranked by exposure, so its cohort runs $377 to $1,861 --
+     a narrow band of uniformly large numbers. Every step below $500 cleared nothing
+     at all, and $1,000 cleared 88% of the items and 72% of the money, which is
+     approve-almost-all wearing a threshold as a disguise.
+
+     So candidates are percentiles of the list in front of the planner, rounded to a
+     figure a person would say out loud, and an offer only survives if it is
+     genuinely the small tail: at most 45% of the items and at most 15% of the money.
+     A list with no small items -- which is what a well-ranked urgent tier looks
+     like -- correctly offers nothing, and the bar hides that half of itself. */
+  const MAX_ITEM_SHARE = 0.45;
+  const MAX_MONEY_SHARE = 0.15;
+
+  /** Round up to something sayable: 460, not 459.3; 2.5k, not 2,431. */
+  function niceUp(v) {
+    if (!(v > 0)) return 0;
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    const step = mag / 2;
+    return Math.ceil(v / step) * step;
+  }
+
+  function bulkOffers() {
+    const live = forTab(state.tab).filter((r) => !state.reviewed.has(r.id));
+    if (live.length < 6) return [];
+    const risks = live.map((r) => r.risk).sort((a, b) => a - b);
+    const total = risks.reduce((a, b) => a + b, 0);
+    if (!(total > 0)) return [];
+    const at = (q) => risks[Math.min(risks.length - 1, Math.floor(risks.length * q))];
+
+    const cands = [...new Set([0.2, 0.35, 0.45].map((q) => niceUp(at(q))))]
+      .filter((v) => v > 0).sort((a, b) => a - b);
+
+    const out = [];
+    for (const t of cands) {
+      const hit = live.filter((r) => r.risk < t);
+      if (hit.length < 2 || hit.length > live.length * MAX_ITEM_SHARE) continue;
+      const sum = hit.reduce((a, r) => a + r.risk, 0);
+      if (sum > total * MAX_MONEY_SHARE) continue;
+      out.push({ limit: t, n: hit.length, sum, share: sum / total,
+                 ids: hit.map((r) => r.id) });
+    }
+    // Distinct counts only: three buttons clearing 9, 9 and 9 items is one button.
+    const seen = new Set();
+    return out.filter((o) => (seen.has(o.n) ? false : (seen.add(o.n), true))).slice(0, 3);
+  }
+
+  function bulkApprove(limit) {
+    const offer = bulkOffers().find((o) => o.limit === limit);
+    if (!offer) return null;
+    const seq = ++seqCounter;
+    for (const id of offer.ids) state.reviewed.set(id, { action: "approved", seq, bulk: true });
+    render();
+    return offer;
+  }
+
+  /* ---- working the list in batches --------------------------------------
+
+     A window over the cohort, never a re-slice of it. The cohort's order and
+     membership were fixed at build time and this only limits how much of it is on
+     screen at once, so the denominator in "4 of 24" cannot move -- which was the
+     failure that made the fixed cohort necessary in the first place. */
+  function batchInfo() {
+    const all = forTab(state.tab);
+    const size = state.batch;
+    if (!size || all.length <= size) return { size, total: 1, index: 0, of: all.length };
+    return { size, total: Math.ceil(all.length / size), index: 0, of: all.length };
+  }
+
+  function setBatch(n) {
+    state.batch = state.batch === n ? 0 : n;
+    state.cursor = 0;
+    render();
   }
 
   /* -------------------------------------------------------------- actions */
@@ -1133,8 +1302,11 @@ window.Review = (() => {
       return render();
     }
 
-    if (action === "approve") state.reviewed.set(id, { action: "approved" });
-    if (action === "skip") state.reviewed.set(id, { action: "skipped" });
+    // Its own sequence number, so undo treats it as one unit -- the same mechanism
+    // that lets a bulk approve be undone in one press.
+    const seq = ++seqCounter;
+    if (action === "approve") state.reviewed.set(id, { action: "approved", seq });
+    if (action === "skip") state.reviewed.set(id, { action: "skipped", seq });
     if (action === "changed") {
       // A change with no reason is not saved. The chips enforce this in the UI; this
       // is the same rule at the one place every path has to pass through.
@@ -1143,7 +1315,8 @@ window.Review = (() => {
         return;
       }
       state.reviewed.set(id, {
-        action: "changed", value, reason: meta.reason, note: (meta.note || "").trim(),
+        action: "changed", value, seq,
+        reason: meta.reason, note: (meta.note || "").trim(),
       });
       hooks.onChange?.(r.s, value);
     }
@@ -1204,7 +1377,7 @@ window.Review = (() => {
       }
       if (a === "open") return hooks.onOpenProduct?.(id);
       // A mouse click also moves the keyboard cursor, so the two never disagree.
-      const idx = forTab(state.tab).findIndex((r) => r.id === id);
+      const idx = shownList().findIndex((r) => r.id === id);
       if (idx >= 0) state.cursor = idx;
       act(id, a);
     });
@@ -1247,6 +1420,21 @@ window.Review = (() => {
       b.addEventListener("click", () => {
         state.tab = b.dataset.tab; state.cursor = 0; render();
       }));
+
+    $("rvWork").addEventListener("click", (ev) => {
+      const bulk = ev.target.closest("[data-bulk]");
+      if (bulk) {
+        const o = bulkApprove(+bulk.dataset.bulk);
+        if (o) {
+          hooks.onToast?.(
+            `Approved ${o.n} item${o.n === 1 ? "" : "s"} under ${Plain.money(o.limit)} ` +
+            `· ${Plain.money(o.sum)} between them · one Undo reverses all of it`);
+        }
+        return;
+      }
+      const b = ev.target.closest("[data-batch]");
+      if (b) setBatch(+b.dataset.batch);
+    });
 
     $("rvCommit").addEventListener("click", () => {
       const rows = decisions({ pendingOnly: true });
@@ -1307,6 +1495,7 @@ window.Review = (() => {
   return { init, render, decisions, counts, setScope, setWatched, chartKey,
            outcomeBlock, blendBlock, costCurve, get evalDays() { return EVAL_DAYS; },
            byCause, setCause, undoLast, progress, watchStatus,
+           bulkOffers, bulkApprove, setBatch, batchInfo,
            get cause() { return state.cause; },
            get state() { return state; }, get scope() { return scope; },
            prettyItem, prettyStore, get rows() { return rows; },
