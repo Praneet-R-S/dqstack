@@ -521,6 +521,11 @@
         ${g.exposure > 0 ? `<span class="sb-q-x">${Plain.money(g.exposure)}</span>` : ""}
       </button>`).join("")
       || '<p class="sb-empty">Queue is clear</p>';
+    const tag = $("sbQueueTag");
+    if (tag) {
+      const n = (groups || []).reduce((a, g) => a + g.n, 0);
+      tag.textContent = n ? String(n) : "";
+    }
   }
 
   /* ---- block 5: watching ------------------------------------------------- */
@@ -538,6 +543,149 @@
         (total > shown.length
           ? `<button class="sb-w-all" data-watch-all="1">See all ${total}</button>` : "")
       : '<p class="sb-empty">Star a product to watch it</p>';
+    const tag = $("sbWatchTag");
+    if (tag) tag.textContent = total ? String(total) : "";
+  }
+
+  /* ==================================================== the inventory blocks
+
+     The rail was eight blocks of the planner's decision work. These three make it a
+     store manager's rail as well, and all three read from data that already existed:
+     the order-up-to levels the pipeline computes, the stock counts the planner
+     enters, and the ABC/XYZ classification that has been on every product since the
+     first run without ever reaching a screen. */
+
+  /** Products currently in scope, which is what every figure in this rail describes.
+      Scope is the store switcher, so the rail answers "my store", not "the company". */
+  const scoped = () =>
+    D.series.filter((s) => !Review.scope || s.store === Review.scope);
+
+  /* ---- replenishment: what today's order costs -------------------------- */
+  function paintOrderBlock() {
+    const host = $("sbOrder");
+    if (!host) return;
+    const sum = Stock.summary(scoped());
+
+    const badge = $("sbOrderBadge");
+    if (badge) {
+      badge.textContent = sum.toOrderLines;
+      badge.hidden = sum.toOrderLines === 0;
+    }
+    $("sbOrderTag").textContent = sum.toOrderLines
+      ? Plain.money(sum.toOrderCost) : "";
+
+    /* The counted share is the honest frame around every other figure here. A
+       confident order total over a half-counted range is the number most likely to
+       be believed and most likely to be wrong. */
+    const pct = sum.total ? Math.round((sum.counted / sum.total) * 100) : 0;
+
+    /* Before anything is counted there is no order to report, and "$0 to spend"
+       reads as a broken screen rather than as an honest zero. What *is* known
+       without a single count is what a full shelf of this range is worth, so that is
+       the figure the block leads with until counting starts. It is the same
+       arithmetic the order total will use, against a stock level of nothing. */
+    const fresh = sum.counted === 0;
+    const fullShelf = scoped().reduce(
+      (a, s) => a + (s.orderUpTo || 0) * (s.cost || 0), 0);
+
+    host.innerHTML = `
+      <button class="sb-ord-hero" data-order-go="${fresh ? "uncounted" : "attention"}"
+              title="${fresh
+                ? "What it would cost to fill every shelf in scope to its target. Count what you already have and this becomes the order."
+                : "Open the order list"}">
+        <span class="sb-ord-fig">${Plain.money(fresh ? fullShelf : sum.toOrderCost)}</span>
+        <span class="sb-ord-cap">${fresh
+          ? `full shelf · ${Plain.units(sum.targetUnits)} units`
+          : `${sum.toOrderLines} line${sum.toOrderLines === 1 ? "" : "s"} · ${
+              Plain.units(sum.toOrderUnits)} units`}</span>
+      </button>
+      <div class="sb-ord-count" title="${sum.counted} of ${sum.total} products have a stock count. Only counted products can produce an order quantity.">
+        <div class="sb-ord-track"><i style="width:${Math.max(pct, sum.counted ? 1 : 0)}%"></i></div>
+        <span>${sum.counted
+          ? `${sum.counted.toLocaleString()} of ${sum.total.toLocaleString()} counted`
+          : "none counted yet"}</span>
+      </div>
+      ${sum.uncounted ? `
+        <button class="sb-ord-warn" data-order-go="uncounted"
+                title="A product that has never been counted is not a product that needs nothing">
+          ${sum.uncounted.toLocaleString()} still to count
+        </button>` : ""}`;
+  }
+
+  /* ---- stock cover: how long the shelves last --------------------------- */
+  const COVER_ROWS = [
+    { key: "critical", tone: "--state-risk" },
+    { key: "low", tone: "--state-attention" },
+    { key: "ok", tone: "--state-excess" },
+    { key: "over", tone: "--series-forecast" },
+  ];
+
+  function paintCoverBlock() {
+    const host = $("sbCover");
+    if (!host) return;
+    const sum = Stock.summary(scoped());
+    const counted = sum.counted;
+
+    $("sbCoverTag").textContent = counted ? `${counted} counted` : "";
+
+    if (!counted) {
+      host.innerHTML =
+        '<p class="sb-empty">Count some stock and the shelves report themselves here</p>';
+      return;
+    }
+    host.innerHTML = COVER_ROWS.map((r) => {
+      const n = sum[r.key] || 0;
+      const w = Stock.COVER_WORD[r.key];
+      return `<button data-order-go="${r.key === "over" ? "over" : "attention"}"
+                      title="${U.esc(w.note)}">
+        <span class="sb-q-dot" style="background:var(${r.tone})"></span>
+        <span class="sb-q-label">${U.esc(w.word)}</span>
+        <span class="sb-q-n">${n}</span>
+      </button>`;
+    }).join("") +
+    (sum.perishRisk ? `
+      <button class="sb-perish" data-order-go="over"
+              title="Overstocked products that keep for a month or less. This is the stock most likely to be thrown away rather than sold.">
+        ${sum.perishRisk} perishable${sum.perishRisk === 1 ? "" : "s"} overstocked ·
+        ${Plain.money(sum.perishCost)}
+      </button>` : "");
+  }
+
+  /* ---- range mix: ABC against XYZ --------------------------------------- */
+  function paintMixBlock() {
+    const host = $("sbMix");
+    if (!host) return;
+    const mix = Stock.abcMix(scoped());
+    $("sbMixTag").textContent = `${mix.n.toLocaleString()} lines`;
+
+    /* A three-by-three grid rather than two lists, because the pairing is the point:
+       an A product that is hard to predict needs a person, and a C product that is
+       hard to predict needs a rule. Shade carries share of stock value, so the eye
+       lands on where the money actually sits. */
+    const max = Math.max(...Object.values(mix.cell).map((c) => c.value), 1);
+    const cells = [];
+    for (const a of "ABC") {
+      for (const x of "XYZ") {
+        const c = mix.cell[a + x] || { n: 0, value: 0 };
+        const share = mix.value ? c.value / mix.value : 0;
+        cells.push(`<button class="sb-mix-cell" data-mix="${a}${x}"
+          style="--fill:${(c.value / max).toFixed(3)}"
+          title="${a}${x} — ${U.esc(Stock.ABC_WORD[a])}, ${U.esc(Stock.XYZ_WORD[x])}. ${
+            c.n} product${c.n === 1 ? "" : "s"}, ${Plain.money(c.value)} of stock value (${
+            Math.round(share * 100)}%). ${U.esc(Stock.classAdvice(a, x))}">
+          <span class="sb-mix-n">${c.n}</span>
+        </button>`);
+      }
+    }
+    host.innerHTML = `
+      <div class="sb-mix-grid" role="group" aria-label="Range mix by value and predictability">
+        <span class="sb-mix-corner" aria-hidden="true"></span>
+        <span class="sb-mix-h">X</span><span class="sb-mix-h">Y</span><span class="sb-mix-h">Z</span>
+        <span class="sb-mix-h" title="${U.esc(Stock.ABC_WORD.A)}">A</span>${cells.slice(0, 3).join("")}
+        <span class="sb-mix-h" title="${U.esc(Stock.ABC_WORD.B)}">B</span>${cells.slice(3, 6).join("")}
+        <span class="sb-mix-h" title="${U.esc(Stock.ABC_WORD.C)}">C</span>${cells.slice(6, 9).join("")}
+      </div>
+      <p class="sb-mix-key">Down: what it earns you. Across: how predictable it is.</p>`;
   }
 
   /* ---- block 6: saved views ---------------------------------------------
@@ -673,6 +821,7 @@
   function paintSidebar() {
     paintDrafts(); paintSession(); paintHealth(); paintCycle(); paintWatchBlock();
     paintViews(Review.viewList());
+    paintOrderBlock(); paintCoverBlock(); paintMixBlock();
   }
 
 
@@ -957,6 +1106,34 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  /** The purchase order, as a file.
+
+      Separate from exportDecisions because it is a different document for a different
+      reader: that one is a record of judgements a planner made, this one is a list of
+      goods and a price, which is what a buyer sends to a supplier. Mixing them would
+      make both worse. Only counted lines with a positive quantity appear, because an
+      order line for a product nobody has counted is a guess with a price on it. */
+  function exportOrder(rows) {
+    if (!rows.length) return toast("Nothing to order yet — enter some stock counts first");
+    const head = ["product", "store", "category", "abc_xyz", "on_hand_units",
+                  "stock_up_to_units", "order_units", "unit_cost", "line_cost",
+                  "days_of_cover", "status", "forecast_made", "covers_from"];
+    const lines = [head.join(",")];
+    let total = 0;
+    for (const r of rows) {
+      total += +r.lineCost;
+      lines.push([r.product, r.store, r.category, r.classification, r.onHand,
+                  r.target, r.order, r.unitCost, r.lineCost, r.daysCover, r.status,
+                  D.run.origin, D.dates.future[0]].map(csvCell).join(","));
+    }
+    lines.push(["TOTAL", "", "", "", "", "",
+                rows.reduce((a, r) => a + r.order, 0), "", total.toFixed(2),
+                "", "", D.run.origin, D.dates.future[0]].map(csvCell).join(","));
+    download(`purchase-order-${D.run.origin}.csv`, lines.join("\r\n"));
+    toast(`${rows.length} line${rows.length === 1 ? "" : "s"} · ${U.money(total)} · ` +
+          "this file is the order — nothing has been sent to a supplier");
+  }
+
   function exportDecisions(rows) {
     if (!rows.length) return toast("Nothing to export yet");
     const cat = Catalog.state;
@@ -1133,6 +1310,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     else if (v === "workspace") requestAnimationFrame(() => { Grid.resize(); Chart.resize(); });
     else if (v === "today") Review.render();
     else if (v === "products") Catalog.renderDetail();
+    else if (v === "orders") Orders.render();
     paintEvidenceTabs(v);
     if (typeof paintSidebar === "function") paintSidebar();
     closeMenu();
@@ -1409,6 +1587,16 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
     /* Catalog shares Grid's pending set, like Review does, so a number changed on
        a product page is the same draft edit the spreadsheet shows. */
+    Stock.init(D.run);
+
+    Orders.init(D, {
+      onOpenProduct: (id) => { setView("products"); Catalog.reveal(id); },
+      // A stock count changes the order block, the cover block and the badge, so the
+      // whole rail repaints rather than three call sites remembering to.
+      onStockChange: paintSidebar,
+      onExport: exportOrder,
+    });
+
     Catalog.init(D, {
       onToast: toast,
       onWatch: paintWatch,
@@ -1491,6 +1679,50 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
       const w = e.target.closest("[data-watch]");
       if (w) { setView("products"); Catalog.reveal(w.dataset.watch); }
     });
+
+    /* ---- the inventory blocks. Every figure in them is a way into the order list
+       filtered to what that figure counts, so a number in the rail is never just a
+       number -- it is the door to the list behind it. */
+    for (const id of ["sbOrder", "sbCover"]) {
+      $(id).addEventListener("click", (e) => {
+        const b = e.target.closest("[data-order-go]");
+        if (!b) return;
+        setView("orders");
+        // The order list follows the rail's scope, so the two never disagree about
+        // which store is being talked about.
+        Orders.setStore(Review.scope || "");
+        Orders.focus(b.dataset.orderGo);
+      });
+    }
+
+    /* The range mix opens Products filtered to that cell. ABC/XYZ is a way of
+       deciding how much attention a group deserves, so the useful next step is
+       seeing the group, not a number about it. */
+    $("sbMix").addEventListener("click", (e) => {
+      const c = e.target.closest("[data-mix]");
+      if (!c) return;
+      setView("products");
+      Catalog.filterClass(c.dataset.mix);
+    });
+
+    /* Which sections are open is a preference: a buyer lives in the replenishment
+       block, a demand planner lives in the queue, and the rail now holds more than
+       fits at once. Remembered per browser like the watchlist. */
+    const RAIL_KEY = "dq.rail";
+    const secs = [...document.querySelectorAll(".sb-sec")];
+    try {
+      const open = JSON.parse(localStorage.getItem(RAIL_KEY) || "null");
+      if (Array.isArray(open)) {
+        for (const d of secs) d.open = open.includes(d.id);
+      }
+    } catch (_) { /* a corrupt preference is not worth failing the boot over */ }
+    const saveRail = () => {
+      try {
+        localStorage.setItem(RAIL_KEY,
+          JSON.stringify(secs.filter((d) => d.open).map((d) => d.id)));
+      } catch (_) {}
+    };
+    for (const d of secs) d.addEventListener("toggle", saveRail);
 
     /* ---- saved views. One delegated listener, because the block is rebuilt on
        every render and per-button handlers would go stale. */

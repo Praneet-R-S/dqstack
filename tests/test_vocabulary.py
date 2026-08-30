@@ -34,7 +34,8 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SURFACES = ("ui/js/plain.js", "ui/js/review.js", "ui/js/catalog.js", "ui/js/truth.js")
+SURFACES = ("ui/js/plain.js", "ui/js/review.js", "ui/js/catalog.js",
+            "ui/js/truth.js", "ui/js/stock.js", "ui/js/orders.js")
 
 # Whole words only, so "SBA" does not fire inside "rvProgressBar" and "ADI" does not
 # fire inside "predictable".

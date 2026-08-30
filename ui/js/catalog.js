@@ -41,6 +41,7 @@ window.Catalog = (() => {
     query: "",
     onlyWatched: false,
     cat: "",
+    abcxyz: "",                    // one cell of the range mix, set from the rail
     flagged: false,
     store: "",
     sort: "name",
@@ -78,6 +79,9 @@ window.Catalog = (() => {
     const q = state.query.trim().toLowerCase();
     const out = all.filter((s) => {
       if (state.onlyWatched && !state.watched.has(s.id)) return false;
+      // An ABC/XYZ cell from the rail: value class and predictability class together.
+      if (state.abcxyz &&
+          (s.abc || "C") + (s.xyz || "Z") !== state.abcxyz) return false;
       if (state.cat && s.cat !== state.cat) return false;
       if (state.store && s.store !== state.store) return false;
       if (state.flagged && !s.reasons.length) return false;
@@ -763,5 +767,22 @@ window.Catalog = (() => {
              renderList(); renderDetail();
            },
            clearWatchFilter() { state.onlyWatched = false; renderList(); },
+
+           /** Show one cell of the range mix. Other filters are cleared, because
+               arriving from the rail with a stale category filter still applied would
+               show a count that does not match the one just clicked. */
+           filterClass(code) {
+             state.abcxyz = state.abcxyz === code ? "" : code;
+             state.onlyWatched = false; state.flagged = false;
+             state.cat = ""; state.query = ""; state.limit = 200;
+             const search = $("catSearch"); if (search) search.value = "";
+             document.querySelectorAll("#catFilters [data-cat]").forEach((b) =>
+               b.setAttribute("aria-pressed", String(b.dataset.cat === "")));
+             $("catFlagged")?.setAttribute("aria-pressed", "false");
+             renderList(); renderDetail();
+             hooks.onToast?.(state.abcxyz
+               ? `${code} — ${Stock.ABC_WORD[code[0]]}, ${Stock.XYZ_WORD[code[1]]}`
+               : "Showing the whole range again");
+           },
            get state() { return state; }, get all() { return all; } };
 })();

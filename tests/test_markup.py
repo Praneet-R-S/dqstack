@@ -26,7 +26,8 @@ INDEX = ROOT / "ui" / "index.html"
 
 MODULES = ["ui/js/app.js", "ui/js/review.js", "ui/js/catalog.js", "ui/js/plain.js",
            "ui/js/duck.js", "ui/js/grid.js", "ui/js/chart.js", "ui/js/views.js",
-           "ui/js/util.js", "ui/js/truth.js", "ui/js/curve.js"]
+           "ui/js/util.js", "ui/js/truth.js", "ui/js/curve.js", "ui/js/stock.js",
+           "ui/js/orders.js"]
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "source", "track", "wbr"}
@@ -93,26 +94,44 @@ def test_the_landmarks_the_shell_depends_on_are_present():
         assert needle in src, f"index.html lost {needle}"
     # Every module the renderers dereference at paint time. A dropped tag here is a
     # ReferenceError inside a template literal, which renders as a blank card.
-    for src_file in ("js/plain.js", "js/truth.js", "js/curve.js", "js/util.js",
-                     "js/review.js", "js/catalog.js", "js/app.js"):
+    for src_file in ("js/plain.js", "js/truth.js", "js/curve.js", "js/stock.js",
+                     "js/util.js", "js/review.js", "js/orders.js", "js/catalog.js",
+                     "js/app.js"):
         assert f'src="{src_file}' in src, f"index.html no longer loads {src_file}"
-    for view in ("today", "products", "workspace", "evidence", "decisions", "pipeline"):
+    for view in ("today", "orders", "products", "workspace", "evidence",
+                 "decisions", "pipeline"):
         assert f'id="view-{view}"' in src, f"index.html lost view-{view}"
 
 
-def test_ids_referenced_by_app_js_all_exist():
-    """A single stale `$("id")` in boot() throws and silently aborts every binding
-    after it, which presents as several unrelated features being broken at once."""
+@pytest.mark.parametrize("rel", MODULES)
+def test_ids_referenced_by_js_all_exist(rel):
+    """A single stale `$("id")` throws and silently aborts everything after it.
+
+    This checked app.js alone until orders.js shipped with a `$("orUncounted")` left
+    over from an earlier draft of its header. The throw happened inside the render,
+    so the whole order list came up empty with nothing on screen to say why — and the
+    console named a line in a file the developer was not looking at.
+
+    The failure mode belongs to every module that touches the DOM, not to app.js, so
+    the check does too.
+    """
     import re
 
     src = INDEX.read_text(encoding="utf-8")
     ids = set(re.findall(r'id="([A-Za-z0-9_]+)"', src))
-    # Template content counts: it is cloned into the document.
-    js = (ROOT / "ui" / "js" / "app.js").read_text(encoding="utf-8")
+    # Ids the modules render themselves count too: catalog.js writes `id="catQty"`
+    # into a template literal and then looks it up, which is legitimate. Only an id
+    # that exists in neither the document nor any module's output is a stale
+    # reference. Interpolated ids (`id="ed-${...}"`) are skipped by the pattern,
+    # which is correct -- they are never looked up by a literal string either.
+    for mod in MODULES:
+        ids |= set(re.findall(r'id="([A-Za-z0-9_]+)"',
+                              (ROOT / mod).read_text(encoding="utf-8")))
+    js = (ROOT / rel).read_text(encoding="utf-8")
     refs = set(re.findall(r'\$\("([A-Za-z0-9_]+)"\)', js))
     refs |= set(re.findall(r'getElementById\("([A-Za-z0-9_]+)"\)', js))
     missing = sorted(r for r in refs - ids)
-    assert not missing, f"app.js references ids that do not exist: {missing}"
+    assert not missing, f"{rel} references ids that do not exist: {missing}"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not on PATH")

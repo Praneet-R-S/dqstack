@@ -556,6 +556,178 @@
   color: var(--text-secondary); max-width: var(--measure);
 }
 
+/* ==================================================== the order list
+
+   The screen that produces an order rather than a recommendation. Everything else in
+   this application ends in a number a planner has to carry somewhere; this ends in a
+   file a buyer can send.
+
+   The layout is a six-column grid rather than a table because one column holds a
+   live input and the rest are computed from it — and because a table's row height is
+   set by its tallest cell, which here is a text field, which would make every row as
+   tall as a form. */
+.or { display: grid; gap: var(--s6); align-content: start; padding-bottom: var(--s8); }
+.or-head {
+  display: flex; align-items: flex-start; gap: var(--s7); flex-wrap: wrap;
+}
+.or-head-main { flex: 1; min-width: 260px; }
+.or-head h1 {
+  margin: 0 0 var(--s3); font-size: var(--fs-24); font-weight: 600;
+  letter-spacing: var(--tracking-tight); color: var(--text-primary);
+}
+.or-head-main p {
+  margin: 0; font-size: var(--fs-14); line-height: var(--lh-prose);
+  color: var(--text-secondary); max-width: var(--measure);
+}
+.or-totals { display: flex; gap: var(--s7); flex: none; }
+.or-total { text-align: right; }
+.or-total-n {
+  display: block; font-family: var(--face-fig-hero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--fig-lg);
+  font-weight: 500; letter-spacing: var(--track-fig-lg);
+  color: var(--text-primary); line-height: 1;
+}
+.or-total-hero .or-total-n { color: var(--ui-accent); }
+.or-total-cap {
+  display: block; margin-top: var(--s2); font-size: var(--fs-10);
+  color: var(--text-secondary); text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+}
+
+/* How much of the range the totals above actually describe. Deliberately directly
+   beneath them: the two figures are one statement. */
+.or-counted { display: flex; align-items: center; gap: var(--s5); }
+.or-counted-track {
+  flex: 1; max-width: 280px; height: 4px; border-radius: var(--r-pill);
+  background: var(--bg-inset); overflow: hidden;
+}
+.or-counted-bar { height: 100%; background: var(--state-excess); width: 0; }
+.or-counted-text { font-size: var(--fs-12); color: var(--text-secondary); }
+
+.or-warn {
+  display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+  padding: var(--s5) var(--s6); border-radius: var(--r-card);
+  font-size: var(--fs-13); line-height: var(--lh-prose-sm);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--state-attention) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-attention) 30%, transparent);
+}
+.or-warn span:not(.or-warn-mark) { flex: 1; min-width: 220px; }
+.or-warn-mark {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 700; font-size: var(--fs-12);
+  background: var(--state-attention); color: #1A1206;
+}
+
+.or-controls {
+  display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+}
+.or-filters { display: flex; gap: var(--s3); flex-wrap: wrap; }
+.or-filter {
+  font-size: var(--fs-12); padding: var(--s3) var(--s5); cursor: pointer;
+  border-radius: var(--r-pill); border: 1px solid var(--border-strong);
+  background: var(--bg-surface); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.or-filter:hover { background: var(--bg-hover); color: var(--text-primary); }
+.or-filter:active { transform: translateY(1px); }
+.or-filter[aria-pressed="true"] {
+  background: var(--bg-raised); color: var(--text-primary);
+  border-color: var(--ui-accent); box-shadow: var(--e1);
+}
+.or-search {
+  min-width: 160px; background: var(--bg-inset);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  padding: var(--s3) var(--s5); font-size: var(--fs-13); color: var(--text-primary);
+}
+.or-search:focus {
+  outline: none; border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 25%, transparent);
+}
+.or-count { font-size: var(--fs-12); color: var(--text-secondary); margin-left: auto; }
+
+/* Six columns, shared by the header strip and every row, so they cannot drift. */
+.or-th, .or-row {
+  display: grid; gap: var(--s5);
+  grid-template-columns: minmax(160px, 2.2fr) 92px minmax(110px, 1fr)
+                         minmax(70px, 0.7fr) minmax(78px, 0.8fr) minmax(88px, 0.9fr);
+  align-items: center;
+}
+.or-th {
+  padding: 0 var(--s5) var(--s3);
+  font-size: var(--fs-10); text-transform: uppercase;
+  letter-spacing: var(--tracking-caps); color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.or-th span:nth-child(n+4) { text-align: right; }
+.or-body { display: grid; gap: 1px; }
+.or-row {
+  padding: var(--s4) var(--s5); border-radius: var(--r-card);
+  border: 1px solid transparent;
+  transition: background var(--t-feedback) var(--ease);
+}
+.or-row:hover { background: var(--bg-hover); }
+/* A 3px edge carrying how soon this one empties, matching the review card's
+   convention so the two surfaces read as one application. */
+.or-row { border-left: 3px solid transparent; }
+.or-row[data-cover="critical"] { border-left-color: var(--state-risk); }
+.or-row[data-cover="low"] { border-left-color: var(--state-attention); }
+.or-row[data-cover="ok"] { border-left-color: var(--state-excess); }
+.or-row[data-cover="over"] { border-left-color: var(--series-forecast); }
+.or-row[data-cover="unknown"] { border-left-color: var(--border-strong); }
+
+.or-cell { min-width: 0; display: grid; gap: 1px; }
+.or-num { text-align: right; }
+.or-name { min-width: 0; }
+.or-link {
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+  font-size: var(--fs-14); color: var(--text-primary); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.or-link:hover { text-decoration: underline; }
+.or-sub {
+  font-size: var(--fs-10); color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.or-input {
+  width: 100%; background: var(--bg-inset);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  padding: var(--s3) var(--s4); font-family: var(--font-num);
+  font-size: var(--fs-14); text-align: right; color: var(--text-primary);
+}
+.or-input:focus {
+  outline: none; border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 25%, transparent);
+}
+.or-input::placeholder { color: var(--text-secondary); font-size: var(--fs-11); }
+.or-cover-word { font-size: var(--fs-13); color: var(--text-primary); }
+.or-target, .or-qty-n, .or-line-cost {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-14); color: var(--text-primary);
+}
+/* The one figure the whole screen exists to produce. */
+/* Weight, not hue. --ui-accent is a component colour held to 3:1 and measures
+   4.3:1 as text on this row; the surrounding figures are --text-secondary, so
+   primary at 600 is already the loudest thing in the row. */
+.or-qty-n.is-order { color: var(--text-primary); font-weight: 700; }
+.or-dash { font-family: var(--font-num); color: var(--text-secondary); cursor: help; }
+.or-empty {
+  padding: var(--s8) var(--s6); text-align: center;
+  font-size: var(--fs-14); color: var(--text-secondary);
+}
+.or-more { justify-self: center; }
+
+@media (max-width: 900px) {
+  /* Below this the six columns stop being readable, so the row becomes two lines
+     with the product name spanning. */
+  .or-th { display: none; }
+  .or-row {
+    grid-template-columns: minmax(0, 1fr) 88px 88px;
+    row-gap: var(--s3);
+  }
+  .or-name { grid-column: 1 / -1; }
+}
+
 /* ==================================================== the work bar
 
    Two ways to spend attention where it is worth spending, above the list rather than
@@ -1035,7 +1207,10 @@
 .sb-group {
   margin: var(--s5) 0 var(--s3); padding: 0 var(--s4);
   font-size: var(--fs-10); text-transform: uppercase;
-  letter-spacing: var(--tracking-caps); color: var(--text-tertiary);
+  /* --text-secondary, not tertiary. These stopped being decorative dividers when
+     they became the <summary> of a collapsible section: a planner reads them to
+     find a block and clicks them to open it. Tertiary measures 3.86:1. */
+  letter-spacing: var(--tracking-caps); color: var(--text-secondary);
   font-weight: 600;
 }
 .sb-nav .sb-group:first-child { margin-top: 0; }
@@ -1801,6 +1976,140 @@
 .sb-empty {
   margin: 0; padding: var(--s3) var(--s4); font-size: var(--fs-11);
   color: var(--text-tertiary);
+}
+
+/* ==================================================== collapsible rail sections
+
+   The rail outgrew one screen once it carried replenishment as well as review, so
+   every block is a <details> and the open set is remembered per browser. Native
+   disclosure rather than a hand-rolled accordion: it is keyboard-operable, it
+   announces its own state, and it survives having no JavaScript attached. */
+.sb-sec { min-width: 0; }
+.sb-sec > summary {
+  display: flex; align-items: baseline; gap: var(--s3);
+  cursor: pointer; list-style: none; user-select: none;
+  border-radius: 5px; transition: color var(--t-feedback) var(--ease);
+}
+.sb-sec > summary::-webkit-details-marker { display: none; }
+.sb-sec > summary:hover { color: var(--text-primary); }
+.sb-sec > summary:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+/* A caret that turns, drawn in text so it needs no asset and inherits colour. */
+.sb-sec > summary::before {
+  content: ""; flex: none; width: 0; height: 0; margin-right: 2px;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+  transform: translateY(-1px); opacity: 0.5;
+  transition: transform var(--t-feedback) var(--ease);
+}
+.sb-sec[open] > summary::before { transform: translateY(-1px) rotate(90deg); }
+/* The live figure a collapsed section still reports. The whole argument for this
+   rail is that a closed block is not a silent one. */
+.sb-sec-tag {
+  margin-left: auto; font-family: var(--font-num); font-size: var(--fs-10);
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+
+/* ==================================================== replenishment
+
+   What today's order costs, and how much of the range has not been counted. The
+   second figure is the frame around the first: a confident order total over a
+   half-counted assortment is the number most likely to be believed and most likely
+   to be wrong, so the counted share sits directly beneath it and is never added in. */
+.sb-order { display: grid; gap: var(--s3); margin: var(--s2) var(--s4) var(--s4); }
+.sb-ord-hero {
+  display: grid; gap: 2px; padding: var(--s4) var(--s5); cursor: pointer;
+  text-align: left; border-radius: var(--r-card);
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  transition: background var(--t-feedback) var(--ease), border-color var(--t-feedback) var(--ease);
+}
+.sb-ord-hero:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.sb-ord-hero:active { transform: translateY(1px); }
+.sb-ord-fig {
+  font-family: var(--face-fig-hero); font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--fig-md); font-weight: 600; letter-spacing: var(--track-fig-md);
+  color: var(--text-primary); line-height: 1;
+}
+.sb-ord-cap { font-size: var(--fs-11); color: var(--text-secondary); }
+.sb-ord-count {
+  display: flex; align-items: center; gap: var(--s4); cursor: help;
+  font-size: var(--fs-10); color: var(--text-secondary);
+}
+.sb-ord-track {
+  flex: 1; height: 3px; border-radius: var(--r-pill);
+  background: var(--bg-inset); overflow: hidden;
+}
+.sb-ord-track i { display: block; height: 100%; background: var(--state-excess); }
+.sb-ord-warn {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: var(--s3) var(--s4); border-radius: 5px;
+  font-size: var(--fs-11); color: var(--text-primary);
+  background: color-mix(in srgb, var(--state-attention) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-attention) 28%, transparent);
+  transition: background var(--t-feedback) var(--ease);
+}
+.sb-ord-warn:hover { background: color-mix(in srgb, var(--state-attention) 20%, transparent); }
+.sb-ord-warn:active { transform: translateY(1px); }
+
+/* ---- stock cover: the same row shape as the queue, deliberately ---------
+   A planner reads one list of "count, label, number" in this rail and should not
+   have to learn a second grammar for the block underneath it. */
+.sb-cover { display: grid; gap: 1px; margin: var(--s2) var(--s4) var(--s5); }
+.sb-cover button {
+  display: flex; align-items: center; gap: var(--s4);
+  width: 100%; min-height: 28px; padding: 4px var(--s4);
+  background: transparent; border: 0; cursor: pointer;
+  border-radius: 5px; text-align: left;
+  font-size: var(--fs-12); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-cover button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-cover button:active { transform: translateY(1px); }
+.sb-perish {
+  margin-top: var(--s2); font-size: var(--fs-11) !important;
+  color: var(--state-risk) !important;
+  background: color-mix(in srgb, var(--state-risk) 10%, transparent) !important;
+}
+
+/* ==================================================== range mix (ABC x XYZ)
+
+   The two classifications every inventory course teaches, which the pipeline has
+   assigned to all thousand products since the first run and no planner-facing screen
+   ever showed. A three-by-three grid rather than two lists, because the pairing is
+   the point: an A product that is hard to predict needs a person, a C product that is
+   hard to predict needs a rule, and neither list says that on its own.
+
+   Shade carries share of stock value, so the eye lands on where the money sits
+   rather than on where the product count is highest -- which is the C row, always,
+   and never the answer. */
+.sb-mix { margin: var(--s2) var(--s4) var(--s5); }
+.sb-mix-grid {
+  display: grid; grid-template-columns: 14px repeat(3, 1fr); gap: 2px;
+}
+.sb-mix-h {
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-10); font-weight: 600; color: var(--text-secondary);
+  font-family: var(--font-num);
+}
+.sb-mix-corner { width: 14px; }
+.sb-mix-cell {
+  position: relative; cursor: pointer; min-height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; border: 1px solid var(--border-subtle);
+  /* Capped at 34%: at 62% the densest cell was near-black text on strong blue,
+     measuring 1.15:1. Shade still orders the cells; it no longer has to also be
+     the only thing distinguishing them. */
+  background: color-mix(in srgb, var(--series-forecast) calc(var(--fill) * 34%), var(--bg-inset));
+  transition: border-color var(--t-feedback) var(--ease), transform var(--t-feedback) var(--ease);
+}
+.sb-mix-cell:hover { border-color: var(--ui-accent); }
+.sb-mix-cell:active { transform: translateY(1px); }
+.sb-mix-n {
+  font-family: var(--font-num); font-size: var(--fs-11); font-weight: 500;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.sb-mix-key {
+  margin: var(--s3) 0 0; font-size: var(--fs-10); line-height: var(--lh-caption);
+  color: var(--text-secondary);
 }
 
 /* ---- block 6: saved views ---------------------------------------------
