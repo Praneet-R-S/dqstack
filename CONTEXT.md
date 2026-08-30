@@ -14,12 +14,13 @@ Last updated: after commit `644af67` (six verified findings fixed).
 The pipeline and its evidence are finished and committed. **All current work is
 interface.** Two external design reviews have been received; v2 supersedes v1 and
 corrects it. **C11** records the review's own eight blocks (all built). **C12** records
-the eight features built after them, including two new modules — `truth.js` and
-`curve.js` — and the traps this work added to the list. Read C12's trap list before
-touching charts, contrast or the sidebar's height budget.
+the eight features built after them (`truth.js`, `curve.js`). **C13** is the inventory
+layer — stock counts and the order list (`stock.js`, `orders.js`) — and is the most
+recent work. Read the trap lists in C12 and C13 before touching charts, contrast,
+measurement harnesses or the sidebar.
 
     python -m dqstack.serve          # then http://127.0.0.1:8000/
-    python -m pytest -q              # 129 tests
+    python -m pytest -q              # 147 tests
     python docs/build_reference_pdf.py   # regenerate the 20-page reference
 
 Verification habits that have repeatedly paid for themselves:
@@ -1116,6 +1117,101 @@ is not a key is still caught. Confirmed by test.
   masking, not a repair; both calendar events *are* in the window; and per-product
   reliability *is* derivable. Two features I had called blocked were buildable, and one I
   had called easy was a bug.
+
+### C13. Inventory management — IN PROGRESS, paused cleanly
+
+Asked to make the interface fuller, stand apart from other demand/supply tools, and
+above all to fill the sidebar with things that help run a store's inventory. Two
+commits landed; the work is committed, tested and safe to leave.
+
+**The gap this closed.** The application forecast demand and computed a target —
+"stock up to 156 units" — and stopped. It never asked how many are on the shelf, so
+it could not produce an order. It was a forecaster wearing the clothes of an
+inventory tool.
+
+**`ui/js/stock.js`** owns the missing input. On-hand is **planner-entered and
+persisted** (`localStorage` key `dq.onhand`). It is deliberately never derived,
+estimated or back-filled, and **there is no "fill these in for me" button**: a
+fabricated count flows straight into an order quantity and out of the building as a
+purchase. This is the one place in the system where a plausible invention costs real
+money. Products are `counted` or `uncounted` and the interface always says which; a
+product with no count shows `—`, never `order 0`.
+
+    order quantity = stock up to  -  what is on the shelf
+    days of cover  = on hand      /  expected demand per day
+
+Cover thresholds are the ordering policy's own windows (`leadTime`, `reviewPeriod +
+leadTime`), so they cannot drift from the logic that set the target.
+
+**`ui/js/orders.js`** is the new fourth destination and the screen that produces an
+order rather than a recommendation. Editable count per row saving as typed, Enter
+moving to the next, rows ordered by how soon the shelf empties — the only ordering
+that makes a list safe to abandon halfway. Exports a purchase-order CSV with a TOTAL
+line, separate from `exportDecisions` because it is a different document for a
+different reader.
+
+**Uncounted products are ranked by what a full shelf is worth** (`target × cost`),
+the only value figure available for something nobody has counted. A thousand blank
+fields is not a task anyone starts; "$713k of shelf value, most valuable first" is.
+
+**The rail is now eight collapsible `<details>` sections** with the open set
+remembered in `dq.rail`. Native disclosure, so it is keyboard-operable and announces
+its own state. **A collapsed section still reports its figure in its heading** —
+the whole argument for this rail is that a closed block is not a silent one. New
+blocks: **Replenishment** (order cost over the counted share it describes),
+**Stock cover** (four buckets, each a door into the order list filtered to it),
+**Range mix** (ABC × XYZ as a 3×3 grid, shade = share of stock value; the pipeline
+has assigned both to all 1,000 products since the first run and no planner screen
+ever showed them), **Stores** (all ten ranked from `D.rollups.store`, the one in
+scope pinned top; clicking sets scope in Review, Orders and the select at once).
+
+Before any counting the replenishment block leads with **what a full shelf of the
+range is worth ($719k)**, because "$0 to spend" reads as a broken screen rather than
+an honest zero — and it is the same arithmetic the order total will use, against a
+stock level of nothing.
+
+**Test count is now 147.** The jump is `test_ids_referenced_by_js_all_exist`, now
+parametrised over all thirteen modules.
+
+### Traps added by C13
+
+- **The id check must cover every module, not app.js.** `orders.js` shipped with a
+  `$("orUncounted")` left over from an earlier draft of its header; the throw
+  happened inside the render, so the order list came up completely empty with
+  nothing on screen to say why, and the console named a line in a file I was not
+  looking at. Now checked across all modules. Ids a module writes into its own
+  template literal count as real — `catalog.js` legitimately writes and then reads
+  `catQty`.
+- **Chrome serialises `color-mix()` as `color(srgb 0.677 0.730 0.943)` with 0–1
+  components.** A contrast probe that reads those as 0–255 sees near-black and
+  reports a passing 8:1 cell as 1.15:1. Every contrast harness in this project must
+  parse that form — it produced two false failures before it was spotted.
+- **`--text-tertiary` claimed a seventh victim**: the `.sb-group` headings, which
+  stopped being decorative the moment they became clickable `<summary>` elements.
+- **`--ui-accent` claimed another**: the order quantity at 4.3:1. Weight replaced hue.
+- **Measuring in a zero-width pane is worthless.** `documentElement.clientWidth` came
+  back `0` and every overflow figure with it; a reported 15px overflow vanished at a
+  real viewport. Always `resize_window` before believing a layout measurement.
+
+### C13. What is left, for the next session
+
+Nothing is half-applied — both commits are complete and the suite is green. Picking
+up means starting something new, in roughly this order:
+
+1. **The reference PDF is stale.** `docs/DQ-Stack-Reference.pdf` predates all eight
+   C12 features and all of C13. `python docs/build_reference_pdf.py` regenerates it,
+   but the prose needs new sections for the excluded-day layer, the cost curve, the
+   order list and stock counts.
+2. **Supplier grouping still needs a field the generator does not emit.** Orders are
+   placed to suppliers, not products; this is the largest remaining gap in the
+   replenishment story and it starts in `dqstack/`, not in the interface.
+3. **Reorder alerts.** A cover threshold a planner sets, surfacing as a rail block.
+   The data is all present; the open question is whether an alert without any
+   notification channel is worth more than the filter that already exists.
+4. **Cycle-count scheduling** — which products to recount and how often, by ABC class.
+   The classic pairing with the count entry that now exists.
+5. Still unbuilt from v2's own list: density modes, card transitions on J/K, notes,
+   history timeline, first-run walkthrough, command-palette actions, mobile approvals.
 
 ### D. Correctly out of scope
 Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
