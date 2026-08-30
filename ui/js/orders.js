@@ -44,6 +44,11 @@ window.Orders = (() => {
 
   const RANK = { critical: 0, low: 1, unknown: 2, ok: 3, over: 4 };
 
+  /** What a full shelf of this product is worth. The only value figure available for
+      a product nobody has counted, and therefore the one that decides which of a
+      thousand uncounted products is worth counting first. */
+  const atStake = (l) => (l.target || 0) * (l.unitCost || 0);
+
   function lines() {
     const q = state.query.trim().toLowerCase();
     let out = all
@@ -68,11 +73,18 @@ window.Orders = (() => {
     } else {
       /* Urgency: how soon the shelf empties. Uncounted products sit between "low"
          and "fine" -- they might be either, and that uncertainty is itself a
-         reason to look at them before the ones known to be comfortable. */
+         reason to look at them before the ones known to be comfortable.
+
+         Among themselves, uncounted products are ranked by what is at stake on the
+         shelf -- target times unit cost -- because they have no cover figure to be
+         ranked by and arbitrary order is what makes a thousand blank fields feel
+         impossible. Counting the twenty most valuable is a morning's work that
+         resolves most of the money; counting twenty arbitrary ones resolves nothing
+         in particular. */
       out.sort((a, b) =>
         RANK[a.coverStatus] - RANK[b.coverStatus] ||
         (a.cover ?? 99) - (b.cover ?? 99) ||
-        (b.lineCost || 0) - (a.lineCost || 0));
+        (b.lineCost ?? atStake(b)) - (a.lineCost ?? atStake(a)));
     }
     return out;
   }
@@ -132,11 +144,19 @@ window.Orders = (() => {
 
     const warn = $("orWarn");
     warn.hidden = sum.uncounted === 0;
-    $("orWarnText").textContent =
-      `${sum.uncounted.toLocaleString()} product${sum.uncounted === 1 ? " has" : "s have"} ` +
-      `no stock count, so ${sum.uncounted === 1 ? "it is" : "they are"} not in the ` +
-      `figures above. A product that has never been counted is not a product that ` +
-      `needs nothing.`;
+    if (sum.uncounted) {
+      /* Quantify the gap rather than just naming it. "996 uncounted" is a chore;
+         "996 uncounted, $712k of shelf value" is a reason, and the list behind the
+         button is ordered so the first twenty resolve most of it. */
+      const un = all
+        .filter((s) => (!state.store || s.store === state.store) && !Stock.known(s.id))
+        .reduce((a, s) => a + (s.orderUpTo || 0) * (s.cost || 0), 0);
+      $("orWarnText").textContent =
+        `${sum.uncounted.toLocaleString()} product${sum.uncounted === 1 ? " has" : "s have"} ` +
+        `no stock count — ${Plain.money(un)} of shelf value that cannot become an ` +
+        `order yet. They are listed most valuable first, so the top of that list is ` +
+        `where counting pays.`;
+    }
   }
 
   function row(l) {

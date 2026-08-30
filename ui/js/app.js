@@ -688,6 +688,51 @@
       <p class="sb-mix-key">Down: what it earns you. Across: how predictable it is.</p>`;
   }
 
+  /* ---- stores: where this one sits against the rest ----------------------
+
+     A store manager's first question about any figure is whether it is normal, and
+     that needs a comparison. The rollups have carried per-store totals since the
+     first run; this is the first screen to use them.
+
+     Bars are shares of the largest store rather than of the total, because the
+     comparison being made is "who is biggest here", and a share-of-total bar for ten
+     stores is ten short stubs that answer nothing. */
+  function paintStoresBlock() {
+    const host = $("sbStores");
+    if (!host) return;
+    const rows = (D.rollups && D.rollups.store) || [];
+    if (!rows.length) { host.innerHTML = ""; return; }
+
+    const max = Math.max(...rows.map((r) => r.orderUpTo || 0), 1);
+    const sorted = rows.slice().sort((a, b) => (b.orderUpTo || 0) - (a.orderUpTo || 0));
+    const mine = Review.scope;
+    $("sbStoresTag").textContent = `${rows.length}`;
+
+    /* When a store is in scope it is pinned to the top with its rank, because at ten
+       stores the one you manage is otherwise somewhere in the middle of a list you
+       have to search. */
+    const ordered = mine
+      ? [sorted.find((r) => r.key === mine), ...sorted.filter((r) => r.key !== mine)]
+          .filter(Boolean)
+      : sorted;
+
+    host.innerHTML = ordered.slice(0, mine ? 6 : 10).map((r) => {
+      const rank = sorted.findIndex((x) => x.key === r.key) + 1;
+      const isMine = r.key === mine;
+      return `<button class="sb-store" data-store="${U.esc(r.key)}"
+                ${isMine ? 'data-mine="true"' : ""}
+                title="${U.esc(Review.prettyStore(r.key))} — ${r.series} products, ${
+                  Plain.units(r.orderUpTo)} units to stock, ${
+                  Plain.money(r.revenue)} of yearly sales. Ranked ${rank} of ${
+                  sorted.length} by units. Click to put this store in scope.">
+        <span class="sb-store-name">${U.esc(Review.prettyStore(r.key))}</span>
+        <span class="sb-store-bar"><i style="width:${
+          (((r.orderUpTo || 0) / max) * 100).toFixed(1)}%"></i></span>
+        <span class="sb-store-n">${Plain.units(r.orderUpTo)}</span>
+      </button>`;
+    }).join("");
+  }
+
   /* ---- block 6: saved views ---------------------------------------------
      The one block of the report's eight that was never built. A view is the scope,
      the cause filter and the tab under a name the planner chose; each row carries
@@ -821,7 +866,7 @@
   function paintSidebar() {
     paintDrafts(); paintSession(); paintHealth(); paintCycle(); paintWatchBlock();
     paintViews(Review.viewList());
-    paintOrderBlock(); paintCoverBlock(); paintMixBlock();
+    paintOrderBlock(); paintCoverBlock(); paintMixBlock(); paintStoresBlock();
   }
 
 
@@ -1698,6 +1743,18 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     /* The range mix opens Products filtered to that cell. ABC/XYZ is a way of
        deciding how much attention a group deserves, so the useful next step is
        seeing the group, not a number about it. */
+    /* A store row puts that store in scope, which is what the rest of the rail is
+       already reading from -- so one click re-points every figure in it. */
+    $("sbStores").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-store]");
+      if (!b) return;
+      const next = Review.scope === b.dataset.store ? "" : b.dataset.store;
+      $("sbScope").value = next;
+      Review.setScope(next);
+      Orders.setStore(next);
+      toast(next ? `Scope set to ${Review.prettyStore(next)}` : "Showing all stores");
+    });
+
     $("sbMix").addEventListener("click", (e) => {
       const c = e.target.closest("[data-mix]");
       if (!c) return;

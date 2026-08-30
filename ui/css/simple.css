@@ -2112,6 +2112,40 @@
   color: var(--text-secondary);
 }
 
+/* ---- stores: where this one sits against the rest ---------------------
+   Bars are shares of the largest store, not of the total: the question is "who is
+   biggest here", and ten share-of-total stubs answer nothing. */
+.sb-stores { display: grid; gap: 1px; margin: var(--s2) var(--s4) var(--s4); }
+.sb-store {
+  display: flex; align-items: center; gap: var(--s4);
+  width: 100%; min-height: 26px; padding: 3px var(--s4);
+  background: transparent; border: 0; cursor: pointer; border-radius: 5px;
+  text-align: left; font-size: var(--fs-11); color: var(--text-secondary);
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.sb-store:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sb-store:active { transform: translateY(1px); }
+/* The store in scope is pinned to the top and is the only raised row, matching the
+   convention the queue and saved-view blocks already use. */
+.sb-store[data-mine="true"] {
+  background: var(--bg-raised); color: var(--text-primary); box-shadow: var(--e1);
+}
+.sb-store-name { flex: none; width: 66px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-store-bar {
+  flex: 1; min-width: 0; height: 4px; border-radius: var(--r-pill);
+  background: var(--bg-inset); overflow: hidden;
+}
+.sb-store-bar i {
+  display: block; height: 100%; border-radius: var(--r-pill);
+  background: var(--series-forecast); opacity: 0.75;
+}
+.sb-store[data-mine="true"] .sb-store-bar i { background: var(--ui-accent); opacity: 1; }
+.sb-store-n {
+  flex: none; min-width: 34px; text-align: right;
+  font-family: var(--font-num); font-size: var(--fs-10);
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+
 /* ---- block 6: saved views ---------------------------------------------
    The eighth block of the report's eight, and the last one built. A planner who
    narrows to the same slice every morning should not rebuild it every morning.
@@ -2225,6 +2259,11 @@
 :root[data-sidebar="closed"] .sb-watch,
 :root[data-sidebar="closed"] .sb-views,
 :root[data-sidebar="closed"] .sb-view-add,
+:root[data-sidebar="closed"] .sb-order,
+:root[data-sidebar="closed"] .sb-mix,
+:root[data-sidebar="closed"] .sb-stores,
+:root[data-sidebar="closed"] .sb-sec-tag,
+:root[data-sidebar="closed"] .sb-sec > summary,
 :root[data-sidebar="closed"] .sb-cycle-chip,
 :root[data-sidebar="closed"] .sb-group,
 :root[data-sidebar="closed"] .sb-session-cap,
