@@ -15,9 +15,9 @@ The pipeline and its evidence are finished and committed. **All current work is
 interface.** Two external design reviews have been received; v2 supersedes v1 and
 corrects it. **C11** records the review's own eight blocks (all built). **C12** records
 the eight features built after them (`truth.js`, `curve.js`). **C13** is the inventory
-layer — stock counts and the order list (`stock.js`, `orders.js`) — and is the most
-recent work. Read the trap lists in C12 and C13 before touching charts, contrast,
-measurement harnesses or the sidebar.
+layer — stock counts and the order list (`stock.js`, `orders.js`). **C14** adds cycle
+counting and brings the reference PDF current. Read the trap lists in C12, C13 and C14
+before touching charts, contrast, measurement harnesses or the sidebar.
 
     python -m dqstack.serve          # then http://127.0.0.1:8000/
     python -m pytest -q              # 147 tests
@@ -1193,24 +1193,53 @@ parametrised over all thirteen modules.
   back `0` and every overflow figure with it; a reported 15px overflow vanished at a
   real viewport. Always `resize_window` before believing a layout measurement.
 
-### C13. What is left, for the next session
+### C14. Cycle counting and the reference — DONE
 
-Nothing is half-applied — both commits are complete and the suite is green. Picking
-up means starting something new, in roughly this order:
+**Cycle counting.** Counts now carry a timestamp and a recount interval driven by ABC
+class (A 7 days, B 28, C 91). Without an age a figure entered three months ago and one
+entered this morning are indistinguishable, and the order list depends on both equally.
+New rail block **Stock take**, reported by class because "412 due" is a wall and "all
+306 A lines are due" is a morning's work with a reason. Order rows show the count's age
+under the input that sets it. `Due a count` filter on the order list.
 
-1. **The reference PDF is stale.** `docs/DQ-Stack-Reference.pdf` predates all eight
-   C12 features and all of C13. `python docs/build_reference_pdf.py` regenerates it,
-   but the prose needs new sections for the excluded-day layer, the cost curve, the
-   order list and stock counts.
-2. **Supplier grouping still needs a field the generator does not emit.** Orders are
-   placed to suppliers, not products; this is the largest remaining gap in the
-   replenishment story and it starts in `dqstack/`, not in the interface.
-3. **Reorder alerts.** A cover threshold a planner sets, surfacing as a rail block.
-   The data is all present; the open question is whether an alert without any
-   notification channel is worth more than the filter that already exists.
-4. **Cycle-count scheduling** — which products to recount and how often, by ABC class.
-   The classic pairing with the count entry that now exists.
-5. Still unbuilt from v2's own list: density modes, card transitions on J/K, notes,
+**The `dq.onhand` format changed** from `{id: number}` to `{id: {n, at}}`. Legacy plain
+numbers are read as counts of *unknown age* and treated as **stale**, which is the safe
+reading; `0` survives as a real count of nothing (full-target order, critical cover) and
+must never be confused with uncounted. Verified against a planted legacy store.
+
+**The reference PDF is current again** — 24 pages, up from 20. Part V rewritten for the
+four-rung card and the nine-block rail; **new Part VI on replenishment**; Evidence,
+Engineering record and Limits renumbered VII–IX. `build()` now returns `(path, pages)`
+and the script prints the page count.
+
+Trap: verifying a PDF by regex over its raw streams inflates nothing and reports every
+probe missing — the harness failing, not the document. `pip install pypdf` and read it
+properly.
+
+### C14. What is left, for the next session
+
+Everything committed, suite green at **147 tests**, working tree clean.
+
+1. **Supplier grouping — BLOCKED ON A DECISION, needs the user.** Orders are placed to
+   suppliers, not products, and this is the largest remaining gap in the replenishment
+   story. It needs a supplier dimension with its own lead time, which means:
+   `config.py` + wherever series attributes are assigned, then `decide.py` taking a
+   **per-series** lead time instead of the global `cfg.decision.lead_time`, then the UI
+   grouping the order list by supplier with per-supplier totals and minimum order values.
+   **The blocker:** `pipeline.py` has no stage-level resume (only `--quick`), so this
+   costs a **full ~15.5 minute re-run** and changes `orderUpTo` for every product —
+   invalidating every verified figure in this file, the committed artifacts, and the PDF.
+   Do not start it without the user agreeing to that. The cheap shortcut — synthesising
+   suppliers into `bundle.json` with a side script — is a coherence trap: a later
+   pipeline run would silently drop them.
+2. **Reorder alerts.** A cover threshold a planner sets, surfacing as a rail block. Data
+   is all present; the open question is whether an alert with no notification channel is
+   worth more than the filter that already exists.
+3. **Count variance / shrinkage.** When a recount lands, compare it against what the
+   system expected (previous count minus sales since). Genuinely valuable, and the
+   timestamp added in C14 is the precondition — but it needs sales-since-count, which
+   the bundle does not currently carry.
+4. Still unbuilt from v2's own list: density modes, card transitions on J/K, notes,
    history timeline, first-run walkthrough, command-palette actions, mobile approvals.
 
 ### D. Correctly out of scope
