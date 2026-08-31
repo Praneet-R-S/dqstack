@@ -16,11 +16,13 @@ interface.** Two external design reviews have been received; v2 supersedes v1 an
 corrects it. **C11** records the review's own eight blocks (all built). **C12** records
 the eight features built after them (`truth.js`, `curve.js`). **C13** is the inventory
 layer — stock counts and the order list (`stock.js`, `orders.js`). **C14** adds cycle
-counting and brings the reference PDF current. Read the trap lists in C12, C13 and C14
-before touching charts, contrast, measurement harnesses or the sidebar.
+counting and brings the reference PDF current. **C15** is the usability pass over the
+whole application — orientation, one vocabulary, and the framing of the dense surfaces.
+Read the trap lists in C12, C13, C14 and C15 before touching charts, contrast,
+measurement harnesses, wording or the sidebar.
 
     python -m dqstack.serve          # then http://127.0.0.1:8000/
-    python -m pytest -q              # 147 tests
+    python -m pytest -q              # 149 tests
     python docs/build_reference_pdf.py   # regenerate the 20-page reference
 
 Verification habits that have repeatedly paid for themselves:
@@ -1215,6 +1217,73 @@ and the script prints the page count.
 Trap: verifying a PDF by regex over its raw streams inflates nothing and reports every
 probe missing — the harness failing, not the document. `pip install pypdf` and read it
 properly.
+
+### C15. Usability pass — the whole application
+
+Asked to make the entire project usable without confusion. Audited it as a first-time
+visitor with every stored key cleared, then fixed what the audit found rather than what
+seemed likely.
+
+**Orientation.** The application opened on "24 decisions to make today" with nothing
+saying what it is or how its two jobs relate. `#helpBox` — *How this works* — opens once
+(`dq.seen`) and lives in the footer afterwards. Two numbered steps in the order they
+happen, the order arithmetic, and four things worth knowing: nothing is sent anywhere,
+a wide range is a warning not a fault, you need not finish, `?` shows the shortcuts.
+
+**Three confusions found by measurement:**
+
+- Every tier's cohort is capped at the same limit, so three tabs read `24`, `24`, `24`
+  over lists of 489, 276 and 83 — a filter that looked broken. Now `24 of 489`.
+- The queue block reported `72` (all tiers) beside the Today badge's `24` (urgent
+  only): two right answers to one question. The block reports **exposure** now, a
+  different unit that cannot be misread as a competing count.
+- The order list led with "Needs a decision", which is also a Today tab meaning
+  something else. Now "To order or count"; "Not counted" → "Never counted", since it
+  sat beside "Due a count" and never-counted is a subset of due.
+
+**The detailed view had never had the plain layer.** A rendered-DOM scan (not a source
+scan) found the Spreadsheet printing the pipeline's own identifiers: filter chips read
+`risk`, `stale`, `censored`, `wide`, `swing`, `cold-start`, `terminal`; the breadcrumb
+said "item-locations · panel rows"; rows read `2_016 · CA_4` and `terminal · health
+0.80`; captions read "lost mgn"; the weights panel read "lgbm quantile", "croston sba",
+"adida". All had plain equivalents in `plain.js` already.
+
+**Root cause: a second vocabulary.** `util.js` carried `REASON_LABEL` with its own seven
+values ("service risk", "terminal decline", "censored history"…) and the Spreadsheet
+read that one while everything else read `plain.js`. Deleted; all four call sites route
+through `plain.js`. `CLASS_SHORT` mapped to abbreviated *jargon* ("intermit",
+"terminal") and now maps to short *plain* words ("occasional", "ending").
+
+**The most important fix is invisible.** The grid's accessibility mirror — what a screen
+reader reads — printed the class key, a bare health score, "P10 to P90" and "target
+quantile". That is the one surface where raw vocabulary has no visual context to lean
+on. It now reads "Food 2-016, Store CA-4, Being discontinued, Patchy data quality,
+492 units, likely between 278 and 796".
+
+**Dense surfaces are framed rather than dumbed down.** The Spreadsheet and the Evidence
+page each say who they are for; their technical column names are correct for those
+readers. Framing, not an apology. Both dismissible/inline.
+
+**Result:** rendered-DOM scan across Today, Order list, Products, Spreadsheet and the
+sidebar returns **zero** jargon leaks, with real terms preserved on hover.
+
+**Two guards added** (149 tests): no module may define a rival label table, and
+`renderFilters` must render through `Plain.short()`. Both verified to fail when they
+should.
+
+### Traps added by C15
+
+- **`--text-tertiary` has now cost ten elements.** It is 4.6:1 on `--bg-surface`
+  *only*; on `--bg-inset`, a card, or any tinted panel it is 3.86–3.87:1. The token
+  definition in `tokens.css` now warns about itself. Rules, dividers, disabled states
+  and decorative glyphs only — never text a reader must read.
+- **A rendered-DOM scan finds what a source scan cannot.** The vocabulary test reads
+  files; it had passed for months while the Spreadsheet printed raw keys, because that
+  surface was never in `SURFACES`. Walk the live DOM per surface when the question is
+  "what does a user actually see".
+- **The heredoc backslash trap bit again** — `\n` inside a bash heredoc became a real
+  newline and the test file would not parse. Use the Write/Edit tools for anything
+  containing escapes. This is the third time.
 
 ### C14. What is left, for the next session
 

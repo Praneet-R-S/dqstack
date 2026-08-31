@@ -2426,3 +2426,12 @@
   transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
 }
 .ws-note-x:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* The same framing the detailed view gets: say who a dense surface is for, so its
+   density reads as depth rather than as confusion. */
+.sheet-frame {
+  padding: var(--s4) var(--s5); margin-bottom: var(--s5);
+  border-left: 3px solid var(--ui-accent); border-radius: var(--r-sm);
+  background: var(--bg-inset);
+}
+.sheet-frame b { color: var(--text-primary); }

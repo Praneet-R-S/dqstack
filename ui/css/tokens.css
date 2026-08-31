@@ -53,7 +53,12 @@
 
   --text-primary: #E9EFF6;
   --text-secondary:#95A3B4;   /* 6.1:1 on --bg-surface */
-  --text-tertiary:#69747F;   /* 4.6:1 on --bg-surface */
+  /* CAUTION. 4.6:1 on --bg-surface only. On --bg-inset, on a card, or over any
+     tinted panel it measures 3.86-3.87:1, which fails AA for text. Ten separate
+     elements in this project have had to be moved off it after being measured. Use
+     it for rules, dividers, disabled states and decorative glyphs; use
+     --text-secondary for anything a reader has to read. */
+  --text-tertiary:#69747F;   /* 4.6:1 on --bg-surface, and nowhere else */
 
   /* ---- semantic accents. One meaning each, and nothing else. ------------ */
   --series-forecast: #4C6FFF;

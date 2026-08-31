@@ -383,8 +383,12 @@ code {
   color: var(--text-primary); letter-spacing: -0.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Both of these carry real content now -- "occasional / patchy data" and "profit
+   lost" rather than a raw class key and an abbreviation -- and --text-tertiary
+   measures 3.86:1 here. Ninth and tenth time that token has been wrong for text in
+   this project; see the note at its definition in tokens.css. */
 .wl-meta {
-  font-size: var(--fs-10); color: var(--text-tertiary); margin-top: 3px;
+  font-size: var(--fs-10); color: var(--text-secondary); margin-top: 3px;
   text-transform: uppercase; letter-spacing: var(--tracking-caps);
 }
 .wl-val { text-align: right; display: grid; gap: 2px; justify-items: end; }
@@ -393,7 +397,7 @@ code {
   color: var(--text-primary);
 }
 .wl-val .u {
-  font-size: var(--fs-10); color: var(--text-tertiary);
+  font-size: var(--fs-10); color: var(--text-secondary);
   text-transform: uppercase; letter-spacing: var(--tracking-caps);
 }
 .wl-tags { display: flex; gap: 3px; margin-top: 2px; justify-content: flex-end; }
