@@ -2402,3 +2402,27 @@
   color: var(--text-primary); font-weight: 500; box-shadow: var(--e1);
 }
 
+
+
+/* ---- the detailed view's own framing -----------------------------------
+   The spreadsheet's column names are the real ones on purpose. What was missing was
+   anything telling a reader who does not want them that they are in the expert view
+   and that Today and the Order list exist. Dismissible, and it stays dismissed. */
+.ws-note {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: var(--s4);
+  margin: 0 0 var(--s4); padding: var(--s3) var(--s5);
+  border-radius: var(--r-card);
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  font-size: var(--fs-12); line-height: var(--lh-prose-sm);
+  color: var(--text-secondary);
+}
+.ws-note b { color: var(--text-primary); font-weight: 600; }
+.ws-note[hidden] { display: none; }
+.ws-note-x {
+  margin-left: auto; flex: none; width: 20px; height: 20px; cursor: pointer;
+  background: transparent; border: 0; border-radius: 4px;
+  color: var(--text-secondary); font-size: var(--fs-14); line-height: 1;
+  transition: background var(--t-feedback) var(--ease), color var(--t-feedback) var(--ease);
+}
+.ws-note-x:hover { background: var(--bg-hover); color: var(--text-primary); }

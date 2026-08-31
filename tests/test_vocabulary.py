@@ -147,3 +147,50 @@ def test_every_blended_method_has_a_plain_label():
     assert not missing, (
         f"these methods carry weight but have no plain label in plain.js: {missing}"
     )
+
+def test_plain_js_is_the_only_table_of_user_facing_labels():
+    """One vocabulary, or it drifts -- and it had.
+
+    util.js carried a second label table, REASON_LABEL, whose values were
+    "service risk", "stale data", "censored history", "wide interval",
+    "moved vs prior", "cold start" and "terminal decline". plain.js has had
+    "Running out", "Pattern changed", "Shelf looked empty", "Hard to predict",
+    "Moved a lot", "Too new" and "Winding down" for the same seven keys since it was
+    written. Two tables meant two vocabularies, and the spreadsheet was showing the
+    wrong one to anyone who opened it -- including, through the grid's accessibility
+    mirror, to screen-reader users who had no visual context to compensate.
+
+    plain.js is the declared single source of user-facing wording. This asserts no
+    module reintroduces a rival.
+    """
+    banned_tables = ["REASON_LABEL", "CLASS_LABEL", "REASON_WORD"]
+    offenders = []
+    for rel in ("ui/js/util.js", "ui/js/app.js", "ui/js/grid.js", "ui/js/chart.js",
+                "ui/js/orders.js", "ui/js/stock.js"):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        for name in banned_tables:
+            if f"const {name}" in src or f"{name} =" in src:
+                offenders.append(f"{rel} defines {name}")
+    assert not offenders, (
+        "a second table of user-facing labels has reappeared:\n  "
+        + "\n  ".join(offenders)
+        + "\nPut the wording in plain.js and read it from there."
+    )
+
+
+def test_the_worklist_reads_its_labels_from_plain_js():
+    """The spreadsheet's filter chips printed the raw reason keys.
+
+    They read `risk`, `stale`, `censored`, `wide`, `swing`, `cold-start`, `terminal`
+    to the user -- the pipeline's own identifiers, on a surface a planner opens to
+    edit many products at once. The keys were always the same as plain.js's, so the
+    plain label was one lookup away and simply never asked for.
+    """
+    src = (ROOT / "ui" / "js" / "app.js").read_text(encoding="utf-8")
+    i = src.find("function renderFilters")
+    assert i > 0, "renderFilters has been renamed; update this test"
+    block = src[i:i + 1400]
+    assert "Plain.short(" in block, (
+        "the worklist chips no longer render through Plain.short(), so they are "
+        "printing raw reason keys to the user again"
+    )

@@ -103,19 +103,19 @@ const U = (() => {
   }
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  /* Short *plain* words, not short jargon. These label the densest surfaces in the
+     application, where the full phrases from plain.js ("Sells occasionally", "Being
+     discontinued") do not fit -- but "intermit" and "terminal" are not shorter English,
+     they are abbreviated method vocabulary, which is the thing this interface is not
+     supposed to put in front of a planner anywhere. */
   const CLASS_SHORT = {
-    smooth: "smooth", erratic: "erratic", intermittent: "intermit",
-    lumpy: "lumpy", cold_start: "cold-start", terminal: "terminal",
+    smooth: "steady", erratic: "jumpy", intermittent: "occasional",
+    lumpy: "bursty", cold_start: "new", terminal: "ending",
   };
   const REASON_COLOR = {
     risk: "--state-risk", stale: "--state-attention", censored: "--series-override",
     wide: "--series-forecast", swing: "--series-prior",
     "cold-start": "--state-excess", terminal: "--text-tertiary",
-  };
-  const REASON_LABEL = {
-    risk: "service risk", stale: "stale data", censored: "censored history",
-    wide: "wide interval", swing: "moved vs prior",
-    "cold-start": "cold start", terminal: "terminal decline",
   };
 
   /* Prepare a canvas for a CSS-pixel box on a high-DPI display. Skipping this
@@ -165,7 +165,7 @@ const U = (() => {
     esc,
     refresh, tk, nf, compact, money, pct, signed, signedPct,
     rgba, mix, hexToRgb, healthColor, varianceTint, clamp,
-    CLASS_SHORT, REASON_COLOR, REASON_LABEL,
+    CLASS_SHORT, REASON_COLOR,
     fitCanvas, isoWeek, shortDate, debounce,
   };
 })();

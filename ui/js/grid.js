@@ -621,24 +621,33 @@ const Grid = (() => {
         continue;
       }
       const flags = r.reasons && r.reasons.length
-        ? `, flagged ${r.reasons.map((x) => U.REASON_LABEL[x] || x).join(" and ")}`
+        ? `, flagged ${r.reasons.map((x) => Plain.short(x)).join(" and ")}`
         : "";
+      /* The mirror is what a screen reader actually reads, so it is the one surface
+         where raw vocabulary has no visual context to lean on. It printed the class
+         key ("terminal"), a bare health score and "target quantile" -- all of which
+         have plain equivalents that have existed since plain.js was written. */
       body +=
-        `<tr aria-selected="${i === sel}"><td>${r.item}</td><td>${r.store}</td>` +
-        `<td>${r.cls}</td><td>health ${num(r.health, 2)}${flags}</td>` +
+        `<tr aria-selected="${i === sel}">` +
+        `<td>${Review.prettyItem(r.item)}</td><td>${Review.prettyStore(r.store)}</td>` +
+        `<td>${Plain.CLASS[r.cls]?.label || r.cls}</td>` +
+        `<td>${Plain.quality(r.health).word} data quality${flags}</td>` +
         r.weekly.map((w) =>
-          `<td>${Math.round(w[3])} units, P10 ${Math.round(w[1])} to P90 ${Math.round(w[5])}</td>`
+          `<td>${Math.round(w[3])} units, likely between ${Math.round(w[1])} and ` +
+          `${Math.round(w[5])}</td>`
         ).join("") +
-        `<td>${Math.round(r.total)}</td><td>target quantile ${num(r.targetQ, 3)}</td>` +
-        `<td>order up to ${Math.round(r.orderUpTo)}</td></tr>`;
+        `<td>${Math.round(r.total)}</td>` +
+        `<td>aim to meet demand ${Math.round(r.targetQ * 100)} percent of the time</td>` +
+        `<td>stock up to ${Math.round(r.orderUpTo)}</td></tr>`;
     }
     const grouped = groupBy ? `, grouped by ${groupBy}` : "";
     aria.innerHTML =
       `<table><caption>Forecast grid${grouped}. Showing rows ${first + 1} to ` +
       `${Math.min(last, rows.length)} of ${rows.length}.</caption>` +
-      `<thead><tr><th>Item</th><th>Location</th><th>Class</th><th>Data health</th>` +
+      `<thead><tr><th>Product</th><th>Store</th><th>How it sells</th>` +
+      `<th>Data quality</th>` +
       cols.filter((c) => c.kind === "week").map((c) => `<th>${c.label}</th>`).join("") +
-      `<th>28 day total</th><th>Target quantile</th><th>Order up to</th></tr></thead>` +
+      `<th>28 day total</th><th>Service level</th><th>Stock up to</th></tr></thead>` +
       `<tbody>${body}</tbody></table>`;
   }
 

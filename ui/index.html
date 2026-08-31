@@ -384,12 +384,22 @@
     <!-- The exception worklist is permanent furniture, not a separate page.
          Planners do not browse thirty thousand SKUs; they work a queue, so the
          queue is the primary navigation. -->
-    <aside class="worklist" aria-label="Exception worklist">
+    <!-- Framing, not an apology. This is the bulk-editing instrument and its column
+         names are the real ones on purpose; a planner who wants plain wording has
+         Today and the Order list. Saying so is what stops the density reading as
+         confusion. -->
+    <p class="ws-note" id="wsNote">
+      <b>This is the detailed view.</b> It shows every number the system holds, using
+      their proper names, for editing many products at once.
+      <button class="ws-note-x" id="wsNoteHide" aria-label="Hide this note">&times;</button>
+    </p>
+
+    <aside class="worklist" aria-label="Flagged products">
       <div class="wl-head">
         <div class="wl-count" id="wlCount">—</div>
-        <div class="wl-label">exceptions in queue</div>
+        <div class="wl-label">products flagged</div>
       </div>
-      <div class="wl-filters" id="wlFilters" role="group" aria-label="Filter exceptions by reason"></div>
+      <div class="wl-filters" id="wlFilters" role="group" aria-label="Filter flagged products by reason"></div>
       <div class="wl-list" id="wlList" role="listbox" aria-label="Exceptions" tabindex="0"></div>
       <div class="wl-foot">
         <span id="wlFoot">—</span>

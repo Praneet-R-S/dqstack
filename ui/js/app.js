@@ -123,8 +123,9 @@
       .map(
         (k) =>
           `<button class="chip r-${k.replace("-start", "")}" data-reason="${k}"
-             aria-pressed="${state.filters.has(k)}" title="${U.REASON_LABEL[k]}">
-             <span class="dot"></span>${k}<span class="n">${counts[k]}</span></button>`
+             aria-pressed="${state.filters.has(k)}"
+             title="${U.esc(Plain.REASON_BY_KEY[k]?.detail || k)}">
+             <span class="dot"></span>${U.esc(Plain.short(k))}<span class="n">${counts[k]}</span></button>`
       )
       .join("");
     $("wlFilters").querySelectorAll(".chip").forEach((b) =>
@@ -150,7 +151,7 @@
           .map(
             (x) =>
               `<span class="wl-tag" style="color:var(${U.REASON_COLOR[x] || "--text-tertiary"})"
-                 title="${U.REASON_LABEL[x]}"></span>`
+                 title="${U.esc(Plain.short(x))}"></span>`
           )
           .join("");
         const lost = r.ledger.lostMargin;
@@ -159,12 +160,13 @@
                   style="--h-color:${U.healthColor(r.health)}">
           <div class="wl-gutter"></div>
           <div>
-            <div class="wl-id">${r.item.replace(/^(FOODS|HOUSEHOLD|HOBBIES)_/, "")} · ${r.store}</div>
-            <div class="wl-meta">${U.CLASS_SHORT[r.cls] || r.cls} · health ${r.health.toFixed(2)}</div>
+            <div class="wl-id">${U.esc(Review.prettyItem(r.item))} · ${U.esc(Review.prettyStore(r.store))}</div>
+            <div class="wl-meta">${U.CLASS_SHORT[r.cls] || r.cls} · ${
+              U.esc(Plain.quality(r.health).word.toLowerCase())} data</div>
           </div>
           <div class="wl-val">
             <div class="n">${lost > 0.005 ? U.money(lost) : U.nf(Math.round(r.total))}</div>
-            <div class="u">${lost > 0.005 ? "lost mgn" : "units 28d"}</div>
+            <div class="u">${lost > 0.005 ? "profit lost" : "units, 28 days"}</div>
             <div class="wl-tags">${tags}</div>
           </div>
         </div>`;
@@ -221,7 +223,7 @@
       </div>
       <dl class="kv">
         <dt>health score</dt><dd style="color:${U.healthColor(s.health)}">${s.health.toFixed(3)}</dd>
-        <dt>suspected censored days</dt><dd>${s.censoredDays}</dd>
+        <dt title="Censored demand: days the till recorded nothing while the product was meant to be on sale.">days the shelf looked empty</dt><dd>${s.censoredDays}</dd>
         <dt>out-of-assortment days</dt><dd>${s.ooaDays}</dd>
         <dt>price completeness</dt><dd>${U.pct(s.priceCompleteness, 1)}</dd>
         <dt>series age</dt><dd>${s.ageWeeks.toFixed(1)}w</dd>
@@ -233,7 +235,9 @@
         ${weights
           .map(
             ([k, v]) => `<div class="w-row">
-              <span style="color:var(--text-secondary)">${k.replace(/_/g, " ")}</span>
+              <span style="color:var(--text-secondary)"
+                    title="${U.esc(Plain.MODELS[k]?.term || k)}">${
+                U.esc(Plain.MODELS[k]?.label || k.replace(/_/g, " "))}</span>
               <span class="w-bar"><i style="width:${((v / wMax) * 100).toFixed(1)}%"></i></span>
               <span class="w-val">${(v * 100).toFixed(1)}%</span>
             </div>`
@@ -241,13 +245,13 @@
           .join("")}
       </div>
       <p style="font-size:10px;color:var(--text-tertiary);margin:8px 0 0;line-height:1.5">
-        Weights chosen by the meta-learner from this series' diagnostic features. Class
+        Each method is weighted by how well it has done on products like this one. Class
         <em>${U.CLASS_SHORT[s.cls] || s.cls}</em>, ADI ${s.adi ?? "—"}, CV² ${s.cv2 ?? "—"}.
       </p>
 
       <div class="panel-h" style="margin-top:18px">economics</div>
       <dl class="kv">
-        <dt>target quantile (critical fractile)</dt><dd>${s.targetQ.toFixed(3)}</dd>
+        <dt title="Target quantile, the critical fractile: underage / (underage + overage).">service level aimed at</dt><dd>${Math.round(s.targetQ * 100)}%</dd>
         <dt>underage — lost margin / unit</dt><dd>$${s.underage.toFixed(3)}</dd>
         <dt>overage — holding + markdown</dt><dd>$${s.overage.toFixed(3)}</dd>
         <dt class="dim" style="padding-left:10px">· holding</dt><dd class="dim">$${s.holdingComp.toFixed(3)}</dd>
@@ -453,12 +457,14 @@
     if (!r) return;
     state.selected = r.id;
     const s = r._s;
-    $("chartTitle").textContent = `${s.item} · ${s.store}`;
+    $("chartTitle").textContent =
+      `${Review.prettyItem(s.item)} · ${Review.prettyStore(s.store)}`;
     $("chartSub").innerHTML =
-      `${U.CLASS_SHORT[s.cls] || s.cls} · health <span style="color:${U.healthColor(s.health)}">${s.health.toFixed(2)}</span>` +
-      ` · ${s.censoredDays} censored days · ${s.ooaDays} not carried` +
+      `${U.CLASS_SHORT[s.cls] || s.cls} · <span style="color:${U.healthColor(s.health)}">${
+        U.esc(Plain.quality(s.health).word.toLowerCase())}</span> data` +
+      ` · ${s.censoredDays} days the shelf looked empty · ${s.ooaDays} days not stocked` +
       ` · prior version ${D.run.priorOrigin}` +
-      (s.reasons.length ? ` · ${s.reasons.map((x) => U.REASON_LABEL[x]).join(", ")}` : "");
+      (s.reasons.length ? ` · ${s.reasons.map((x) => U.esc(Plain.short(x))).join(", ")}` : "");
 
     $("ovWeek").innerHTML = [0, 1, 2, 3]
       .map((w) => `<option value="${w}">W${U.isoWeek(D.dates.future[w * 7])}</option>`)
@@ -1606,8 +1612,14 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     // horizon beside it; the sidebar stamp it used to live in is gone.
     paintDensityLabel();
     paintThemeLabel();
+    /* "item-locations" and "panel rows" are the pipeline's names for its own tables.
+       A planner opening the spreadsheet wants to know how much is in front of them,
+       which is products and stores, and the day count is what makes the big number
+       explicable rather than alarming. */
     $("crumbScope").textContent =
-      `${U.nf(D.run.nSeries)} item-locations · ${U.nf(D.run.nPanelRows)} panel rows`;
+      `${U.nf(D.run.nSeries)} products across ${
+        new Set(D.series.map((x) => x.store)).size} stores · ${
+        U.nf(D.run.historyDays)} days of history`;
 
     Grid.init({
       futureDates: D.dates.future,
@@ -2009,6 +2021,17 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
     // Sorting the grid is reflected in the breadcrumb, so the current ordering is
     // never ambiguous.
+    /* The detailed view's framing note, dismissed for good once it has done its job.
+       A note that returns every visit is a note that gets ignored and then resented. */
+    const WS_NOTE_KEY = "dq.wsNote";
+    try {
+      if (localStorage.getItem(WS_NOTE_KEY) === "hidden") $("wsNote").hidden = true;
+    } catch (_) {}
+    $("wsNoteHide").addEventListener("click", () => {
+      $("wsNote").hidden = true;
+      try { localStorage.setItem(WS_NOTE_KEY, "hidden"); } catch (_) {}
+    });
+
     const origSort = Grid.sortBy;
     Grid.sortBy = (k) => { origSort(k); $("crumbSort").textContent = k; };
 
