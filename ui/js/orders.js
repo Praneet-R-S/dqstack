@@ -115,8 +115,6 @@ window.Orders = (() => {
     $("orMore").textContent =
       `Show ${Math.min(60, list.length - state.limit)} more ` +
       `(${(list.length - state.limit).toLocaleString()} not shown)`;
-
-    $("orExport").disabled = sum.toOrderLines === 0;
   }
 
   function emptyWord() {
@@ -135,6 +133,16 @@ window.Orders = (() => {
      confident total over a half-counted assortment is the number most likely to be
      believed and most likely to be wrong. */
   function paintTotals(sum, scoped) {
+    /* Export lives here rather than in render(), because typing a count repaints the
+       totals in place -- a full render would take the caret with it -- and the button
+       depends on exactly the figure this function computes. Sitting in render() meant
+       a planner could enter counts, watch the total climb to $8.5k, and find Export
+       still greyed out with nothing on screen explaining why. */
+    $("orExport").disabled = sum.toOrderLines === 0;
+    $("orExport").title = sum.toOrderLines
+      ? `Download ${sum.toOrderLines} line${sum.toOrderLines === 1 ? "" : "s"} as a file`
+      : "Enter some stock counts first — there is nothing to order yet";
+
     $("orLines").textContent = sum.toOrderLines.toLocaleString();
     $("orUnits").textContent = Plain.units(sum.toOrderUnits);
     $("orCost").textContent = Plain.money(sum.toOrderCost);
