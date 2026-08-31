@@ -63,6 +63,9 @@ window.Orders = (() => {
                               !l.counted);
     } else if (state.show === "uncounted") {
       out = out.filter((l) => !l.counted);
+    } else if (state.show === "due") {
+      // Never counted, or counted longer ago than this product's class allows.
+      out = out.filter((l) => Stock.countDue(l.s).state !== "ok");
     } else if (state.show === "over") {
       out = out.filter((l) => l.coverStatus === "over");
     }
@@ -121,6 +124,7 @@ window.Orders = (() => {
     switch (state.show) {
       case "attention": return "Nothing needs ordering and nothing is uncounted. The shelves are covered.";
       case "uncounted": return "Every product in scope has a stock count.";
+      case "due": return "Nothing is due a count. Every product has been counted inside the interval its class asks for.";
       case "over": return "Nothing is carrying more than the forecast period needs.";
       default: return "No products in scope.";
     }
@@ -163,6 +167,7 @@ window.Orders = (() => {
     const e = U.esc;
     const s = l.s;
     const cw = Stock.COVER_WORD[l.coverStatus];
+    const due = Stock.countDue(s);
     return `<div class="or-row" data-id="${e(l.id)}" data-cover="${l.coverStatus}">
       <div class="or-cell or-name">
         <button class="or-link" data-open="${e(l.id)}"
@@ -176,6 +181,12 @@ window.Orders = (() => {
         <input id="oh-${e(l.id)}" class="or-input" type="number" min="0" step="1"
                inputmode="numeric" data-onhand="${e(l.id)}"
                value="${l.counted ? l.onHand : ""}" placeholder="count">
+        <span class="or-age" data-due="${e(due.state)}"
+              title="${e(s.abc || "C")}-class, so it wants counting every ${
+                due.every} days. ${e(Stock.countWord(s))}.">${
+          due.state === "never" ? "never counted"
+            : due.state === "stale" ? "due a recount"
+            : Stock.countWord(s)}</span>
       </div>
 
       <div class="or-cell or-cover">
@@ -304,6 +315,16 @@ window.Orders = (() => {
       '<span class="or-sub">to order</span>';
     el.querySelector(".or-line-cost").textContent =
       l.lineCost == null ? "—" : Plain.money(l.lineCost);
+    // The count was just taken, so its age resets with it.
+    const age = el.querySelector(".or-age");
+    if (age) {
+      const due = Stock.countDue(s);
+      age.dataset.due = due.state;
+      age.textContent = due.state === "never" ? "never counted"
+        : due.state === "stale" ? "due a recount" : Stock.countWord(s);
+      age.title = `${s.abc || "C"}-class, so it wants counting every ${due.every} days. ` +
+                  `${Stock.countWord(s)}.`;
+    }
   }
 
   return { init, render, orderRows, get state() { return state; },

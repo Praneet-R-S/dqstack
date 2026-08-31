@@ -2050,6 +2050,57 @@
 .sb-ord-warn:hover { background: color-mix(in srgb, var(--state-attention) 20%, transparent); }
 .sb-ord-warn:active { transform: translateY(1px); }
 
+/* ==================================================== stock take
+
+   Reported by class rather than as one number: "412 due" is a wall, "all 306 A lines
+   are due" is a morning's work with a reason. The bar is the share of that class due
+   now, so a full bar on the A row is the thing that should pull the eye. */
+.sb-count { display: grid; gap: var(--s3); margin: var(--s2) var(--s4) var(--s4); }
+.sb-count-hero {
+  display: grid; gap: 1px; padding: var(--s3) var(--s4); cursor: pointer;
+  text-align: left; border-radius: 5px;
+  background: var(--bg-inset); border: 1px solid var(--border-subtle);
+  transition: background var(--t-feedback) var(--ease), border-color var(--t-feedback) var(--ease);
+}
+.sb-count-hero:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.sb-count-hero:active { transform: translateY(1px); }
+.sb-count-n {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-15); font-weight: 600; color: var(--text-primary); line-height: 1.1;
+}
+.sb-count-cap { font-size: var(--fs-10); color: var(--text-secondary); }
+.sb-count-rows { display: grid; gap: 3px; }
+.sb-count-row { display: flex; align-items: center; gap: var(--s4); cursor: help; }
+.sb-count-cls {
+  flex: none; width: 10px; font-family: var(--font-num); font-size: var(--fs-10);
+  font-weight: 600; color: var(--text-secondary);
+}
+.sb-count-bar {
+  flex: 1; min-width: 0; height: 4px; border-radius: var(--r-pill);
+  background: var(--bg-inset); overflow: hidden;
+}
+.sb-count-bar i {
+  display: block; height: 100%; border-radius: var(--r-pill);
+  background: var(--state-attention);
+}
+.sb-count-frac {
+  flex: none; min-width: 42px; text-align: right;
+  font-family: var(--font-num); font-size: var(--fs-10);
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.sb-count-frac small { opacity: 0.65; }
+.sb-count-key {
+  margin: 0; font-size: var(--fs-10); line-height: var(--lh-caption);
+  color: var(--text-secondary);
+}
+
+/* The count's age, under the input that sets it. A stock figure with no age is a
+   stock figure you cannot decide whether to trust. */
+.or-age { font-size: var(--fs-10); color: var(--text-secondary); cursor: help; }
+.or-age[data-due="never"] { color: var(--text-secondary); }
+.or-age[data-due="stale"] { color: var(--state-attention); }
+.or-age[data-due="ok"] { color: var(--state-excess); }
+
 /* ---- stock cover: the same row shape as the queue, deliberately ---------
    A planner reads one list of "count, label, number" in this rail and should not
    have to learn a second grammar for the block underneath it. */
@@ -2260,6 +2311,7 @@
 :root[data-sidebar="closed"] .sb-views,
 :root[data-sidebar="closed"] .sb-view-add,
 :root[data-sidebar="closed"] .sb-order,
+:root[data-sidebar="closed"] .sb-count,
 :root[data-sidebar="closed"] .sb-mix,
 :root[data-sidebar="closed"] .sb-stores,
 :root[data-sidebar="closed"] .sb-sec-tag,

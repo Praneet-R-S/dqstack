@@ -612,6 +612,50 @@
         </button>` : ""}`;
   }
 
+  /* ---- stock take: what to count, and when ------------------------------
+
+     Nobody counts a whole shop at once. Inventory teams cycle count, and the interval
+     comes from what a line is worth: the A lines come round in a week, the tail in a
+     quarter. Without this the counts the order list depends on decay silently -- they
+     were true once and nothing said how long ago.
+
+     The block reports by class rather than as one number, because "412 due" is a
+     wall and "all 306 A lines are due" is a morning's work with a reason. */
+  function paintCountBlock() {
+    const host = $("sbCount");
+    if (!host) return;
+    const plan = Stock.countPlan(scoped());
+    $("sbCountTag").textContent = plan.n ? String(plan.n) : "";
+
+    if (!plan.n) {
+      host.innerHTML =
+        '<p class="sb-empty">Everything has been counted inside its interval</p>';
+      return;
+    }
+    host.innerHTML = `
+      <button class="sb-count-hero" data-order-go="due"
+              title="Open the count list, most valuable first. Every product here is either uncounted or older than its class allows.">
+        <span class="sb-count-n">${plan.n.toLocaleString()}</span>
+        <span class="sb-count-cap">due a count · ${Plain.money(plan.dueValue)} on the shelf</span>
+      </button>
+      <div class="sb-count-rows">
+        ${["A", "B", "C"].map((c) => {
+          const b = plan.byClass[c] || { due: 0, total: 0 };
+          if (!b.total) return "";
+          const pct = b.total ? (b.due / b.total) * 100 : 0;
+          return `<div class="sb-count-row"
+                       title="${U.esc(Stock.ABC_WORD[c])} — counted every ${
+                         plan.intervals[c]} days. ${b.due} of ${b.total} due now.">
+            <span class="sb-count-cls">${c}</span>
+            <span class="sb-count-bar"><i style="width:${pct.toFixed(1)}%"></i></span>
+            <span class="sb-count-frac">${b.due}<small>/${b.total}</small></span>
+          </div>`;
+        }).join("")}
+      </div>
+      <p class="sb-count-key">Counted every ${plan.intervals.A}, ${
+        plan.intervals.B} and ${plan.intervals.C} days by value.</p>`;
+  }
+
   /* ---- stock cover: how long the shelves last --------------------------- */
   const COVER_ROWS = [
     { key: "critical", tone: "--state-risk" },
@@ -866,7 +910,8 @@
   function paintSidebar() {
     paintDrafts(); paintSession(); paintHealth(); paintCycle(); paintWatchBlock();
     paintViews(Review.viewList());
-    paintOrderBlock(); paintCoverBlock(); paintMixBlock(); paintStoresBlock();
+    paintOrderBlock(); paintCountBlock(); paintCoverBlock();
+    paintMixBlock(); paintStoresBlock();
   }
 
 
@@ -1728,7 +1773,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     /* ---- the inventory blocks. Every figure in them is a way into the order list
        filtered to what that figure counts, so a number in the rail is never just a
        number -- it is the door to the list behind it. */
-    for (const id of ["sbOrder", "sbCover"]) {
+    for (const id of ["sbOrder", "sbCount", "sbCover"]) {
       $(id).addEventListener("click", (e) => {
         const b = e.target.closest("[data-order-go]");
         if (!b) return;

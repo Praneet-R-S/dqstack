@@ -103,7 +103,15 @@
         <div class="sb-order" id="sbOrder"></div>
       </details>
 
-      <!-- 5. Stock cover. How long the shelves last, in four buckets, each one a
+      <!-- 5. Stock take. Nobody counts a whole shop at once, so the lines that carry
+              the money come round faster than the tail. Driven by the same ABC class
+              the pipeline already assigns. -->
+      <details class="sb-sec" id="secCount">
+        <summary class="sb-group">Stock take<span class="sb-sec-tag" id="sbCountTag"></span></summary>
+        <div class="sb-count" id="sbCount"></div>
+      </details>
+
+      <!-- 6. Stock cover. How long the shelves last, in four buckets, each one a
               filter into the order list. -->
       <details class="sb-sec" id="secCover" open>
         <summary class="sb-group">Stock cover<span class="sb-sec-tag" id="sbCoverTag"></span></summary>
@@ -599,6 +607,7 @@
         <div class="or-filters" id="orFilters" role="group" aria-label="Which products to list">
           <button class="or-filter" data-show="attention" aria-pressed="true">Needs a decision</button>
           <button class="or-filter" data-show="uncounted" aria-pressed="false">Not counted</button>
+          <button class="or-filter" data-show="due" aria-pressed="false">Due a count</button>
           <button class="or-filter" data-show="over" aria-pressed="false">Overstocked</button>
           <button class="or-filter" data-show="all" aria-pressed="false">Everything</button>
         </div>
