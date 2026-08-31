@@ -538,9 +538,10 @@ def build():
         ("III", "Architecture", "Constraints, the read path, and in-browser SQL"),
         ("IV", "The design system", "Identity, colour, type, space, motion"),
         ("V", "The interface", "Every view, control and keyboard path"),
-        ("VI", "Evidence and results", "Accuracy, calibration, and economics"),
-        ("VII", "Engineering record", "Defects found, budgets measured"),
-        ("VIII", "Limits", "What is deliberately not built"),
+        ("VI", "Replenishment", "Stock counts, the order list, and cycle counting"),
+        ("VII", "Evidence and results", "Accuracy, calibration, and economics"),
+        ("VIII", "Engineering record", "Defects found, budgets measured"),
+        ("IX", "Limits", "What is deliberately not built"),
     ]
     A(table([["", "Part", "Contents"]] + [[a, b, c] for a, b, c in toc],
             [12 * mm, 52 * mm, W - 64 * mm], align_right=(0,)))
@@ -903,19 +904,48 @@ def build():
     A(Sec(doc, "V - The interface"))
     A(PageBreak())
     h1("Part V", "The interface")
-    p("Six destinations in a sidebar, grouped by intent. Everything is reachable in one click; "
-      "no feature is more than two.", LEAD)
+    p("Four destinations in a sidebar of nine collapsible blocks. Everything is reachable in "
+      "one click; no feature is more than two.", LEAD)
 
     A(table([
         ["Group", "Destination", "What it is for"],
         ["Your work", "Today", "The decision queue. The landing view."],
+        ["", "Order list", "What to buy: target minus what is on the shelf."],
         ["", "Products", "Browse the range, inspect one product, change the range."],
         ["Understand it", "How it's doing", "Accuracy, calibration and economics."],
         ["", "Ordering decisions", "Why two products with the same forecast get different orders."],
         ["", "How it works", "The eight stages, with this run's own numbers."],
+        ["", "Policy cost", "What each of nine ways of running the system earned."],
         ["Tools", "Spreadsheet", "The bulk-editing instrument: canvas grid, keyboard-driven."],
         ["", "Glossary, SQL console, shortcuts", "Plain-English definitions; ad-hoc queries; the key map."],
     ], [26 * mm, 40 * mm, W - 66 * mm]))
+
+    A(Paragraph("The sidebar", H2))
+    p("The rail holds the planner's own work rather than the application's features, which is "
+      "the distinction an external review drew and the reason it grew rather than shrank. Every "
+      "block carries a live number: a rail where nothing changes between visits is a list of "
+      "links, and a rail where six figures moved overnight is the first thing read each morning.")
+    p("It outgrew one screen once it carried replenishment as well as review, so every block is "
+      "a native disclosure element whose open set is remembered per browser - a buyer lives in "
+      "the order block, a demand planner lives in the queue, and neither should scroll past the "
+      "other's. <b>A collapsed block still reports its figure in its heading</b>, because the "
+      "whole argument for this rail is that a closed block is not a silent one.")
+    A(table([
+        ["Block", "What it reports", "Where it goes"],
+        ["Cycle", "Vintage of the forecast, position in its horizon", "-"],
+        ["Replenishment", "Today's order cost over the counted share it describes",
+         "Order list"],
+        ["Stock take", "What is due a count, by value class", "Order list, filtered"],
+        ["Stock cover", "Four buckets: runs out first, needs topping up, covered, overstocked",
+         "Order list, filtered"],
+        ["Your queue", "The day's decisions grouped by cause, with exposure",
+         "Today, filtered"],
+        ["Range mix", "ABC against XYZ, shaded by share of stock value", "Products, filtered"],
+        ["Watching", "Pinned products and how far they moved", "Products"],
+        ["Saved views", "Scope, filter and tab under a chosen name", "Today, restored"],
+        ["Stores", "All stores ranked by units to stock, yours pinned", "Sets scope"],
+        ["Session", "Decisions made, exposure covered, and an undo", "-"],
+    ], [30 * mm, W - 70 * mm, 40 * mm]))
 
     A(Paragraph("Today - the decision queue", H2))
     p("The front door shows a day's work, not the backlog. Of the flagged series, the "
@@ -923,22 +953,76 @@ def build():
       "actually finishes it - an earlier version re-sliced the queue on every render, so the "
       "progress readout went '1 of 25', then '2 of 26', and the finish line moved away as you "
       "worked.")
-    p("Each item is one card asking one question, with one obvious answer:")
+    p("Each item is one card asking one question, with one obvious answer. The card is built "
+      "in four rungs, in the order a decision is actually made - a planner clearing twenty-four "
+      "of these reads the same layout twenty-four times, so what sits where does more work here "
+      "than anywhere else in the application:")
     A(table([
-        ["Element", "Content"],
-        ["Money at risk", "Lost margin plus waste from the ledger - the ranking key."],
-        ["Identity", "Product, store, category, and how it sells."],
-        ["Why it is here", "The headline reason in a sentence, from a fixed priority order."],
-        ["Chart", "35 days of sales and the 28-day fan, bled to the card edges."],
-        ["Four figures", "Next week's forecast and its range; change since last week; "
-                         "stock-up-to level and service target; data quality and confidence."],
-        ["Actions", "Approve / Change / Skip, plus 'Why this number?' and 'Full details'."],
-    ], [34 * mm, W - 34 * mm]))
+        ["Rung", "Question it answers", "Content"],
+        ["0", "Is this worth my attention?",
+         "Position in the day's list, money at risk, how long the product has been selling."],
+        ["1", "What am I deciding?",
+         "Product and store; next week's forecast with its range; the stock-up-to level "
+         "with the cost curve beside it."],
+        ["2", "Why is it in front of me?",
+         "The headline reason in one sentence, from a fixed priority order, and the chart "
+         "behind it: 35 days of sales and the 28-day fan, bled to the card edges."],
+        ["3", "Do it", "Approve / Change / Skip, plus the drawer and the product page."],
+    ], [14 * mm, 44 * mm, W - 58 * mm]))
     p("Exactly one filled button is on screen per card. That hierarchy is what makes a card "
-      "answerable in one click without reading all of it. Confidence and data-quality wording "
-      "is calibrated to the terciles of this assortment rather than to guessed cutoffs - "
-      "hardcoded thresholds put every visible card in one bucket, which trains a planner to "
-      "ignore the field.")
+      "answerable in one click without reading all of it. Exposure was a hero figure and did "
+      "not deserve to be: it is the reason the card sits in this position, and the position now "
+      "states that directly.")
+    p("Six figures came off the face of the card and into the drawer behind <b>W</b>, ordered so "
+      "the two that qualify the decision come first and the four that explain the cost curve "
+      "follow. A planner told that running out costs 2.2x more than overstocking, who wants to "
+      "know why, finds the margin, the shelf life, the value of the line and how often it sells "
+      "- which is where the answer actually is. The drawer also carries how the last 28 days "
+      "went, where the number came from, and what to do.")
+    p("Confidence and data-quality wording is calibrated to the terciles of this assortment "
+      "rather than to guessed cutoffs - hardcoded thresholds put every visible card in one "
+      "bucket, which trains a planner to ignore the field.")
+
+    A(Paragraph("The cost curve", H3))
+    p("The ordering layer's argument is that two products with the same forecast deserve "
+      "different stock levels, because the two ways of being wrong do not cost the same and how "
+      "unequal they are is a property of the product. Said in a paragraph, nobody reads it. "
+      "Drawn as a shape with the recommendation at the bottom of it, it is learnable in a week "
+      "without meeting a technical term.")
+    p("The curve's minimum <b>is</b> the recommended level, by construction rather than by "
+      "fitting: a low point sitting beside the number printed above it would discredit both, "
+      "silently. The demand distribution is rebuilt from two figures the bundle states exactly "
+      "- the mean of the cover window, and F(order-up-to) = the target service level - which "
+      "determines a two-parameter distribution. Verified at a worst offset of <b>0.000%</b> "
+      "across all 997 series that have a forecast.")
+    p("It differentiates, which is the point. Across the assortment the ratio of under-ordering "
+      "cost to over-ordering cost runs 1.25 to 5.36, and the extremes are the thesis itself: "
+      "720-day-shelf, 44-53% margin lines are visibly lopsided, and 21-day-shelf, 17% margin "
+      "food is visibly flat.")
+
+    A(Paragraph("Changing a number", H3))
+    p("An override states a reason, and the reason is required. Every other fact about a "
+      "decision can be rebuilt later - what the model said, what was chosen, what it was worth "
+      "- but 'the end cap goes up on Tuesday' exists only in the head of whoever typed the "
+      "number, and it is the one column that could teach a later run something. Six codes, plus "
+      "free text: promotion, local event, supply, price, range, own knowledge.")
+    p("A guardrail reports where the number sits, live as it is typed, and in odds rather than "
+      "percentiles: 'about a 1 in 11 chance demand reaches this level'. Beyond the exported "
+      "ladder it says so plainly. It is a guardrail and not a block - the planner is allowed to "
+      "be right when the model is wrong, which is the whole reason an override exists. The "
+      "expected effect comes from the same estimator the spreadsheet cell and the commit summary "
+      "quote, so the three surfaces cannot disagree.")
+
+    A(Paragraph("The work bar", H3))
+    p("A planner with twenty-four cards and forty minutes spends the same click on a $9 item as "
+      "on a $16,000 one. Approve-all fixes that by discarding the judgement; a threshold keeps "
+      "the judgement where the money is. Thresholds are percentiles of the list in front of the "
+      "planner, and an offer survives only if it is genuinely the small tail: at most 45% of the "
+      "items and at most 15% of the money. A tier with no small items correctly offers nothing "
+      "rather than relabelling approve-all.")
+    p("Batching is a window over the fixed cohort, never a re-slice of it. The cards on screen "
+      "go from twenty-four to five while the headline, the money at risk, the progress readout "
+      "and the position all stay exactly as they were.")
 
     A(Paragraph("Keyboard", H3))
     A(table([
@@ -947,7 +1031,13 @@ def build():
         ["A or Enter", "Approve", "O", "Open the product page"],
         ["C", "Change the number", "?", "Shortcut sheet"],
         ["S", "Skip", "Cmd-K", "Search"],
+        ["Cmd-Z", "Undo the last decision", "Esc", "Close whatever is open"],
     ], [20 * mm, 52 * mm, 20 * mm, W - 92 * mm]))
+    p("Undo reverses an <i>action</i>, not a row. Once one press can approve five items, undoing "
+      "them one at a time is not an undo, so every decision carries the sequence number of the "
+      "action that made it and a bulk approve is one unit in the undo stack exactly as it was "
+      "one click in the interface. Committed decisions are deliberately not undoable, because "
+      "the planner has already been told they were final.")
     p("The spreadsheet keeps its own nine bindings - arrows, range selection, fill-down, "
       "Excel-compatible copy and paste, undo and redo across the whole pending set. The "
       "letters above were chosen to be sayable rather than to mirror spreadsheet convention, "
@@ -1003,9 +1093,82 @@ def build():
       "deliberately no longer the default surface.")
 
     # =============================================================== VI
-    A(Sec(doc, "VI - Evidence"))
+    # =============================================================== VI
+    A(Sec(doc, "VI - Replenishment"))
     A(PageBreak())
-    h1("Part VI", "Evidence and results")
+    h1("Part VI", "Replenishment")
+    p("The system could forecast demand and compute a target - stock up to 156 units - and then "
+      "stopped. It never asked the one question that turns a target into an order: how many are "
+      "on the shelf now. Every screen was a recommendation nobody could act on.", LEAD)
+
+    A(Paragraph("On-hand is entered, never invented", H2))
+    p("Stock counts are typed by the planner and kept in the browser. They are not derived, "
+      "estimated, or back-filled from the simulation, and there is deliberately <b>no "
+      "'fill these in for me' button</b>. A fabricated count flows straight into an order "
+      "quantity and out of the building as a purchase, which makes this the one place in the "
+      "system where a plausible-looking invention would cost real money.")
+    p("So a product is in one of two states and the interface always says which. A product with "
+      "no count shows a dash, never 'order 0'. Zero is a real answer meaning 'you have none', "
+      "and conflating the two would hide every uncounted product inside a list of products that "
+      "need nothing.")
+    A(table([
+        ["Quantity", "Definition"],
+        ["Order quantity", "stock up to  -  what is on the shelf. Null, not zero, when uncounted."],
+        ["Days of cover", "on hand / expected demand per day over the window the order covers."],
+        ["Cover status",
+         "Below the lead time the shelf empties before a delivery can land; below the review "
+         "period plus lead time it will not last the window this order covers; above the "
+         "forecast horizon it is carrying more than the period needs."],
+    ], [34 * mm, W - 34 * mm]))
+    p("The thresholds are the ordering policy's own windows, so they cannot drift from the logic "
+      "that produced the target.")
+
+    A(Paragraph("The order list", H2))
+    p("Rows are ordered by how soon the shelf empties rather than by name or by value, which is "
+      "the only ordering that makes the list safe to abandon halfway through. Counts save as "
+      "they are typed - a count is a fact about the world, not a proposal, so there is nothing "
+      "to confirm about it, unlike a forecast override, which is a judgement and therefore has "
+      "a reason attached. Enter moves to the next count, the way anyone types a stock take.")
+    p("The header reports the order total and the counted share as two figures that are never "
+      "added, because a confident total over a half-counted range is the number most likely to "
+      "be believed and most likely to be wrong. Export produces a purchase order with a TOTAL "
+      "line, separate from the decisions export because it is a different document for a "
+      "different reader: one is a record of judgements, the other is a list of goods and a price.")
+
+    A(Paragraph("Cycle counting", H2))
+    p("Nobody counts a whole shop at once. Counts carry a timestamp, and the recount interval "
+      "comes from the ABC class the pipeline already assigns - so the lines that carry the money "
+      "come round faster than the tail. Without an age, a figure entered three months ago and "
+      "one entered this morning look identical, and the order list depends on both equally.")
+    A(table([
+        ["Class", "Meaning", "Counted every"],
+        ["A", "Your biggest earners", "7 days"],
+        ["B", "Middle of the range", "28 days"],
+        ["C", "The long tail", "91 days"],
+    ], [18 * mm, W - 58 * mm, 40 * mm], align_right=(2,)))
+    p("The intervals are the textbook ones and deliberately round. They are a starting policy, "
+      "not a claim; what matters is that a count has an age at all and that value sets the "
+      "frequency. A count whose age cannot be established is treated as due for recount, which "
+      "is the safe reading.")
+    p("Uncounted products are ranked by what a full shelf of each is worth - the only value "
+      "figure that exists for something nobody has counted. A thousand blank fields is not a "
+      "task anyone starts; naming the value that cannot become an order until they are counted, "
+      "and listing the most valuable first, turns a chore into a decision about where to spend "
+      "an hour.")
+
+    A(Paragraph("Classification the pipeline already had", H2))
+    p("ABC ranks products by what they are worth; XYZ by how predictable they are. Both have "
+      "been assigned to all thousand products since the first run and no planner-facing screen "
+      "ever showed either. The rail presents them as a three-by-three grid rather than two "
+      "lists, because the pairing is the point: an A product that is hard to predict needs a "
+      "person, a C product that is hard to predict needs a rule, and neither list says that "
+      "alone. Shade carries share of stock value, so the eye lands on where the money sits "
+      "rather than on where the product count is highest - which is the long tail, always, and "
+      "never the answer.")
+
+    A(Sec(doc, "VII - Evidence"))
+    A(PageBreak())
+    h1("Part VII", "Evidence and results")
     bt = F["backtest"]
     p(f"Rolling-origin backtest over {bt['n_origins']} origins from {bt['origins'][0]} to "
       f"{bt['origins'][-1]}, with <b>paired</b> inference - Wilcoxon signed-rank and an exact "
@@ -1113,9 +1276,9 @@ def build():
       "inflating a genuine zero into imagined demand is the more expensive error.")
 
     # =============================================================== VII
-    A(Sec(doc, "VII - Engineering record"))
+    A(Sec(doc, "VIII - Engineering record"))
     A(PageBreak())
-    h1("Part VII", "Engineering record")
+    h1("Part VIII", "Engineering record")
     p("A record of defects found and fixed is part of the argument, not an appendix to it: "
       "several of these were silently flattering results, and would have survived into a "
       "written claim if the system had not been instrumented to catch them.", LEAD)
@@ -1205,9 +1368,9 @@ def build():
     ], W))
 
     # =============================================================== VIII
-    A(Sec(doc, "VIII - Limits"))
+    A(Sec(doc, "IX - Limits"))
     A(PageBreak())
-    h1("Part VIII", "Limits and what is deliberately not built")
+    h1("Part IX", "Limits and what is deliberately not built")
     p("Stated plainly, because a system that hides its boundaries is making the same mistake "
       "as a forecast that hides its uncertainty.", LEAD)
 
@@ -1259,9 +1422,11 @@ def build():
         "their own price.", NOTE))
 
     doc.build(st)
-    return OUT
+    # The page count is worth reporting: it is the cheapest signal that a section was
+    # added or lost, and the document is long enough that nobody notices either by eye.
+    return OUT, doc.page
 
 
 if __name__ == "__main__":
-    out = build()
-    print(f"wrote {out}  ({out.stat().st_size / 1024:.0f} KB)")
+    out, pages = build()
+    print(f"wrote {out}  ({out.stat().st_size / 1024:.0f} KB, {pages} pages)")
