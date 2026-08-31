@@ -937,7 +937,17 @@ window.Review = (() => {
     for (const k of ["urgent", "check", "later", "done"]) {
       const b = document.querySelector(`.rv-tab[data-tab="${k}"]`);
       if (!b) continue;
-      b.querySelector(".n").textContent = String(c[k]);
+      /* "24 of 489", not a bare "24".
+
+         Every tier's cohort is capped at the same limit, so all three tabs read
+         exactly 24 and the strip looked like a filter that did nothing — three
+         identical numbers over three genuinely different lists of 489, 276 and 83.
+         Naming the tier's real size differentiates them and explains the cap in the
+         same breath. The tooltip already said this; nobody hovers a number they have
+         already concluded is broken. */
+      b.querySelector(".n").textContent = c[k + "Behind"]
+        ? `${c[k]} of ${c[k + "Total"].toLocaleString()}`
+        : String(c[k]);
       b.title = k === "done"
         ? "Decisions you have made in this session"
         : c[k + "Behind"]

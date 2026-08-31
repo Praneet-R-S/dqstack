@@ -291,8 +291,26 @@ window.Orders = (() => {
       if (b) hooks.onOpenProduct?.(b.dataset.open);
     });
 
+    /* The warning banner's way into the list it is warning about. A listener rather
+       than an inline handler, like every other control in this application -- an
+       onclick attribute reaches for the global and cannot be seen from this file. */
+    $("orShowUncounted").addEventListener("click", () => focusShow("uncounted"));
+
     $("orExport").addEventListener("click", () => hooks.onExport?.(orderRows()));
 
+    render();
+  }
+
+  /** Switch which rows are listed, keeping the pressed state on the filter strip in
+      step. One implementation, so the rail, the warning banner and the strip itself
+      cannot end up disagreeing about which filter is active. */
+  function focusShow(show) {
+    state.show = show; state.limit = 60;
+    const b = document.querySelector(`#orFilters [data-show="${show}"]`);
+    if (b) {
+      document.querySelectorAll("#orFilters [data-show]").forEach((x) =>
+        x.setAttribute("aria-pressed", String(x === b)));
+    }
     render();
   }
 
@@ -329,11 +347,5 @@ window.Orders = (() => {
 
   return { init, render, orderRows, get state() { return state; },
            setStore(v) { state.store = v; $("orStore").value = v; state.limit = 60; render(); },
-           focus(show) {
-             state.show = show; state.limit = 60;
-             const b = document.querySelector(`#orFilters [data-show="${show}"]`);
-             if (b) document.querySelectorAll("#orFilters [data-show]").forEach((x) =>
-               x.setAttribute("aria-pressed", String(x === b)));
-             render();
-           } };
+           focus: focusShow };
 })();

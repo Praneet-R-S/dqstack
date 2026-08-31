@@ -99,7 +99,7 @@
       <!-- 4. Replenishment. The block a store manager opens first: what today's order
               costs, and how much of the range has not been counted. -->
       <details class="sb-sec" id="secOrder" open>
-        <summary class="sb-group">Replenishment<span class="sb-sec-tag" id="sbOrderTag"></span></summary>
+        <summary class="sb-group" title="What today&rsquo;s order would cost, and how much of the range still needs counting">Replenishment<span class="sb-sec-tag" id="sbOrderTag"></span></summary>
         <div class="sb-order" id="sbOrder"></div>
       </details>
 
@@ -107,21 +107,21 @@
               the money come round faster than the tail. Driven by the same ABC class
               the pipeline already assigns. -->
       <details class="sb-sec" id="secCount">
-        <summary class="sb-group">Stock take<span class="sb-sec-tag" id="sbCountTag"></span></summary>
+        <summary class="sb-group" title="Which products are due a stock count. The lines worth most come round most often.">Stock take<span class="sb-sec-tag" id="sbCountTag"></span></summary>
         <div class="sb-count" id="sbCount"></div>
       </details>
 
       <!-- 6. Stock cover. How long the shelves last, in four buckets, each one a
               filter into the order list. -->
       <details class="sb-sec" id="secCover" open>
-        <summary class="sb-group">Stock cover<span class="sb-sec-tag" id="sbCoverTag"></span></summary>
+        <summary class="sb-group" title="How long the stock on your shelves will last before it runs out">Stock cover<span class="sb-sec-tag" id="sbCoverTag"></span></summary>
         <div class="sb-cover" id="sbCover"></div>
       </details>
 
       <!-- 6. The queue, by cause, with exposure. The block that makes the rail an
               instrument rather than a menu. -->
       <details class="sb-sec" id="secQueue" open>
-        <summary class="sb-group">Your queue<span class="sb-sec-tag" id="sbQueueTag"></span></summary>
+        <summary class="sb-group" title="Today&rsquo;s decisions, grouped by the reason each one was flagged">Your queue<span class="sb-sec-tag" id="sbQueueTag"></span></summary>
         <div class="sb-queue" id="sbQueue"></div>
       </details>
 
@@ -129,20 +129,20 @@
               predictable it is. The pipeline has assigned both since the first run
               and no planner-facing screen ever showed them. -->
       <details class="sb-sec" id="secMix">
-        <summary class="sb-group">Range mix<span class="sb-sec-tag" id="sbMixTag"></span></summary>
+        <summary class="sb-group" title="Every product by what it earns you (A to C) and how predictable it is (X to Z)">Range mix<span class="sb-sec-tag" id="sbMixTag"></span></summary>
         <div class="sb-mix" id="sbMix"></div>
       </details>
 
       <!-- 8. Watching. -->
       <details class="sb-sec" id="secWatch">
-        <summary class="sb-group">Watching<span class="sb-sec-tag" id="sbWatchTag"></span></summary>
+        <summary class="sb-group" title="Products you have pinned, so they show up every day whether flagged or not">Watching<span class="sb-sec-tag" id="sbWatchTag"></span></summary>
         <div class="sb-watch" id="sbWatch"></div>
       </details>
 
       <!-- 9. Saved views. A planner who narrows to the same slice every morning
               should not rebuild it every morning. -->
       <details class="sb-sec" id="secViews">
-        <summary class="sb-group">Saved views
+        <summary class="sb-group" title="Remember a filter you use often, and come back to it in one click">Saved views
           <button class="sb-view-add" id="sbViewAdd"
                   title="Remember the scope, the filter and the tab you are looking at now">+ Save</button>
         </summary>
@@ -153,13 +153,13 @@
                bundle already exports. A store manager's first question about any
                figure is whether it is normal, and that needs a comparison. -->
       <details class="sb-sec" id="secStores">
-        <summary class="sb-group">Stores<span class="sb-sec-tag" id="sbStoresTag"></span></summary>
+        <summary class="sb-group" title="How your stores compare by how much stock they need. Click one to work in it.">Stores<span class="sb-sec-tag" id="sbStoresTag"></span></summary>
         <div class="sb-stores" id="sbStores"></div>
       </details>
 
       <!-- 11. Scope. -->
       <details class="sb-sec" id="secScope" open>
-        <summary class="sb-group">Scope</summary>
+        <summary class="sb-group" title="Limit everything on screen &mdash; every list and every figure &mdash; to one store">Scope</summary>
         <div class="sb-scope">
           <label class="sr-only" for="sbScope">Stores in scope</label>
           <select id="sbScope" class="sel"><option value="">All stores</option></select>
@@ -190,6 +190,12 @@
       <!-- Evidence sits in the footer deliberately. It is a real destination that
            analysts and examiners need, and putting it here says plainly that it is
            not part of the daily loop -- without hiding it or apologising for it. -->
+      <!-- The way back to the orientation, permanently. A welcome a user can never
+           see again is a welcome they cannot use as a reference. -->
+      <button class="sb-item sb-small" id="helpOpen"
+              title="What this application does, and the two jobs it is for">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M6.3 6.2a1.8 1.8 0 1 1 2.3 2.1c-.4.2-.6.5-.6.9v.4"/><path d="M8 12.1v.01"/></svg><span>How this works</span>
+      </button>
       <button class="sb-item sb-small" id="sbEvidence">
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 13V3"/><path d="M2.5 13h11"/><path d="M5 10.5l2.5-3 2 2 3-4"/></svg><span>Evidence</span>
         <span class="sb-dot" id="sbEngineDot" data-status="idle" aria-hidden="true"></span>
@@ -572,8 +578,9 @@
       <header class="or-head">
         <div class="or-head-main">
           <h1>What to order</h1>
-          <p>Your forecast says how much to stock. Type what is on the shelf and this
-             works out what to buy, cheapest way round: soonest to run out first.</p>
+          <p>The forecast says how much to stock. Type how many are on the shelf and
+             this works out what to buy &mdash; <b>what to stock &minus; what you
+             have</b>. Whatever runs out soonest is at the top.</p>
         </div>
         <div class="or-totals">
           <div class="or-total">
@@ -599,14 +606,13 @@
       <div class="or-warn" id="orWarn" hidden>
         <span class="or-warn-mark" aria-hidden="true">!</span>
         <span id="orWarnText"></span>
-        <button class="btn btn-quiet" data-show="uncounted"
-                onclick="Orders.focus('uncounted')">Show them</button>
+        <button class="btn btn-quiet" id="orShowUncounted">Show them</button>
       </div>
 
       <div class="or-controls">
         <div class="or-filters" id="orFilters" role="group" aria-label="Which products to list">
-          <button class="or-filter" data-show="attention" aria-pressed="true">Needs a decision</button>
-          <button class="or-filter" data-show="uncounted" aria-pressed="false">Not counted</button>
+          <button class="or-filter" data-show="attention" aria-pressed="true">To order or count</button>
+          <button class="or-filter" data-show="uncounted" aria-pressed="false">Never counted</button>
           <button class="or-filter" data-show="due" aria-pressed="false">Due a count</button>
           <button class="or-filter" data-show="over" aria-pressed="false">Overstocked</button>
           <button class="or-filter" data-show="all" aria-pressed="false">Everything</button>
@@ -883,6 +889,65 @@
     <button class="btn" id="glossClose">Close</button>
   </div>
   <div class="gloss-body" id="glossBody"></div>
+</div>
+
+<!-- ============================================================ how this works
+     The application opened straight into "24 decisions to make today" with nothing
+     saying what it is, what a decision is, or how its two jobs relate. Everything
+     here was learnable by exploring, which is another way of saying it was learnable
+     by getting it wrong first. Shown once, and reachable from the footer forever. -->
+<div class="sheet-modal" id="helpBox" data-open="false" role="dialog" aria-modal="true"
+     aria-labelledby="helpTitle">
+  <div class="sqlbox-head">
+    <div>
+      <div class="sqlbox-title" id="helpTitle">How this works</div>
+      <div class="sqlbox-sub">Two jobs, about twenty minutes</div>
+    </div>
+    <button class="btn" id="helpClose">Close</button>
+  </div>
+  <div class="help-body">
+    <p class="help-lede">This looks at what you have sold, works out what you are
+      likely to sell next, and tells you how much to stock. It never guesses in
+      silence: every number comes with the range around it.</p>
+
+    <ol class="help-steps">
+      <li>
+        <span class="help-n">1</span>
+        <div>
+          <h3>Check the forecasts it is unsure about <span class="help-where">Today</span></h3>
+          <p>It has already forecast all 1,000 products. Today shows only the ones
+             worth a human look, most money at stake first. Approve the number, change
+             it, or skip. Most take one click.</p>
+        </div>
+      </li>
+      <li>
+        <span class="help-n">2</span>
+        <div>
+          <h3>Turn that into an order <span class="help-where">Order list</span></h3>
+          <p>Type how many are on the shelf and it works out what to buy:
+             <b>what to stock &minus; what you have</b>. Export the order as a file
+             when you are done.</p>
+        </div>
+      </li>
+    </ol>
+
+    <h3 class="help-h">Worth knowing before you start</h3>
+    <ul class="help-notes">
+      <li><b>Nothing is sent anywhere.</b> Every change is a draft in this browser
+        until you export a file. There is no connection to a supplier or a stock
+        system.</li>
+      <li><b>A wide range is a warning, not a fault.</b> Where the system is unsure it
+        says so, because a confident wrong number is the expensive kind.</li>
+      <li><b>You do not have to finish.</b> Both lists are ordered so the top matters
+        most — stopping halfway still leaves the important work done.</li>
+      <li><b>Press <span class="kbd">?</span></b> at any time for the keyboard shortcuts.</li>
+    </ul>
+
+    <div class="help-act">
+      <button class="btn btn-primary" id="helpStart">Start with today's decisions</button>
+      <button class="btn" id="helpOrders">Take me to the order list</button>
+    </div>
+  </div>
 </div>
 
 <!-- ================================================ what each policy would cost

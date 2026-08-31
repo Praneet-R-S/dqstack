@@ -523,8 +523,15 @@
       || '<p class="sb-empty">Queue is clear</p>';
     const tag = $("sbQueueTag");
     if (tag) {
-      const n = (groups || []).reduce((a, g) => a + g.n, 0);
-      tag.textContent = n ? String(n) : "";
+      /* Exposure, not a count.
+
+         This reported the sum across all three tiers -- 72 -- while the Today badge
+         beside it reported the urgent tier alone -- 24. Two plausible answers to
+         "how much work is there", neither wrong, on screen at once. Money is a
+         different unit, so it cannot be misread as a competing count, and it is the
+         quantity this block is already organised by. */
+      const x = (groups || []).reduce((a, g) => a + (g.exposure || 0), 0);
+      tag.textContent = x > 0 ? Plain.money(x) : "";
     }
   }
 
@@ -1157,6 +1164,25 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
   const openPolicy = () => { renderPolicy(); setModal("policyBox", "glossBackdrop", true); };
   const closePolicy = () => setModal("policyBox", "glossBackdrop", false);
+
+  /* ---- orientation -------------------------------------------------------
+     Shown once, then available from the footer forever. A welcome a user cannot
+     reopen is a welcome they cannot use as a reference, and the two-jobs framing is
+     the thing most worth being able to check again. */
+  const SEEN_KEY = "dq.seen";
+
+  const openHelp = () => setModal("helpBox", "glossBackdrop", true);
+  const closeHelp = () => setModal("helpBox", "glossBackdrop", false);
+
+  function maybeWelcome() {
+    let seen = false;
+    try { seen = localStorage.getItem(SEEN_KEY) === "1"; } catch (_) { seen = false; }
+    if (seen) return;
+    try { localStorage.setItem(SEEN_KEY, "1"); } catch (_) {}
+    // After the first paint, so the panel opens over a populated application rather
+    // than over a loading shell — the numbers behind it are half the explanation.
+    setTimeout(openHelp, 450);
+  }
 
   const openGlossary = () => { renderGlossary(); setModal("glossBox", "glossBackdrop", true); };
   const closeGlossary = () => setModal("glossBox", "glossBackdrop", false);
@@ -1869,10 +1895,16 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     });
     $("sbCollapse").addEventListener("click", () => setSidebar(!sidebarOpen()));
     $("sbOpen").addEventListener("click", () => setSidebar(true));
+    $("helpOpen").addEventListener("click", openHelp);
+    $("helpClose").addEventListener("click", closeHelp);
+    $("helpStart").addEventListener("click", () => { closeHelp(); setView("today"); });
+    $("helpOrders").addEventListener("click", () => { closeHelp(); setView("orders"); });
     $("policyClose").addEventListener("click", closePolicy);
     $("policyOpen").addEventListener("click", openPolicy);
     $("glossClose").addEventListener("click", closeGlossary);
-    $("glossBackdrop").addEventListener("click", () => { closeGlossary(); closePolicy(); });
+    $("glossBackdrop").addEventListener("click", () => {
+      closeGlossary(); closePolicy(); closeHelp();
+    });
 
     $("sortBy").addEventListener("change", (e) => {
       state.sort = e.target.value;
@@ -1952,7 +1984,8 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     $("keysBtn")?.addEventListener("click", () => toggleKeys(true));
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        toggleKeys(false); closeSql(); closeGlossary(); closePolicy(); closeMenu();
+        toggleKeys(false); closeSql(); closeGlossary(); closePolicy(); closeHelp();
+        closeMenu();
       }
       // Undo the last decision from anywhere in Today. `mod` is computed here rather
       // than borrowed: this is a different listener from the grid's key handler and
@@ -1978,6 +2011,10 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     // never ambiguous.
     const origSort = Grid.sortBy;
     Grid.sortBy = (k) => { origSort(k); $("crumbSort").textContent = k; };
+
+    // Last, so a first-time visitor meets the orientation over a working application
+    // rather than over a half-built one.
+    maybeWelcome();
   }
 
   document.readyState === "loading"
