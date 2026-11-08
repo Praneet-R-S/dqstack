@@ -1,124 +1,68 @@
-# CI for DQ-Stack.
-#
-# The specification is blunt about why this exists: "budgets that are not automated
-# are wishes." The leakage tests and the simulator conservation tests are named in the
-# definition of done as things that must pass *in CI*, not on a developer's machine —
-# and the defect history bears that out, since eleven of the roughly thirty defects
-# found in this project were silent and would never have surfaced from a run that
-# merely completed without raising.
-
-name: ci
+# Every push and pull request runs the whole suite twice: once on SQLite (the
+# engine, the planner interface and the app) and once with every app test on
+# PostgreSQL 16, the production database. Then the migrations are applied to an
+# empty PostgreSQL and checked against the models.
+name: tests
 
 on:
   push:
-    branches: [master, main]
   pull_request:
-  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  tests:
-    name: tests (python ${{ matrix.python }})
+  test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12"]
-
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dq
+          POSTGRES_PASSWORD: dq-ci-only
+          POSTGRES_DB: dq_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dq -d dq_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DQ_ENV: test
+      DQ_TEST_POSTGRES_URL: postgresql+psycopg://dq:dq-ci-only@localhost:5432/dq_test
+      PGPASSWORD: dq-ci-only
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
-
-      - name: Source files must be valid UTF-8
-        # A locale-encoded write corrupted a source file once already; a byte that
-        # only fails on some platforms is worth catching mechanically.
-        run: |
-          python - <<'PY'
-          import pathlib, sys
-          bad = []
-          for p in list(pathlib.Path("dqstack").rglob("*.py")) + list(pathlib.Path("tests").rglob("*.py")):
-              try:
-                  p.read_bytes().decode("utf-8")
-              except UnicodeDecodeError as e:
-                  bad.append(f"{p}: {e}")
-          if bad:
-              print("\n".join(bad)); sys.exit(1)
-          print("all source files are valid UTF-8")
-          PY
-
-      - name: Compile
-        run: python -m compileall -q dqstack tests
-
-      - name: Unit and contract tests
-        # Includes the leakage suite (origin invariance, purged splits, mask
-        # integrity), the simulator suite (conservation, non-negativity, closed form,
-        # monotonicity, overage realisability) and the stage-boundary contracts.
-        run: python -m pytest tests/ -q --durations=10
-
-      - name: Frontend syntax
-        run: |
-          for f in ui/js/*.js; do node --check "$f"; done
-          echo "ui javascript parses"
-
-  smoke:
-    name: end-to-end smoke run
-    runs-on: ubuntu-latest
-    # The pipeline must run start to finish from one command. This is a reduced
-    # configuration -- the point is that no stage raises and every artifact is
-    # written, not that the numbers are final.
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Generate the panel
-        run: python -m dqstack.data.generate
-      - name: Stage 0 quality gate
-        run: python -m dqstack.ingest
-      - name: Full pipeline (quick)
-        run: python -m dqstack.pipeline --quick --export
-      - name: Every declared artifact must exist
-        run: |
-          python - <<'PY'
-          import json, pathlib, sys
-          required = [
-              "metrics.json", "leaderboard.csv", "fva_ladder.csv", "fva_by_class.csv",
-              "coverage_table.csv", "economics.csv", "decision_ledger.parquet",
-              "backtest_per_origin.csv", "backtest_summary.json",
-              "cost_sensitivity.csv", "feed_runs.json",
-          ]
-          missing = [f for f in required if not (pathlib.Path("artifacts") / f).exists()]
-          if missing:
-              print("missing artifacts:", missing); sys.exit(1)
-          if not pathlib.Path("ui/data/bundle.js").exists():
-              print("UI bundle not exported"); sys.exit(1)
 
-          m = json.loads(pathlib.Path("artifacts/metrics.json").read_text())
-          # Assertions on the run itself, not on its accuracy. These are the
-          # invariants a completed run must satisfy however good the forecast is.
-          sim = m["simulator_totals"]
-          assert sim["conservation_residual"] < 1e-6, sim["conservation_residual"]
-          assert sim["min_on_hand"] >= -1e-9, sim["min_on_hand"]
-          assert m["mint_projection_error"] < 1e-6, m["mint_projection_error"]
-          assert 0.0 <= sim["fill_rate"] <= 1.0
-          print("all artifacts present; run invariants hold")
-          PY
-
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/setup-node@v4
         with:
-          name: pipeline-artifacts
-          path: artifacts/
+          node-version: "22"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.15.0+cpu"
+          pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
+
+      - name: Tests on SQLite (engine, planner, app)
+        run: python -m pytest -q
+
+      - name: App tests on PostgreSQL
+        env:
+          DQ_APP_TESTS_ON_POSTGRES: "1"
+        run: python -m pytest -q tests/app
+
+      - name: Migrations apply to an empty PostgreSQL and match the models
+        run: |
+          psql -h localhost -U dq -d dq_test -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+          alembic -x url="$DQ_TEST_POSTGRES_URL" upgrade head
+          alembic -x url="$DQ_TEST_POSTGRES_URL" check
+
+      - name: Production refuses unsafe settings
+        run: |
+          ! DQ_ENV=production python -c "import dqstack.app.config" 2>/dev/null

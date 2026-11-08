@@ -1,0 +1,19 @@
+# Store-operations application server (dqstack/app). Exact pins: these are the
+# versions the test suite passed against. Change one only together with a green CI.
+#
+# FastAPI is held at 0.140.13 on purpose: it is the newest release that supports
+# Starlette 1.x without also requiring opentelemetry-api >= 1.44, which conflicts
+# with common observability stacks.
+
+fastapi==0.140.13
+starlette==1.2.1
+pydantic==2.12.5
+uvicorn==0.37.0
+gunicorn==23.0.0
+sqlalchemy==2.0.34
+alembic==1.20.1
+psycopg[binary]==3.3.8
+argon2-cffi==21.3.0
+python-multipart==0.0.20
+openpyxl==3.1.5
+reportlab==5.0.0

@@ -1,0 +1,5 @@
+# Tests and documentation builds, on top of the engine and the app.
+-r requirements-app.txt
+pytest==7.4.4
+httpx==0.28.1
+pypdf==6.16.2

@@ -1,0 +1,13 @@
+# Exact versions of the forecasting engine's libraries, as verified (model report,
+# CONTEXT.md C16). requirements.txt states the minimums; installs for CI and the
+# Docker image add `-c constraints.txt` so a new upstream release cannot change the
+# forecasts silently. torch is installed first from the CPU-only index (see the
+# Dockerfile and .github/workflows/ci.yml); ==2.15.0 matches 2.15.0+cpu.
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+scikit-learn==1.5.1
+lightgbm==4.7.0
+pyarrow==16.1.0
+duckdb==1.5.5
+torch==2.15.0

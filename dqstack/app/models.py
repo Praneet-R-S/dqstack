@@ -1,0 +1,696 @@
+"""Every record in section 4 of the specification.
+
+Three rules hold across the whole schema:
+
+1. Every table except `companies` carries `company_id`, and every query in the
+   application filters on it. Company separation is enforced in one place
+   (`scope.py`) rather than remembered at each call site.
+
+2. Quantities are integer thousandths (`*_milli`) and money is integer paise
+   (`*_paise`). Floating point cannot represent 0.1 exactly, so a ledger summed in
+   floats drifts, and "stock on hand equals the sum of movements" -- the property
+   the whole inventory checker rests on -- would be true only approximately. With
+   integers it is true exactly, which is what the Step 4 test demands. Thousandths
+   cover goods sold by weight (1.250 kg = 1250).
+
+3. Stock movements and the activity log are never updated or deleted. Mistakes are
+   corrected by a new movement. This is enforced by ORM events here and by database
+   triggers in the PostgreSQL migration, so it holds even against code that forgets.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from sqlalchemy import (JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, String,
+                        Text, UniqueConstraint, BigInteger, event)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .db import Base, CreatedMixin, IdMixin, utcnow
+
+CO = "companies.id"
+
+
+def company_fk() -> Mapped[str]:
+    return mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"), index=True,
+                         nullable=False)
+
+
+# =============================================================== tenants and people
+
+ROLES = ("owner", "admin", "store_manager", "purchaser", "stock_clerk", "cashier", "viewer")
+
+
+class Company(IdMixin, CreatedMixin, Base):
+    __tablename__ = "companies"
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    gstin: Mapped[str | None] = mapped_column(String(15))
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    fy_start_month: Mapped[int] = mapped_column(Integer, default=4, nullable=False)  # April
+    plan: Mapped[str] = mapped_column(String(32), default="trial", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    # Business rules (section 5 step 10). Defaults live in rules.py and are merged in.
+    rules: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    # Setup checklist progress (section 5): step key -> ISO timestamp completed.
+    setup: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class Store(IdMixin, CreatedMixin, Base):
+    __tablename__ = "stores"
+    __table_args__ = (UniqueConstraint("company_id", "code"),)
+    company_id: Mapped[str] = company_fk()
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    address: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(String(64))       # decides festival calendar
+    opening_hours: Mapped[str | None] = mapped_column(String(64))
+    day_close_time: Mapped[str] = mapped_column(String(5), default="22:00", nullable=False)
+    weekly_off: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    size: Mapped[str | None] = mapped_column(String(16))
+    mode: Mapped[str] = mapped_column(String(16), default="standalone", nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class Person(IdMixin, CreatedMixin, Base):
+    __tablename__ = "people"
+    # Null only for the platform administrator (the vendor), who belongs to no company.
+    company_id: Mapped[str | None] = mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"),
+                                                   index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(254), unique=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(20), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    manager_pin_hash: Mapped[str | None] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    language: Mapped[str] = mapped_column(String(8), default="en", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="invited", nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sign_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Read-only view; assignments are written as PersonStore rows by
+    # `assign_stores()`, so each row carries its company like every other table.
+    stores: Mapped[list["Store"]] = relationship(secondary="person_stores", lazy="selectin",
+                                                 viewonly=True)
+
+
+class PersonStore(Base):
+    __tablename__ = "person_stores"
+    company_id: Mapped[str] = company_fk()
+    person_id: Mapped[str] = mapped_column(String(32), ForeignKey("people.id", ondelete="CASCADE"),
+                                           primary_key=True)
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id", ondelete="CASCADE"),
+                                          primary_key=True)
+
+
+def assign_stores(db, person: "Person", stores: list["Store"]) -> None:
+    """Replace a person's store assignments. Callers have already checked that every
+    store belongs to the person's company (see `org._valid_stores`)."""
+    from sqlalchemy import delete
+    db.execute(delete(PersonStore).where(PersonStore.person_id == person.id))
+    for st in stores:
+        db.add(PersonStore(company_id=person.company_id, person_id=person.id, store_id=st.id))
+    db.flush()
+    db.expire(person, ["stores"])
+
+
+class AuthSession(IdMixin, CreatedMixin, Base):
+    """A signed-in browser. The cookie holds a random token; only its hash is stored,
+    so a copy of the database is not a copy of everyone's sessions."""
+    __tablename__ = "auth_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    person_id: Mapped[str] = mapped_column(String(32), ForeignKey("people.id", ondelete="CASCADE"),
+                                           index=True, nullable=False)
+    company_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    csrf_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    device: Mapped[str | None] = mapped_column(String(255))
+
+
+class Invitation(IdMixin, CreatedMixin, Base):
+    __tablename__ = "invitations"
+    company_id: Mapped[str] = company_fk()
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(254))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    store_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    invited_by: Mapped[str | None] = mapped_column(String(32))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PasswordReset(IdMixin, CreatedMixin, Base):
+    __tablename__ = "password_resets"
+    # Null only for the platform administrator, mirroring Person.company_id.
+    company_id: Mapped[str | None] = mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"),
+                                                   index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    person_id: Mapped[str] = mapped_column(String(32), ForeignKey("people.id", ondelete="CASCADE"),
+                                           nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ActivityLog(IdMixin, Base):
+    """Append-only. Who did what, when, from which device, before and after."""
+    __tablename__ = "activity_log"
+    __table_args__ = (Index("ix_activity_company_at", "company_id", "at"),)
+    company_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    store_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    person_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    device: Mapped[str | None] = mapped_column(String(255))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity: Mapped[str | None] = mapped_column(String(64))
+    entity_id: Mapped[str | None] = mapped_column(String(64))
+    before: Mapped[dict | None] = mapped_column(JSON)
+    after: Mapped[dict | None] = mapped_column(JSON)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class SupportGrant(IdMixin, CreatedMixin, Base):
+    """Temporary access a client grants the platform administrator, logged."""
+    __tablename__ = "support_grants"
+    company_id: Mapped[str] = company_fk()
+    granted_by: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ApiKey(IdMixin, CreatedMixin, Base):
+    """For an existing POS sending sales (section 14). Only the hash is stored."""
+    __tablename__ = "api_keys"
+    company_id: Mapped[str] = company_fk()
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    prefix: Mapped[str] = mapped_column(String(12), nullable=False)
+    store_id: Mapped[str | None] = mapped_column(String(32))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# =============================================================== catalogue
+
+class Product(IdMixin, CreatedMixin, Base):
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("company_id", "sku"),)
+    company_id: Mapped[str] = company_fk()
+    sku: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    brand: Mapped[str | None] = mapped_column(String(120))
+    category: Mapped[str | None] = mapped_column(String(120), index=True)
+    department: Mapped[str | None] = mapped_column(String(120))
+    pack_size: Mapped[str | None] = mapped_column(String(64))
+    unit: Mapped[str] = mapped_column(String(8), default="each", nullable=False)  # each|kg|litre
+    mrp_paise: Mapped[int | None] = mapped_column(BigInteger)
+    price_paise: Mapped[int | None] = mapped_column(BigInteger)
+    cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    gst_rate_bp: Mapped[int | None] = mapped_column(Integer)      # basis points: 1800 = 18%
+    hsn: Mapped[str | None] = mapped_column(String(16))
+    shelf_life_days: Mapped[int | None] = mapped_column(Integer)
+    perishable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    case_pack: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    abc_class: Mapped[str | None] = mapped_column(String(1))
+    # Link back to the forecasting engine's series id for the demo company.
+    engine_ref: Mapped[str | None] = mapped_column(String(120))
+
+
+class Barcode(IdMixin, Base):
+    __tablename__ = "barcodes"
+    __table_args__ = (UniqueConstraint("company_id", "code"),)
+    company_id: Mapped[str] = company_fk()
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id", ondelete="CASCADE"),
+                                            index=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    # A case barcode adds the case quantity in single units (section 13).
+    units_per_scan: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+
+class Supplier(IdMixin, CreatedMixin, Base):
+    __tablename__ = "suppliers"
+    __table_args__ = (UniqueConstraint("company_id", "name"),)
+    company_id: Mapped[str] = company_fk()
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    gstin: Mapped[str | None] = mapped_column(String(15))
+    contact: Mapped[str | None] = mapped_column(String(200))
+    email: Mapped[str | None] = mapped_column(String(254))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    # ISO weekday numbers, Monday = 0. Empty means "any day".
+    order_days: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    lead_time_days: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    min_order_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+
+
+class SupplierProduct(IdMixin, Base):
+    __tablename__ = "supplier_products"
+    __table_args__ = (UniqueConstraint("supplier_id", "product_id"),)
+    company_id: Mapped[str] = company_fk()
+    supplier_id: Mapped[str] = mapped_column(String(32), ForeignKey("suppliers.id", ondelete="CASCADE"),
+                                             index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id", ondelete="CASCADE"),
+                                            index=True, nullable=False)
+    supplier_code: Mapped[str | None] = mapped_column(String(64))
+    cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    case_pack: Mapped[int | None] = mapped_column(Integer)
+    min_order_qty_milli: Mapped[int | None] = mapped_column(BigInteger)
+    preferred: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class PriceRecord(IdMixin, Base):
+    """Price and promotion: a planned promotion is known to the forecast in advance."""
+    __tablename__ = "prices"
+    company_id: Mapped[str] = company_fk()
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id", ondelete="CASCADE"),
+                                            index=True, nullable=False)
+    store_id: Mapped[str | None] = mapped_column(String(32), index=True)   # null = all stores
+    price_paise: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    promo_type: Mapped[str | None] = mapped_column(String(32))
+
+
+class CalendarEvent(IdMixin, Base):
+    """National and state festivals come pre-filled (company_id null); companies add
+    local events and closures."""
+    __tablename__ = "calendar_events"
+    company_id: Mapped[str | None] = mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"),
+                                                   index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    day: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), default="festival", nullable=False)
+    states: Mapped[list] = mapped_column(JSON, default=list, nullable=False)   # empty = national
+    store_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+
+
+# =============================================================== the ledger
+
+MOVEMENT_TYPES = ("opening", "sale", "customer_return", "delivery_received", "supplier_return",
+                  "transfer_out", "transfer_in", "count_adjustment", "wastage", "damage")
+
+
+class StockMovement(IdMixin, Base):
+    """The heart of the inventory checker. Never edited or deleted."""
+    __tablename__ = "stock_movements"
+    __table_args__ = (
+        UniqueConstraint("company_id", "idempotency_key"),
+        Index("ix_movement_store_product_at", "company_id", "store_id", "product_id", "at"),
+    )
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
+    qty_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)   # signed
+    type: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(200))
+    source_type: Mapped[str | None] = mapped_column(String(24))
+    source_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    person_id: Mapped[str | None] = mapped_column(String(32))
+    device: Mapped[str | None] = mapped_column(String(255))
+    unit_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    batch: Mapped[str | None] = mapped_column(String(64))
+    expiry: Mapped[date | None] = mapped_column(Date)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class StockOnHand(Base):
+    """Worked out from movements and kept up to date in the same transaction."""
+    __tablename__ = "stock_on_hand"
+    company_id: Mapped[str] = mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"),
+                                            index=True, nullable=False)
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), primary_key=True)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), primary_key=True)
+    on_hand_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    avg_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_counted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_movement_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# =============================================================== selling
+
+class Bill(IdMixin, CreatedMixin, Base):
+    """Only a paid bill creates sale movements (section 7)."""
+    __tablename__ = "bills"
+    __table_args__ = (UniqueConstraint("company_id", "store_id", "bill_number"),)
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), index=True,
+                                          nullable=False)
+    till: Mapped[str | None] = mapped_column(String(32))
+    cashier_id: Mapped[str | None] = mapped_column(String(32))
+    # Assigned on the device before payment; the safety key against double posting.
+    bill_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), default="open", nullable=False)
+    total_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    tax_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    discount_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    void_reason: Mapped[str | None] = mapped_column(String(200))
+    refund_of: Mapped[str | None] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(16), default="checkout", nullable=False)
+    business_day: Mapped[date | None] = mapped_column(Date, index=True)
+    lines: Mapped[list["BillLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
+    payments: Mapped[list["BillPayment"]] = relationship(cascade="all, delete-orphan",
+                                                         lazy="selectin")
+
+
+class BillLine(IdMixin, Base):
+    __tablename__ = "bill_lines"
+    company_id: Mapped[str] = company_fk()
+    bill_id: Mapped[str] = mapped_column(String(32), ForeignKey("bills.id", ondelete="CASCADE"),
+                                         index=True, nullable=False)
+    product_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("products.id"))
+    description: Mapped[str | None] = mapped_column(String(300))   # misc items
+    unmapped_barcode: Mapped[str | None] = mapped_column(String(64))
+    qty_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    unit_price_paise: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    discount_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    tax_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    resaleable: Mapped[bool | None] = mapped_column(Boolean)   # for refund lines
+
+
+class BillPayment(IdMixin, Base):
+    __tablename__ = "bill_payments"
+    company_id: Mapped[str] = company_fk()
+    bill_id: Mapped[str] = mapped_column(String(32), ForeignKey("bills.id", ondelete="CASCADE"),
+                                         index=True, nullable=False)
+    method: Mapped[str] = mapped_column(String(8), nullable=False)    # cash|upi|card
+    amount_paise: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tendered_paise: Mapped[int | None] = mapped_column(BigInteger)
+    reference: Mapped[str | None] = mapped_column(String(64))
+
+
+class DailySales(IdMixin, Base):
+    """What the forecasting engine reads every night."""
+    __tablename__ = "daily_sales"
+    __table_args__ = (UniqueConstraint("company_id", "store_id", "product_id", "day"),)
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), index=True,
+                                          nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), index=True,
+                                            nullable=False)
+    day: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    units_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    revenue_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    avg_price_paise: Mapped[int | None] = mapped_column(BigInteger)
+    out_of_stock: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    oos_source: Mapped[str | None] = mapped_column(String(12))   # ledger|estimated
+    source: Mapped[str] = mapped_column(String(16), default="upload", nullable=False)
+    import_job_id: Mapped[str | None] = mapped_column(String(32), index=True)
+
+
+class DayClose(IdMixin, CreatedMixin, Base):
+    __tablename__ = "day_closes"
+    __table_args__ = (UniqueConstraint("company_id", "store_id", "day"),)
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    closed_by: Mapped[str | None] = mapped_column(String(32))
+    automatic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cash_expected_paise: Mapped[int | None] = mapped_column(BigInteger)
+    cash_counted_paise: Mapped[int | None] = mapped_column(BigInteger)
+    report: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+# =============================================================== buying and receiving
+
+PO_STATES = ("draft", "approved", "sent", "partly_received", "received", "cancelled")
+
+
+class PurchaseOrder(IdMixin, CreatedMixin, Base):
+    __tablename__ = "purchase_orders"
+    __table_args__ = (UniqueConstraint("company_id", "number"),)
+    company_id: Mapped[str] = company_fk()
+    number: Mapped[str] = mapped_column(String(32), nullable=False)
+    supplier_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("suppliers.id"),
+                                                    index=True)
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), index=True,
+                                          nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
+    expected_date: Mapped[date | None] = mapped_column(Date)
+    created_by: Mapped[str | None] = mapped_column(String(32))
+    approved_by: Mapped[str | None] = mapped_column(String(32))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    origin: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    lines: Mapped[list["PurchaseOrderLine"]] = relationship(cascade="all, delete-orphan",
+                                                            lazy="selectin")
+
+
+class PurchaseOrderLine(IdMixin, Base):
+    __tablename__ = "purchase_order_lines"
+    company_id: Mapped[str] = company_fk()
+    po_id: Mapped[str] = mapped_column(String(32), ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+                                       index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
+    qty_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    received_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    unit_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    reason: Mapped[str | None] = mapped_column(String(300))   # why the quantity is what it is
+
+
+class Delivery(IdMixin, CreatedMixin, Base):
+    __tablename__ = "deliveries"
+    __table_args__ = (UniqueConstraint("company_id", "idempotency_key"),)
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    po_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("purchase_orders.id"),
+                                              index=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(32))
+    invoice_number: Mapped[str | None] = mapped_column(String(64))
+    received_by: Mapped[str | None] = mapped_column(String(32))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
+    lines: Mapped[list["DeliveryLine"]] = relationship(cascade="all, delete-orphan",
+                                                       lazy="selectin")
+
+
+class DeliveryLine(IdMixin, Base):
+    __tablename__ = "delivery_lines"
+    company_id: Mapped[str] = company_fk()
+    delivery_id: Mapped[str] = mapped_column(String(32), ForeignKey("deliveries.id", ondelete="CASCADE"),
+                                             index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
+    received_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    damaged_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    unit_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    batch: Mapped[str | None] = mapped_column(String(64))
+    expiry: Mapped[date | None] = mapped_column(Date)
+
+
+class Transfer(IdMixin, CreatedMixin, Base):
+    __tablename__ = "transfers"
+    company_id: Mapped[str] = company_fk()
+    from_store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    to_store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="in_transit", nullable=False)
+    sent_by: Mapped[str | None] = mapped_column(String(32))
+    received_by: Mapped[str | None] = mapped_column(String(32))
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lines: Mapped[list["TransferLine"]] = relationship(cascade="all, delete-orphan",
+                                                       lazy="selectin")
+
+
+class TransferLine(IdMixin, Base):
+    __tablename__ = "transfer_lines"
+    company_id: Mapped[str] = company_fk()
+    transfer_id: Mapped[str] = mapped_column(String(32), ForeignKey("transfers.id", ondelete="CASCADE"),
+                                             index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
+    sent_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    received_milli: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class CountSession(IdMixin, CreatedMixin, Base):
+    __tablename__ = "count_sessions"
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(12), default="cycle", nullable=False)  # cycle|full
+    blind: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)
+    started_by: Mapped[str | None] = mapped_column(String(32))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lines: Mapped[list["CountLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
+
+
+class CountLine(IdMixin, Base):
+    __tablename__ = "count_lines"
+    __table_args__ = (UniqueConstraint("company_id", "idempotency_key"),)
+    company_id: Mapped[str] = company_fk()
+    session_id: Mapped[str] = mapped_column(String(32), ForeignKey("count_sessions.id", ondelete="CASCADE"),
+                                            index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
+    counted_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Captured at the moment of counting, so a sale a minute later is not a difference.
+    system_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    counted_by: Mapped[str | None] = mapped_column(String(32))
+    counted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(String(32))
+    reason: Mapped[str | None] = mapped_column(String(300))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
+
+
+# =============================================================== forecasting
+
+class ForecastRun(IdMixin, CreatedMixin, Base):
+    __tablename__ = "forecast_runs"
+    company_id: Mapped[str] = company_fk()
+    kind: Mapped[str] = mapped_column(String(12), default="nightly", nullable=False)
+    data_cutoff: Mapped[date | None] = mapped_column(Date)
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    timings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    accuracy: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class ModelVersion(IdMixin, CreatedMixin, Base):
+    __tablename__ = "model_versions"
+    __table_args__ = (UniqueConstraint("company_id", "version"),)
+    company_id: Mapped[str] = company_fk()
+    version: Mapped[str] = mapped_column(String(64), nullable=False)
+    path: Mapped[str | None] = mapped_column(String(500))
+    backtest_profit_paise: Mapped[int | None] = mapped_column(BigInteger)
+    backtest: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    promoted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Recommendation(IdMixin, Base):
+    """Per store and product: forecast with range, stock target, suggested order,
+    reason and money at risk. What Today and Orders show."""
+    __tablename__ = "recommendations"
+    __table_args__ = (UniqueConstraint("run_id", "store_id", "product_id"),)
+    company_id: Mapped[str] = company_fk()
+    run_id: Mapped[str] = mapped_column(String(32), ForeignKey("forecast_runs.id", ondelete="CASCADE"),
+                                        index=True, nullable=False)
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), index=True,
+                                          nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), index=True,
+                                            nullable=False)
+    daily: Mapped[list] = mapped_column(JSON, default=list, nullable=False)   # [[q..]*28]
+    week1_mid_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    week1_lo_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    week1_hi_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    target_milli: Mapped[int | None] = mapped_column(BigInteger)
+    service_level: Mapped[float | None] = mapped_column()
+    reasons: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    money_at_risk_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    flagged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class Decision(IdMixin, CreatedMixin, Base):
+    __tablename__ = "decisions"
+    company_id: Mapped[str] = company_fk()
+    recommendation_id: Mapped[str] = mapped_column(String(32), ForeignKey("recommendations.id",
+                                                                          ondelete="CASCADE"),
+                                                   index=True, nullable=False)
+    store_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    product_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    person_id: Mapped[str | None] = mapped_column(String(32))
+    action: Mapped[str] = mapped_column(String(12), nullable=False)   # approve|change|skip
+    value_milli: Mapped[int | None] = mapped_column(BigInteger)
+    reason: Mapped[str | None] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(String(500))
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# =============================================================== imports and alerts
+
+class ImportJob(IdMixin, CreatedMixin, Base):
+    __tablename__ = "import_jobs"
+    company_id: Mapped[str] = company_fk()
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    filename: Mapped[str | None] = mapped_column(String(300))
+    mapping: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    rows_read: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_accepted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_unchanged: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    errors: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="done", nullable=False)
+    # What this import created or changed, so it can be undone exactly.
+    changes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    person_id: Mapped[str | None] = mapped_column(String(32))
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ColumnMapping(IdMixin, Base):
+    """Remembered per source, so the next upload from it needs no matching."""
+    __tablename__ = "column_mappings"
+    __table_args__ = (UniqueConstraint("company_id", "kind", "signature"),)
+    company_id: Mapped[str] = company_fk()
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    mapping: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Alert(IdMixin, CreatedMixin, Base):
+    __tablename__ = "alerts"
+    __table_args__ = (UniqueConstraint("company_id", "dedupe_key"),)
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    product_id: Mapped[str | None] = mapped_column(String(32))
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    severity: Mapped[str] = mapped_column(String(12), default="attention", nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PosMessage(IdMixin, CreatedMixin, Base):
+    """Each completed-sale, refund and void from an existing POS, by its own id, so a
+    repeat is recognised and ignored (section 14)."""
+    __tablename__ = "pos_messages"
+    __table_args__ = (UniqueConstraint("company_id", "external_id"),)
+    company_id: Mapped[str] = company_fk()
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class PurgePermit(Base):
+    """The only way a departing company's ledger and log rows can be deleted.
+
+    Section 13: when a client leaves they get a full export, and their data is deleted
+    after a confirmed period. The append-only triggers refuse DELETE on stock movements
+    and the activity log unless a permit for that company exists, and the purge writes
+    and removes its permit inside the same transaction. UPDATE is never permitted."""
+    __tablename__ = "purge_permits"
+    company_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    granted_by: Mapped[str | None] = mapped_column(String(32))
+    reason: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 nullable=False)
+
+
+# =============================================================== immutability
+
+class ImmutableRecordError(RuntimeError):
+    pass
+
+
+def _forbid(kind: str):
+    def _raise(mapper, connection, target):  # noqa: ARG001
+        raise ImmutableRecordError(
+            f"{target.__class__.__name__} records are never {kind}d. "
+            "Correct a mistake with a new record instead.")
+    return _raise
+
+
+for _cls in (StockMovement, ActivityLog):
+    event.listen(_cls, "before_update", _forbid("update"))
+    event.listen(_cls, "before_delete", _forbid("delete"))

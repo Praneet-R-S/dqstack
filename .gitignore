@@ -25,3 +25,12 @@ Thumbs.db
 
 # Build caches inside docs/
 docs/__pycache__/
+
+# Application server: local database, uploads, secrets
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/uploads/
+.env
+.env.*
+!.env.example
