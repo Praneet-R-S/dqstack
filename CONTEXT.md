@@ -18,11 +18,12 @@ the eight features built after them (`truth.js`, `curve.js`). **C13** is the inv
 layer — stock counts and the order list (`stock.js`, `orders.js`). **C14** adds cycle
 counting and brings the reference PDF current. **C15** is the usability pass over the
 whole application — orientation, one vocabulary, and the framing of the dense surfaces.
-Read the trap lists in C12, C13, C14 and C15 before touching charts, contrast,
+**C16** is the purple brand, Charts, the Overview hub and the honest model report.
+Read the trap lists in C12 through C16 before touching charts, contrast,
 measurement harnesses, wording or the sidebar.
 
     python -m dqstack.serve          # then http://127.0.0.1:8000/
-    python -m pytest -q              # 149 tests
+    python -m pytest -q              # 161 tests
     python docs/build_reference_pdf.py   # regenerate the 20-page reference
 
 Verification habits that have repeatedly paid for themselves:
@@ -1284,6 +1285,62 @@ should.
 - **The heredoc backslash trap bit again** — `\n` inside a bash heredoc became a real
   newline and the test file would not parse. Use the Write/Edit tools for anything
   containing escapes. This is the third time.
+
+### C16. Purple brand, Charts, Overview, and an honest model report — DONE
+
+Asked to make it business-ready: shades of purple, every graph in one feature list, all
+the modules presented together, and to make sure the model is well trained.
+
+**Palette.** `tokens.css` is three layers: primitives (purple / violet / plum / lilac
+ramps plus red, teal, amber), semantic roles referencing them, components reading only
+roles. No raw hex in the semantic layer; every token *name* survives because the canvas
+renderers read them by name. **Two purples on purpose**: data is a cool violet (~245°),
+action a warm orchid (~272°), 27° apart — the app already learned once that one hue for
+"forecast" and "click me" cannot be learned. States stay red / amber / teal, outside the
+purple family. `tests/test_tokens.py` pins names, checks each `--*-rgb` triple matches
+its colour in both themes, forbids raw hex in roles, keeps the purples ≥20° apart.
+Canvas verified by sampling painted pixels (Chrome substitutes `var()` inside custom
+properties, so `getComputedStyle` returns plain hex). `U.tk()` returns grey `#888` for
+any unregistered name — `--ui-accent` is now registered.
+
+**`--text-tertiary` was raised at the source.** A full sweep of 4,470 text elements found
+31 failures on it. It is now 4.68:1 or better on every surface including `--bg-active`.
+Final sweeps: 0 failures across 4,337 + 1,762 elements (the latter including SVG `fill`).
+
+**Charts** (`ui/js/charts.js`, nav "Charts"): 15 charts as a feature list — demand,
+stock & ordering, model quality — each with the question it answers, a sentence computed
+from the data, and how to read it. Inline SVG, uniform scaling, coloured by token class.
+
+**Overview** (`ui/js/overview.js`) is now the **landing view**: one tile per module with
+its live headline and one click in, three numbered tiles for the work in order.
+
+**Model report — the real findings:**
+- Training **reproduces** within 0.06% on every metric (full retrain, compared against
+  the previous `metrics.json`).
+- Bias was scored on the **median**; on zero-heavy skewed demand that reads 12–17% low by
+  construction. New `evaluate.mean_from_quantiles()` / `bias_mean`: orders forecast −3.1%.
+- Coverage counted ties at zero as hits. New `strict_after`, `tie_aware_gap`,
+  `tie_aware_ok`. Upper range (≥75%, sets stock) honest within 1 point. **Lower tail is a
+  real miss**: 10% of outcomes below the stated 5% floor. Open.
+- The leaderboard's "DQ-Stack (full)" is the *reconciled* forecast (for totals; ~18% worse
+  at product level by design — totals get 30–40% better). Orders read the unreconciled one
+  (`for_decisions=False`). New row **"DQ-Stack (as issued for orders)" = 0.691**, the best
+  on the board, 30% less error than seasonal naive.
+- Rank correlation was unstable (0.53 vs 0.38) because three arms share one forecast and
+  float noise ranked them. Accuracy now compared at 6 dp: ρ = 0.458 stable, p = 0.215.
+- Also open: the reconciled totals view runs ~15% high on its mean.
+
+### Traps added by C16
+
+- **`artifacts/` and `ui/data/` are gitignored.** A pipeline run is NOT restorable from
+  git. Copy `artifacts/metrics.json` somewhere before any retrain if you need to compare.
+- A retrain is ~25 minutes on this machine (backtest alone 670s), longer than the 15 the
+  stored timings suggest. `--export` overwrites the bundle and restamps `index.html`.
+- `bundle.js` must equal `"window.DQ_DATA=" + bundle.json + ";"` byte for byte — no
+  trailing newline — if you ever patch a derived statistic without a full run.
+- A contrast harness must read SVG text via `fill`, not `color`, and must skip gradient
+  pills (their `backgroundColor` is transparent).
+- `U` in the browser is a top-level `const`, not `window.U`.
 
 ### C14. What is left, for the next session
 
