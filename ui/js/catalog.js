@@ -760,7 +760,7 @@ window.Catalog = (() => {
     renderList(); renderDetail(); renderPending();
   }
 
-  return { init, select, reveal, renderList, renderDetail, watchCount,
+  return { init, select, reveal, renderList, renderDetail, watchCount, chart,
            showWatchlist() {
              state.onlyWatched = true; state.query = ""; state.limit = 200;
              $("catSearch").value = "";

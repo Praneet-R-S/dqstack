@@ -22,7 +22,11 @@
 
 html, body {
   margin: 0; padding: 0; height: 100%;
-  background: var(--bg-base);
+  /* The brand wash sits behind every view: a faint orchid glow top-right and violet
+     bottom-left. Fixed, so it is a light in the room rather than a pattern that
+     scrolls past. Opaque panels cover it; it shows only where the base does. */
+  background: var(--brand-wash), var(--bg-base);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: var(--font-ui);
   font-size: var(--fs-13);
@@ -752,7 +756,8 @@ code {
   grid-template-columns: 1fr; overflow-y: auto;
   /* Was a centreless radial blob, which is the default gradient of every SaaS
      landing page. The cone has a direction and an origin, which is the point. */
-  background: var(--cone-wash), var(--bg-base);
+  /* The brand wash under the existing cone: purple felt as atmosphere first. */
+  background: var(--cone-wash), var(--brand-wash), var(--bg-base);
 }
 /* `min-width: 0` is load-bearing on every one of these. A grid item defaults to
    `min-width: auto`, which refuses to shrink below its content's min-content

@@ -24,6 +24,11 @@
    directly. Renaming one is not a CSS edit; it is a silent rendering failure in
    an unrelated file.
 
+   Colour, third pass. The palette is purple: a business deploying this asked for
+   it, and the token architecture became three layers in the process -- primitives
+   (raw values), semantic roles (what a colour is for), and the components that read
+   only the roles. See the layer-1 comment below for why there are two purples.
+
    Typography note. The system specification asks for Inter on the strength of
    its tabular figures. Instrument Sans carries the UI instead, and every numeral
    in the product is set in JetBrains Mono — a monospace face is tabular by
@@ -34,82 +39,145 @@
    ============================================================================ */
 
 :root {
-  /* ---- foundation, dark (default) ---------------------------------------
-     A five-step surface ladder rather than three. The previous palette had to
-     use a border wherever two panels met, because the panels themselves were
-     the same value; with real separation between steps, most of those borders
-     become optional and the interface stops looking like a wireframe. */
-  --bg-base:      #0A0C11;   /* the void behind everything */
-  --bg-surface:   #10141B;   /* chrome, worklist, dock */
-  --bg-raised:    #171D26;   /* hovers, chips, table heads */
-  --bg-overlay:   #1C2330;   /* modals, popovers, tooltips */
-  --bg-inset:     #06080C;   /* inputs, wells, tracks */
-  --bg-hover:     #1B222D;
-  --bg-active:    #212A38;
+  /* ======================================================== layer 1: primitives
 
-  --border-subtle:#1E2632;
-  --border-strong:#303B4A;
-  --border-hair:  rgba(255, 255, 255, 0.055);  /* the top-edge highlight */
+     Raw values with no meaning attached. Nothing outside this block should name a
+     hex code, and nothing in a component should name a primitive -- components read
+     the semantic layer below, which is what lets one theme swap every surface.
 
-  --text-primary: #E9EFF6;
-  --text-secondary:#95A3B4;   /* 6.1:1 on --bg-surface */
-  /* CAUTION. 4.6:1 on --bg-surface only. On --bg-inset, on a card, or over any
-     tinted panel it measures 3.86-3.87:1, which fails AA for text. Ten separate
-     elements in this project have had to be moved off it after being measured. Use
-     it for rules, dividers, disabled states and decorative glyphs; use
-     --text-secondary for anything a reader has to read. */
-  --text-tertiary:#69747F;   /* 4.6:1 on --bg-surface, and nowhere else */
+     Two purple families, deliberately. The brand is purple, but the application
+     already learned the hard way that one hue meaning both "this is a forecast" and
+     "click me" cannot be learned. So data takes a cool VIOLET (hue ~245) and action
+     takes a warm ORCHID (hue ~272): 27 degrees apart, which separates at a glance and
+     at 16px. Risk, attention and healthy stay red, amber and teal -- outside the
+     purple family entirely, so a state colour can never be mistaken for brand.
 
-  /* ---- semantic accents. One meaning each, and nothing else. ------------ */
-  --series-forecast: #4C6FFF;
-  --series-actual:   #C7D2DE;
-  --series-override: #E09B15;
-  --series-prior:    #6B7684;
-  --state-risk:      #E0523C;
-  --state-excess:    #14A99A;
-  --state-attention: #C99A2E;
-  --state-ok:        #14A99A;
+     Contrast was measured before any of this was written (palette_check.py in the
+     session scratchpad): text 6.7:1 or better on every surface in both themes, every
+     chart series and state 3.7:1 or better, white on the button gradient 4.7:1 or
+     better. */
+  --purple-50:  #F7F2FF;
+  --purple-100: #EEE3FF;
+  --purple-200: #DDC7FF;
+  --purple-300: #C9A3FF;
+  --purple-400: #C17BFF;   /* action, dark theme */
+  --purple-500: #A855F7;
+  --purple-600: #9A4BE0;
+  --purple-700: #8A2BD6;   /* action, light theme */
+  --purple-800: #7A33C2;
+  --purple-900: #6E1FB0;
+  --purple-950: #3B0F66;
 
-  /* ---- the interactive accent, separated from the data accent ------------
-     --series-forecast means "this is a predicted quantity" and is read by
-     chart.js and grid.js. It was *also* the colour of every link, focus ring,
-     selected row, pressed chip and primary button, so blue meant both "demand"
-     and "click me" — and a hue that means two unrelated things cannot be learned.
+  --violet-300: #B4AEFF;
+  --violet-400: #8F86FF;   /* data, dark theme */
+  --violet-600: #4F3FD9;   /* data, light theme */
 
-     The split was made first with an identical value, so that no pixel moved and
-     the refactor could be verified on its own. This is the second half: the
-     interactive role now has its own hue, and blue means one thing again.
+  /* Neutrals carry a trace of the brand hue, so a grey surface reads as part of a
+     purple product rather than as a purple accent dropped onto a grey one. */
+  --plum-1000: #090611;
+  --plum-975:  #0D0A16;
+  --plum-950:  #141022;
+  --plum-925:  #1C172D;
+  --plum-910:  #211B33;
+  --plum-900:  #231D37;
+  --plum-875:  #2A233F;
+  --plum-850:  #262039;
+  --plum-800:  #3D3557;
+  --plum-600:  #958BB0;
+  --plum-500:  #857D9E;
+  --plum-300:  #B0A6C9;
+  --plum-100:  #D5CFE6;
+  --plum-50:   #F0ECFA;
 
-     Violet was chosen because it is far enough from the forecast blue to separate
-     at 16px and at a glance, and it collides with none of the four state hues
-     (risk, attention, override, excess). Measured against the surfaces it sits on:
-     4.30 / 4.06 / 3.72:1 on dark base / surface / raised, and 6.41 / 6.76 / 6.12:1
-     on light. That clears the 3:1 threshold for UI components and focus
-     indicators everywhere, but it does NOT clear 4.5:1 for body-size text on the
-     dark raised surface -- which is why links no longer carry a hue at all (see
-     app.css). Violet is now reserved for the focus ring, selection, and the
-     primary action. */
-  --ui-accent:     #7A5CF0;
-  --ui-accent-rgb: 122 92 240;
+  --lilac-0:   #FFFFFF;
+  --lilac-25:  #F8F6FD;
+  --lilac-50:  #F3F0FB;
+  --lilac-75:  #EFEBF9;
+  --lilac-100: #E7E2F3;
+  --lilac-150: #E5DEF5;
+  --lilac-300: #C9BFE0;
+  --lilac-500: #7F7798;
+  --lilac-550: #665D80;
+  --lilac-700: #564C70;
+  --lilac-900: #2C2340;
+  --lilac-950: #170F2B;
 
-  /* Read by the canvas renderers via rgba(var(--x-rgb) / a). Space-separated
-     because that is the form the modern rgba() syntax takes. */
-  --forecast-rgb: 76 111 255;
-  --risk-rgb:     224 82 60;
-  --excess-rgb:   20 169 154;
+  --red-400:    #F0624D;
+  --red-600:    #C0392B;
+  --teal-400:   #19B3A3;
+  --teal-700:   #0B7D71;
+  --amber-400:  #D4A63A;
+  --amber-700:  #8F6408;
+  --orange-500: #E09B15;
+  --orange-700: #B87400;
+
+  /* ======================================================== layer 2: semantic
+
+     What a colour is FOR. Dark is the default theme; the light block at the end of
+     this file reassigns these names and nothing else. */
+
+  /* ---- surfaces: a five-step ladder, so panels separate by light, not borders */
+  --bg-base:      var(--plum-975);   /* the void behind everything */
+  --bg-surface:   var(--plum-950);   /* chrome, worklist, dock, cards */
+  --bg-raised:    var(--plum-925);   /* hovers, chips, table heads */
+  --bg-overlay:   var(--plum-900);   /* modals, popovers, tooltips */
+  --bg-inset:     var(--plum-1000);  /* inputs, wells, tracks */
+  --bg-hover:     var(--plum-910);
+  --bg-active:    var(--plum-875);
+
+  --border-subtle: var(--plum-850);
+  --border-strong: var(--plum-800);
+  --border-hair:   rgba(220, 200, 255, 0.06);   /* the top-edge highlight */
+
+  --text-primary:   var(--plum-50);    /* 13.9:1 or better on every surface */
+  --text-secondary: var(--plum-300);   /* 7.0:1 or better on every surface */
+  /* Now safe for text. It failed AA (3.86-4.49:1) for most of this project's life,
+     and was fixed one element at a time more than ten times; a full sweep of 4,470
+     text elements for the purple palette still found 31 sites on it. So the token
+     itself was raised instead: 4.68:1 or better on every surface including
+     --bg-active, at the cost of one notch of hierarchy below --text-secondary. */
+  --text-tertiary:  var(--plum-600);
+
+  /* ---- data. One meaning each, read by the canvas renderers by name. -------- */
+  --series-forecast: var(--violet-400);
+  --series-actual:   var(--plum-100);
+  --series-override: var(--orange-500);
+  --series-prior:    var(--plum-500);
+  --state-risk:      var(--red-400);
+  --state-excess:    var(--teal-400);
+  --state-attention: var(--amber-400);
+  --state-ok:        var(--teal-400);
+
+  /* ---- action. The orchid, kept apart from the data violet on purpose. ------ */
+  --ui-accent:     var(--purple-400);
+  --ui-accent-rgb: 193 123 255;
+
+  /* Read by the canvas renderers via rgba(var(--x-rgb) / a). Literal triples rather
+     than references, because a hex cannot be split into channels in CSS. Each one
+     must match its semantic colour above; tests/test_tokens.py asserts that, since a
+     mismatch is a chart band in one purple under a line in another. */
+  --forecast-rgb: 143 134 255;
+  --risk-rgb:     240 98 77;
+  --excess-rgb:   25 179 163;
   --override-rgb: 224 155 21;
 
-  /* Tints of the accents, for fills that must not compete with text. */
   --tint-forecast: rgba(var(--forecast-rgb) / 0.13);
   --tint-risk:     rgba(var(--risk-rgb) / 0.13);
   --tint-excess:   rgba(var(--excess-rgb) / 0.13);
   --tint-override: rgba(var(--override-rgb) / 0.13);
+  --tint-accent:   rgba(var(--ui-accent-rgb) / 0.14);
 
-  /* One gradient, used on primary actions only. Built from --ui-accent because a
-     button is a control, not a series. Deliberately darker than --ui-accent
-     itself: white label text measures 5.66:1 on the top stop and 7.77:1 on the
-     bottom, where the lighter #7A5CF0 would give only 4.55:1 and leave no margin. */
-  --grad-accent: linear-gradient(180deg, #6B4BE0 0%, #5334C9 100%);
+  /* Primary actions only. Darker than the accent itself, so white label text clears
+     AA with margin: 4.7:1 on the top stop, 6.8:1 on the bottom. */
+  --grad-accent: linear-gradient(180deg, var(--purple-600) 0%, var(--purple-800) 100%);
+
+  /* The brand wash behind the application: a faint orchid glow in one corner, so the
+     purple is felt as atmosphere before it is read as an accent. Low enough that no
+     surface's measured contrast moves. */
+  --brand-wash: radial-gradient(1200px 640px at 100% -10%,
+                  rgba(var(--ui-accent-rgb) / 0.10), transparent 60%),
+                radial-gradient(900px 520px at -10% 110%,
+                  rgba(var(--forecast-rgb) / 0.07), transparent 60%);
 
   /* ---- type ------------------------------------------------------------- */
   --font-ui: "Instrument Sans", "Segoe UI Variable Display", "Segoe UI",
@@ -197,13 +265,13 @@
           a dark surface a shadow is nearly invisible, and the thing the eye
           actually reads as "in front" is the lit top edge. ---------------- */
   --e0: none;
-  --e1: 0 1px 2px rgba(0, 0, 0, 0.4),
+  --e1: 0 1px 2px rgba(4, 2, 12, 0.5),
         inset 0 1px 0 var(--border-hair);
-  --e2: 0 4px 12px rgba(0, 0, 0, 0.35),
-        0 1px 2px rgba(0, 0, 0, 0.4),
+  --e2: 0 6px 16px rgba(4, 2, 12, 0.42),
+        0 1px 2px rgba(4, 2, 12, 0.5),
         inset 0 1px 0 var(--border-hair);
-  --e3: 0 24px 56px rgba(0, 0, 0, 0.55),
-        0 2px 8px rgba(0, 0, 0, 0.4),
+  --e3: 0 28px 64px rgba(4, 2, 12, 0.62),
+        0 2px 8px rgba(4, 2, 12, 0.45),
         inset 0 1px 0 var(--border-hair);
   --ring-focus: 0 0 0 3px rgba(var(--ui-accent-rgb) / 0.32);
 
@@ -229,47 +297,52 @@
 
 /* ---- light theme -------------------------------------------------------- */
 :root[data-theme="light"] {
-  --bg-base:      #F7F9FB;
-  --bg-surface:   #FFFFFF;
-  --bg-raised:    #F1F4F7;
-  --bg-overlay:   #FFFFFF;
-  --bg-inset:     #EDF1F5;
-  --bg-hover:     #EDF1F5;
-  --bg-active:    #E3E9EF;
+  --bg-base:      var(--lilac-25);
+  --bg-surface:   var(--lilac-0);
+  --bg-raised:    var(--lilac-50);
+  --bg-overlay:   var(--lilac-0);
+  --bg-inset:     var(--lilac-75);
+  --bg-hover:     var(--lilac-75);
+  --bg-active:    var(--lilac-150);
 
-  --border-subtle:#E2E7EC;
-  --border-strong:#C4CDD6;
-  --border-hair:  rgba(15, 23, 33, 0.05);
+  --border-subtle: var(--lilac-100);
+  --border-strong: var(--lilac-300);
+  --border-hair:   rgba(40, 20, 80, 0.05);
 
-  --text-primary: #0E1620;
-  --text-secondary:#54606D;   /* 6.9:1 on white */
-  --text-tertiary:#78838F;   /* 4.6:1 on white */
+  --text-primary:   var(--lilac-950);   /* 15.7:1 or better */
+  --text-secondary: var(--lilac-700);   /* 6.7:1 or better */
+  --text-tertiary:  var(--lilac-550);   /* 4.68:1 or better on every surface */
 
-  --series-forecast: #3050E8;
-  --series-actual:   #2E3A47;
-  --series-override: #B87400;
-  --series-prior:    #98A3AF;
-  --state-risk:      #C0392B;
-  --state-excess:    #0B7D71;
-  --state-attention: #96690B;
-  --state-ok:        #0B7D71;
+  --series-forecast: var(--violet-600);
+  --series-actual:   var(--lilac-900);
+  --series-override: var(--orange-700);
+  --series-prior:    var(--lilac-500);
+  --state-risk:      var(--red-600);
+  --state-excess:    var(--teal-700);
+  --state-attention: var(--amber-700);
+  --state-ok:        var(--teal-700);
 
-  --ui-accent:     #5B3FD4;
-  --ui-accent-rgb: 91 63 212;
+  --ui-accent:     var(--purple-700);
+  --ui-accent-rgb: 138 43 214;
 
-  --forecast-rgb: 48 80 232;
+  --forecast-rgb: 79 63 217;
   --risk-rgb:     192 57 43;
   --excess-rgb:   11 125 113;
   --override-rgb: 184 116 0;
 
-  --grad-accent: linear-gradient(180deg, #5B3FD4 0%, #4A2DB8 100%);
+  --grad-accent: linear-gradient(180deg, var(--purple-700) 0%, var(--purple-900) 100%);
 
-  --e1: 0 1px 2px rgba(15, 23, 33, 0.07),
+  --brand-wash: radial-gradient(1200px 640px at 100% -10%,
+                  rgba(var(--ui-accent-rgb) / 0.07), transparent 60%),
+                radial-gradient(900px 520px at -10% 110%,
+                  rgba(var(--forecast-rgb) / 0.05), transparent 60%);
+
+  --e1: 0 1px 2px rgba(40, 20, 80, 0.08),
         inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --e2: 0 4px 12px rgba(15, 23, 33, 0.07),
-        0 1px 2px rgba(15, 23, 33, 0.06);
-  --e3: 0 24px 56px rgba(15, 23, 33, 0.16),
-        0 2px 8px rgba(15, 23, 33, 0.08);
+  --e2: 0 6px 16px rgba(40, 20, 80, 0.08),
+        0 1px 2px rgba(40, 20, 80, 0.07);
+  --e3: 0 28px 64px rgba(40, 20, 80, 0.18),
+        0 2px 8px rgba(40, 20, 80, 0.09);
 }
 
 @media (prefers-reduced-motion: reduce) {

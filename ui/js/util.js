@@ -17,6 +17,10 @@ const U = (() => {
     "--text-primary", "--text-secondary", "--text-tertiary",
     "--series-forecast", "--series-actual", "--series-override", "--series-prior",
     "--state-risk", "--state-excess", "--state-attention", "--state-ok",
+    // Registered so a canvas renderer can ask for the action colour. tk() returns a
+    // grey fallback for any unregistered name, which is silent -- the chart simply
+    // paints grey -- so the list is the contract, not a convenience.
+    "--ui-accent",
   ];
   function refresh() {
     cache = {};

@@ -1393,6 +1393,7 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
 
   const VIEW_TITLE = {
     today: "Today", products: "Products", workspace: "Spreadsheet",
+    orders: "Order list", charts: "Charts", overview: "Overview",
     evidence: "Evidence", decisions: "Evidence", pipeline: "Evidence",
   };
 
@@ -1433,6 +1434,8 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     else if (v === "today") Review.render();
     else if (v === "products") Catalog.renderDetail();
     else if (v === "orders") Orders.render();
+    else if (v === "charts") Charts.render();
+    else if (v === "overview") Overview.render();
     paintEvidenceTabs(v);
     if (typeof paintSidebar === "function") paintSidebar();
     closeMenu();
@@ -1716,6 +1719,19 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     /* Catalog shares Grid's pending set, like Review does, so a number changed on
        a product page is the same draft edit the spreadsheet shows. */
     Stock.init(D.run);
+    Charts.init(D);
+    Overview.init(D, {
+      // A tile is one click into its module, landing on the right filter or chart.
+      onGo: (view, t) => {
+        setView(view);
+        if (t.focus) Orders.focus(t.focus);
+        if (t.chart) Charts.show(t.chart);
+      },
+      onAction: (a) => {
+        if (a === "policy") openPolicy();
+        if (a === "evidence") setView("pipeline");
+      },
+    });
 
     Orders.init(D, {
       onOpenProduct: (id) => { setView("products"); Catalog.reveal(id); },
@@ -1742,7 +1758,9 @@ FROM series GROUP BY 1, 2 ORDER BY 1, 2`],
     });
 
     paintSidebar();
-    setView("today");
+    // The hub is the landing view: every module and where it stands, before any
+    // one of them asks for work. Today is one click away and step 1 on the hub.
+    setView("overview");
     window.DQ = { state, Query, Duck, rows: ALL_ROWS, selftest: Query.selftest, setTheme };
 
     document.querySelectorAll(".tab").forEach((t) =>

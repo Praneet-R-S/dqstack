@@ -27,7 +27,7 @@ INDEX = ROOT / "ui" / "index.html"
 MODULES = ["ui/js/app.js", "ui/js/review.js", "ui/js/catalog.js", "ui/js/plain.js",
            "ui/js/duck.js", "ui/js/grid.js", "ui/js/chart.js", "ui/js/views.js",
            "ui/js/util.js", "ui/js/truth.js", "ui/js/curve.js", "ui/js/stock.js",
-           "ui/js/orders.js"]
+           "ui/js/orders.js", "ui/js/charts.js", "ui/js/overview.js"]
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "source", "track", "wbr"}
@@ -98,7 +98,7 @@ def test_the_landmarks_the_shell_depends_on_are_present():
                      "js/util.js", "js/review.js", "js/orders.js", "js/catalog.js",
                      "js/app.js"):
         assert f'src="{src_file}' in src, f"index.html no longer loads {src_file}"
-    for view in ("today", "orders", "products", "workspace", "evidence",
+    for view in ("overview", "today", "orders", "products", "charts", "workspace", "evidence",
                  "decisions", "pipeline"):
         assert f'id="view-{view}"' in src, f"index.html lost view-{view}"
 
