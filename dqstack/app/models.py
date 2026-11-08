@@ -412,8 +412,13 @@ class DailySales(IdMixin, Base):
     avg_price_paise: Mapped[int | None] = mapped_column(BigInteger)
     out_of_stock: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     oos_source: Mapped[str | None] = mapped_column(String(12))   # ledger|estimated
+    # history (forecasting only), upload, entry, checkout or pos
     source: Mapped[str] = mapped_column(String(16), default="upload", nullable=False)
+    # Units of this row already posted to the stock ledger. A replacement file posts
+    # only the difference, so the same file twice moves stock once.
+    posted_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     import_job_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DayClose(IdMixin, CreatedMixin, Base):
@@ -426,7 +431,11 @@ class DayClose(IdMixin, CreatedMixin, Base):
     automatic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     cash_expected_paise: Mapped[int | None] = mapped_column(BigInteger)
     cash_counted_paise: Mapped[int | None] = mapped_column(BigInteger)
+    store_was_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(300))
     report: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    # A sales file for this day arrived after it closed: tonight's run re-reads it.
+    late_data_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # =============================================================== buying and receiving
@@ -451,6 +460,7 @@ class PurchaseOrder(IdMixin, CreatedMixin, Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     origin: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+    closed_short: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     lines: Mapped[list["PurchaseOrderLine"]] = relationship(cascade="all, delete-orphan",
                                                             lazy="selectin")
 
@@ -477,6 +487,7 @@ class Delivery(IdMixin, CreatedMixin, Base):
     supplier_id: Mapped[str | None] = mapped_column(String(32))
     invoice_number: Mapped[str | None] = mapped_column(String(64))
     received_by: Mapped[str | None] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(String(300))
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
     lines: Mapped[list["DeliveryLine"]] = relationship(cascade="all, delete-orphan",
                                                        lazy="selectin")
@@ -489,7 +500,10 @@ class DeliveryLine(IdMixin, Base):
                                              index=True, nullable=False)
     product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
     received_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # Not added to stock: damaged, wrong item or expired on arrival; for supplier credit.
     damaged_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    reject_reason: Mapped[str | None] = mapped_column(String(16))
+    credit_status: Mapped[str | None] = mapped_column(String(12))   # pending|credited
     unit_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
     batch: Mapped[str | None] = mapped_column(String(64))
     expiry: Mapped[date | None] = mapped_column(Date)
@@ -497,6 +511,7 @@ class DeliveryLine(IdMixin, Base):
 
 class Transfer(IdMixin, CreatedMixin, Base):
     __tablename__ = "transfers"
+    __table_args__ = (UniqueConstraint("company_id", "idempotency_key"),)
     company_id: Mapped[str] = company_fk()
     from_store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
     to_store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
@@ -504,6 +519,9 @@ class Transfer(IdMixin, CreatedMixin, Base):
     sent_by: Mapped[str | None] = mapped_column(String(32))
     received_by: Mapped[str | None] = mapped_column(String(32))
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(300))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
+    receive_key: Mapped[str | None] = mapped_column(String(128))
     lines: Mapped[list["TransferLine"]] = relationship(cascade="all, delete-orphan",
                                                        lazy="selectin")
 
@@ -516,17 +534,25 @@ class TransferLine(IdMixin, Base):
     product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), nullable=False)
     sent_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
     received_milli: Mapped[int | None] = mapped_column(BigInteger)
+    unit_cost_paise: Mapped[int | None] = mapped_column(BigInteger)   # sender's average cost
 
 
 class CountSession(IdMixin, CreatedMixin, Base):
+    """cycle (what is due), full (year end or audit) or opening (setting first stock).
+    open -> submitted -> closed once no line is waiting for a manager."""
     __tablename__ = "count_sessions"
+    __table_args__ = (UniqueConstraint("company_id", "idempotency_key"),)
     company_id: Mapped[str] = company_fk()
     store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
-    kind: Mapped[str] = mapped_column(String(12), default="cycle", nullable=False)  # cycle|full
+    kind: Mapped[str] = mapped_column(String(12), default="cycle", nullable=False)
+    name: Mapped[str | None] = mapped_column(String(120))
     blind: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)
+    product_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     started_by: Mapped[str | None] = mapped_column(String(32))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
     lines: Mapped[list["CountLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -543,9 +569,17 @@ class CountLine(IdMixin, Base):
     counted_by: Mapped[str | None] = mapped_column(String(32))
     counted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
                                                  nullable=False)
-    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    difference_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    unit_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
+    # posted (small difference, or approved), confirmed (no difference), waiting (for a
+    # manager), conflict (two people disagree), rejected (recount asked), superseded
+    status: Mapped[str] = mapped_column(String(16), default="waiting", nullable=False)
+    movement_id: Mapped[str | None] = mapped_column(String(32))
     decided_by: Mapped[str | None] = mapped_column(String(32))
-    reason: Mapped[str | None] = mapped_column(String(300))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(300))       # the counter's
+    reason: Mapped[str | None] = mapped_column(String(300))     # the manager's
+    device: Mapped[str | None] = mapped_column(String(255))
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
 
 
@@ -707,6 +741,20 @@ class PosMessage(IdMixin, CreatedMixin, Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Attachment(IdMixin, CreatedMixin, Base):
+    """A photo or document attached to something: a wastage entry's photo, a delivery
+    note. Kept in the database so every application server sees it."""
+    __tablename__ = "attachments"
+    __table_args__ = (Index("ix_attachment_owner", "owner_type", "owner_id"),)
+    company_id: Mapped[str] = company_fk()
+    owner_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    person_id: Mapped[str | None] = mapped_column(String(32))
 
 
 class PurgePermit(Base):

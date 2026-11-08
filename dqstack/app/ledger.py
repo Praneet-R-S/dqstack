@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import new_id, utcnow
-from .models import StockMovement, StockOnHand
+from .models import Product, StockMovement, StockOnHand
 
 # type -> required sign of the quantity: +1 in, -1 out, 0 either way
 TYPES: dict[str, int] = {
@@ -108,7 +108,10 @@ def post(db: Session, *, company_id: str, store_id: str, product_id: str, qty_mi
     sign = TYPES[type]
     if qty_milli == 0 and type != "count_adjustment":
         raise LedgerError("A movement must change stock.")
-    if sign > 0 and qty_milli < 0 or sign < 0 and qty_milli > 0:
+    correction = type == "sale" and source_type == "sales_correction"
+    if (sign > 0 and qty_milli < 0 or sign < 0 and qty_milli > 0) and not correction:
+        # The one exception: a corrected sales file that says fewer were sold than an
+        # earlier file for the same day gives the difference back as a sale correction.
         direction = "add to" if sign > 0 else "take from"
         raise LedgerError(f"{LABELS[type]} can only {direction} stock.")
     if type == "opening" and qty_milli < 0 and source_type != "import_undo":
@@ -123,6 +126,16 @@ def post(db: Session, *, company_id: str, store_id: str, product_id: str, qty_mi
 
     row = _soh(db, company_id, store_id, product_id)
     now = at or utcnow()
+    if unit_cost_paise is None and (type in COSTED_IN or row.avg_cost_paise is None):
+        # No cost given and no average yet: the catalogue cost is the best estimate, so
+        # write-offs and transfers of stock that arrived without a cost are not valued
+        # at zero.
+        product = db.get(Product, product_id)
+        catalogue = product.cost_paise if product is not None else None
+        if type in COSTED_IN:
+            unit_cost_paise = catalogue
+        elif row.avg_cost_paise is None:
+            row.avg_cost_paise = catalogue
     if type in COSTED_IN and unit_cost_paise is not None and qty_milli > 0:
         held = max(row.on_hand_milli, 0)
         if held > 0 and row.avg_cost_paise is not None:

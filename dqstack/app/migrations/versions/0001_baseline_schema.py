@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 22:27:12.456915
+Create Date: 2026-11-08 22:43:08.163425
 """
 
 from __future__ import annotations
@@ -155,6 +155,23 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('api_keys', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_api_keys_company_id'), ['company_id'], unique=False)
+
+    op.create_table('attachments',
+    sa.Column('company_id', sa.String(length=32), nullable=False),
+    sa.Column('owner_type', sa.String(length=24), nullable=False),
+    sa.Column('owner_id', sa.String(length=32), nullable=False),
+    sa.Column('content_type', sa.String(length=64), nullable=False),
+    sa.Column('size', sa.Integer(), nullable=False),
+    sa.Column('content', sa.LargeBinary(), nullable=False),
+    sa.Column('person_id', sa.String(length=32), nullable=True),
+    sa.Column('id', sa.String(length=32), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('attachments', schema=None) as batch_op:
+        batch_op.create_index('ix_attachment_owner', ['owner_type', 'owner_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_attachments_company_id'), ['company_id'], unique=False)
 
     op.create_table('calendar_events',
     sa.Column('company_id', sa.String(length=32), nullable=False),
@@ -462,15 +479,20 @@ def upgrade() -> None:
     sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('store_id', sa.String(length=32), nullable=False),
     sa.Column('kind', sa.String(length=12), nullable=False),
+    sa.Column('name', sa.String(length=120), nullable=True),
     sa.Column('blind', sa.Boolean(), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
+    sa.Column('product_ids', sa.JSON(), nullable=False),
     sa.Column('started_by', sa.String(length=32), nullable=True),
     sa.Column('submitted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('closed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('idempotency_key', sa.String(length=128), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['store_id'], ['stores.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('company_id', 'idempotency_key')
     )
     with op.batch_alter_table('count_sessions', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_count_sessions_company_id'), ['company_id'], unique=False)
@@ -486,7 +508,9 @@ def upgrade() -> None:
     sa.Column('out_of_stock', sa.Boolean(), nullable=False),
     sa.Column('oos_source', sa.String(length=12), nullable=True),
     sa.Column('source', sa.String(length=16), nullable=False),
+    sa.Column('posted_milli', sa.BigInteger(), nullable=False),
     sa.Column('import_job_id', sa.String(length=32), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['product_id'], ['products.id'], ),
@@ -509,7 +533,10 @@ def upgrade() -> None:
     sa.Column('automatic', sa.Boolean(), nullable=False),
     sa.Column('cash_expected_paise', sa.BigInteger(), nullable=True),
     sa.Column('cash_counted_paise', sa.BigInteger(), nullable=True),
+    sa.Column('store_was_closed', sa.Boolean(), nullable=False),
+    sa.Column('note', sa.String(length=300), nullable=True),
     sa.Column('report', sa.JSON(), nullable=False),
+    sa.Column('late_data_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
@@ -609,6 +636,7 @@ def upgrade() -> None:
     sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('origin', sa.String(length=16), nullable=False),
     sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('closed_short', sa.Boolean(), nullable=False),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
@@ -726,12 +754,16 @@ def upgrade() -> None:
     sa.Column('sent_by', sa.String(length=32), nullable=True),
     sa.Column('received_by', sa.String(length=32), nullable=True),
     sa.Column('received_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('note', sa.String(length=300), nullable=True),
+    sa.Column('idempotency_key', sa.String(length=128), nullable=True),
+    sa.Column('receive_key', sa.String(length=128), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['from_store_id'], ['stores.id'], ),
     sa.ForeignKeyConstraint(['to_store_id'], ['stores.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('company_id', 'idempotency_key')
     )
     with op.batch_alter_table('transfers', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_transfers_company_id'), ['company_id'], unique=False)
@@ -781,9 +813,15 @@ def upgrade() -> None:
     sa.Column('system_milli', sa.BigInteger(), nullable=False),
     sa.Column('counted_by', sa.String(length=32), nullable=True),
     sa.Column('counted_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('difference_milli', sa.BigInteger(), nullable=False),
+    sa.Column('unit_cost_paise', sa.BigInteger(), nullable=True),
     sa.Column('status', sa.String(length=16), nullable=False),
+    sa.Column('movement_id', sa.String(length=32), nullable=True),
     sa.Column('decided_by', sa.String(length=32), nullable=True),
+    sa.Column('decided_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('note', sa.String(length=300), nullable=True),
     sa.Column('reason', sa.String(length=300), nullable=True),
+    sa.Column('device', sa.String(length=255), nullable=True),
     sa.Column('idempotency_key', sa.String(length=128), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
@@ -826,6 +864,7 @@ def upgrade() -> None:
     sa.Column('supplier_id', sa.String(length=32), nullable=True),
     sa.Column('invoice_number', sa.String(length=64), nullable=True),
     sa.Column('received_by', sa.String(length=32), nullable=True),
+    sa.Column('note', sa.String(length=300), nullable=True),
     sa.Column('idempotency_key', sa.String(length=128), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -863,6 +902,7 @@ def upgrade() -> None:
     sa.Column('product_id', sa.String(length=32), nullable=False),
     sa.Column('sent_milli', sa.BigInteger(), nullable=False),
     sa.Column('received_milli', sa.BigInteger(), nullable=True),
+    sa.Column('unit_cost_paise', sa.BigInteger(), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['product_id'], ['products.id'], ),
@@ -879,6 +919,8 @@ def upgrade() -> None:
     sa.Column('product_id', sa.String(length=32), nullable=False),
     sa.Column('received_milli', sa.BigInteger(), nullable=False),
     sa.Column('damaged_milli', sa.BigInteger(), nullable=False),
+    sa.Column('reject_reason', sa.String(length=16), nullable=True),
+    sa.Column('credit_status', sa.String(length=12), nullable=True),
     sa.Column('unit_cost_paise', sa.BigInteger(), nullable=True),
     sa.Column('batch', sa.String(length=64), nullable=True),
     sa.Column('expiry', sa.Date(), nullable=True),
@@ -1083,6 +1125,11 @@ def downgrade() -> None:
         batch_op.drop_index('ix_calendar_company_day')
 
     op.drop_table('calendar_events')
+    with op.batch_alter_table('attachments', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_attachments_company_id'))
+        batch_op.drop_index('ix_attachment_owner')
+
+    op.drop_table('attachments')
     with op.batch_alter_table('api_keys', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_api_keys_company_id'))
 
