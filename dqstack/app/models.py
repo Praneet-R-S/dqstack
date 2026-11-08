@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import (JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, String,
-                        Text, UniqueConstraint, BigInteger, event)
+from sqlalchemy import (JSON, BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer,
+                        LargeBinary, String, Text, UniqueConstraint, event)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base, CreatedMixin, IdMixin, utcnow
@@ -616,20 +616,58 @@ class Decision(IdMixin, CreatedMixin, Base):
 # =============================================================== imports and alerts
 
 class ImportJob(IdMixin, CreatedMixin, Base):
+    """One uploaded file and everything that happened to it (section 5, Imports screen).
+
+    uploaded -> checked -> imported -> undone, or failed. The file itself is kept in
+    ImportFile so this list stays light; what the import created or changed is kept
+    row by row in ImportChange, so undo restores exactly what was there before."""
     __tablename__ = "import_jobs"
+    __table_args__ = (Index("ix_import_company_created", "company_id", "created_at"),)
     company_id: Mapped[str] = company_fk()
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
     filename: Mapped[str | None] = mapped_column(String(300))
+    store_id: Mapped[str | None] = mapped_column(String(32))
+    signature: Mapped[str | None] = mapped_column(String(64))   # which source the columns match
+    headers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     mapping: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     rows_read: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rows_accepted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rows_unchanged: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    errors: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), default="done", nullable=False)
-    # What this import created or changed, so it can be undone exactly.
-    changes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    rows_new: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_failed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    errors: Mapped[list] = mapped_column(JSON, default=list, nullable=False)      # first 2,000
+    warnings: Mapped[list] = mapped_column(JSON, default=list, nullable=False)    # first 2,000
+    status: Mapped[str] = mapped_column(String(16), default="uploaded", nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
     person_id: Mapped[str | None] = mapped_column(String(32))
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    undo_report: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class ImportFile(Base):
+    __tablename__ = "import_files"
+    job_id: Mapped[str] = mapped_column(String(32), ForeignKey("import_jobs.id", ondelete="CASCADE"),
+                                        primary_key=True)
+    company_id: Mapped[str] = company_fk()
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class ImportChange(IdMixin, Base):
+    """One record an import created, changed or removed, in order, for undo."""
+    __tablename__ = "import_changes"
+    __table_args__ = (Index("ix_import_change_job_seq", "job_id", "seq"),)
+    company_id: Mapped[str] = company_fk()
+    job_id: Mapped[str] = mapped_column(String(32), ForeignKey("import_jobs.id", ondelete="CASCADE"),
+                                        nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    entity: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    op: Mapped[str] = mapped_column(String(8), nullable=False)          # insert|update|delete
+    before: Mapped[dict | None] = mapped_column(JSON)
+    after: Mapped[dict | None] = mapped_column(JSON)
 
 
 class ColumnMapping(IdMixin, Base):

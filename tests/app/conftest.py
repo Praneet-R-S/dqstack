@@ -53,6 +53,26 @@ class Client:
     def delete(self, url, **kw):
         return self.http.delete(url, headers=self._h(kw.pop("headers", None)), **kw)
 
+    def put(self, url, json=None, **kw):
+        return self.http.put(url, json=json, headers=self._h(kw.pop("headers", None)), **kw)
+
+    def upload(self, kind: str, content: bytes | str, filename: str = "upload.csv"):
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        return self.http.post("/api/imports", data={"kind": kind},
+                              files={"file": (filename, content, "application/octet-stream")},
+                              headers=self._h())
+
+    def import_file(self, kind: str, content, filename: str = "upload.csv") -> dict:
+        """Upload, expect a clean check, commit; return the committed job."""
+        r = self.upload(kind, content, filename)
+        assert r.status_code == 201, r.text
+        job = r.json()
+        assert job["status"] == "checked", job
+        r = self.post(f"/api/imports/{job['id']}/commit")
+        assert r.status_code == 200, r.text
+        return r.json()
+
     # -------------------------------------------------------------- helpers
     def signup(self, company="Acme Retail", name="Asha Owner", email=None,
                password="correct horse battery"):

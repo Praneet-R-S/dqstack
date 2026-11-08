@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 21:57:06.984083
+Create Date: 2026-11-08 22:08:18.896800
 """
 
 from __future__ import annotations
@@ -209,21 +209,31 @@ def upgrade() -> None:
     sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('kind', sa.String(length=24), nullable=False),
     sa.Column('filename', sa.String(length=300), nullable=True),
+    sa.Column('store_id', sa.String(length=32), nullable=True),
+    sa.Column('signature', sa.String(length=64), nullable=True),
+    sa.Column('headers', sa.JSON(), nullable=False),
     sa.Column('mapping', sa.JSON(), nullable=False),
     sa.Column('rows_read', sa.Integer(), nullable=False),
     sa.Column('rows_accepted', sa.Integer(), nullable=False),
     sa.Column('rows_unchanged', sa.Integer(), nullable=False),
+    sa.Column('rows_new', sa.Integer(), nullable=False),
+    sa.Column('rows_updated', sa.Integer(), nullable=False),
+    sa.Column('rows_failed', sa.Integer(), nullable=False),
     sa.Column('errors', sa.JSON(), nullable=False),
+    sa.Column('warnings', sa.JSON(), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('changes', sa.JSON(), nullable=False),
+    sa.Column('message', sa.Text(), nullable=True),
     sa.Column('person_id', sa.String(length=32), nullable=True),
+    sa.Column('imported_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('undone_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('undo_report', sa.JSON(), nullable=False),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('import_jobs', schema=None) as batch_op:
+        batch_op.create_index('ix_import_company_created', ['company_id', 'created_at'], unique=False)
         batch_op.create_index(batch_op.f('ix_import_jobs_company_id'), ['company_id'], unique=False)
 
     op.create_table('invitations',
@@ -509,6 +519,36 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('day_closes', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_day_closes_company_id'), ['company_id'], unique=False)
+
+    op.create_table('import_changes',
+    sa.Column('company_id', sa.String(length=32), nullable=False),
+    sa.Column('job_id', sa.String(length=32), nullable=False),
+    sa.Column('seq', sa.Integer(), nullable=False),
+    sa.Column('entity', sa.String(length=32), nullable=False),
+    sa.Column('entity_id', sa.String(length=64), nullable=False),
+    sa.Column('op', sa.String(length=8), nullable=False),
+    sa.Column('before', sa.JSON(), nullable=True),
+    sa.Column('after', sa.JSON(), nullable=True),
+    sa.Column('id', sa.String(length=32), nullable=False),
+    sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['job_id'], ['import_jobs.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('import_changes', schema=None) as batch_op:
+        batch_op.create_index('ix_import_change_job_seq', ['job_id', 'seq'], unique=False)
+        batch_op.create_index(batch_op.f('ix_import_changes_company_id'), ['company_id'], unique=False)
+
+    op.create_table('import_files',
+    sa.Column('job_id', sa.String(length=32), nullable=False),
+    sa.Column('company_id', sa.String(length=32), nullable=False),
+    sa.Column('size', sa.Integer(), nullable=False),
+    sa.Column('content', sa.LargeBinary(), nullable=False),
+    sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['job_id'], ['import_jobs.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('job_id')
+    )
+    with op.batch_alter_table('import_files', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_import_files_company_id'), ['company_id'], unique=False)
 
     op.create_table('password_resets',
     sa.Column('company_id', sa.String(length=32), nullable=True),
@@ -947,6 +987,15 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_password_resets_company_id'))
 
     op.drop_table('password_resets')
+    with op.batch_alter_table('import_files', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_import_files_company_id'))
+
+    op.drop_table('import_files')
+    with op.batch_alter_table('import_changes', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_import_changes_company_id'))
+        batch_op.drop_index('ix_import_change_job_seq')
+
+    op.drop_table('import_changes')
     with op.batch_alter_table('day_closes', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_day_closes_company_id'))
 
@@ -1016,6 +1065,7 @@ def downgrade() -> None:
     op.drop_table('invitations')
     with op.batch_alter_table('import_jobs', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_import_jobs_company_id'))
+        batch_op.drop_index('ix_import_company_created')
 
     op.drop_table('import_jobs')
     with op.batch_alter_table('forecast_runs', schema=None) as batch_op:
