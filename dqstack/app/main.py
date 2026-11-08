@@ -17,9 +17,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import settings
@@ -33,6 +34,22 @@ SITE = ROOT / "site"
 APP_UI = ROOT / "webapp"
 
 VERSION = "1.0.0"
+PLAIN = {404: "That page or address does not exist.",
+         405: "That action is not available here."}
+
+
+def site_page(name: str, status: int = 200) -> HTMLResponse:
+    """A public page with its social-card and canonical URLs made absolute from
+    DQ_PUBLIC_URL, which link previews require and a static file cannot know."""
+    html = (SITE / name).read_text(encoding="utf-8")
+    base = settings.public_url.rstrip("/")
+    html = html.replace('content="/site-assets/', f'content="{base}/site-assets/')
+    if status == 200 and 'rel="canonical"' not in html:
+        url = f"{base}/" if name == "index.html" else f"{base}/{name}"
+        tags = (f'  <link rel="canonical" href="{url}">\n'
+                f'  <meta property="og:url" content="{url}">\n')
+        html = html.replace("</head>", tags + "</head>", 1)
+    return HTMLResponse(html, status_code=status)
 
 
 class SecurityHeaders(BaseHTTPMiddleware):
@@ -57,9 +74,16 @@ def create_app() -> FastAPI:
                   redoc_url=None, openapi_url="/api/openapi.json")
     app.add_middleware(SecurityHeaders)
 
-    @app.exception_handler(HTTPException)
-    async def http_error(_: Request, exc: HTTPException):
-        return JSONResponse({"error": exc.detail}, status_code=exc.status_code,
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException):
+        # Covers our own HTTPExceptions and the router's "no such path" alike. People
+        # get the designed not-found page; programs get a plain JSON sentence.
+        if exc.status_code == 404 and not request.url.path.startswith("/api/")                 and (SITE / "404.html").exists():
+            return site_page("404.html", 404)
+        detail = exc.detail
+        if detail in ("Not Found", "Method Not Allowed", None, ""):
+            detail = PLAIN.get(exc.status_code, "That request could not be completed.")
+        return JSONResponse({"error": detail}, status_code=exc.status_code,
                             headers=getattr(exc, "headers", None))
 
     @app.exception_handler(RequestValidationError)
@@ -105,14 +129,14 @@ def create_app() -> FastAPI:
 
         @app.get("/", include_in_schema=False)
         def home():
-            return FileResponse(SITE / "index.html")
+            return site_page("index.html")
 
         @app.get("/{page}.html", include_in_schema=False)
-        def site_page(page: str):
+        def public_page(page: str):
             f = SITE / f"{page}.html"
-            if f.exists() and f.parent == SITE:
-                return FileResponse(f)
-            return FileResponse(SITE / "404.html", status_code=404)
+            if page != "404" and f.exists() and f.resolve().parent == SITE.resolve():
+                return site_page(f.name)
+            return site_page("404.html", 404)
     else:
         @app.get("/", include_in_schema=False)
         def home_redirect():

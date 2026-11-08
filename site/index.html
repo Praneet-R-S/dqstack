@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DQ-Stack: stock records and demand forecasting for Indian retailers</title>
+  <meta name="description" content="One app for your stores: an exact record of what is on the shelf, and a forecast of what will sell and how much to order. Start with a browser and a spreadsheet.">
+  <meta name="theme-color" content="#0D0A16">
+  <meta name="color-scheme" content="dark">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="DQ-Stack">
+  <meta property="og:title" content="DQ-Stack: order what will sell, from stock you can trust">
+  <meta property="og:description" content="Store operations with demand forecasting built in, for Indian retailers. Exact stock on every shelf, and orders that show their reasons.">
+  <meta property="og:image" content="/site-assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="DQ-Stack. Order what will sell, from stock you can trust.">
+  <meta property="og:locale" content="en_IN">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="DQ-Stack: order what will sell, from stock you can trust">
+  <meta name="twitter:description" content="Store operations with demand forecasting built in, for Indian retailers.">
+  <meta name="twitter:image" content="/site-assets/og.png">
+
+  <link rel="icon" href="/site-assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/site-assets/apple-touch-icon.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/site-assets/css/site.css">
+
+  <script>
+    /* Reveal styles apply only when scripting works. If the main script has not
+       started within three seconds, fall back to the plain page. */
+    document.documentElement.classList.add("js");
+    setTimeout(function () {
+      if (!window.dqReady) document.documentElement.classList.remove("js");
+    }, 3000);
+  </script>
+  <script src="/site-assets/js/site.js" defer></script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {"@type": "Question", "name": "Do I need a barcode scanner or new billing software?",
+       "acceptedAnswer": {"@type": "Answer", "text": "No. A browser and a spreadsheet upload are enough to start. Barcode scanners and links to your existing billing software are optional upgrades you can add store by store."}},
+      {"@type": "Question", "name": "How accurate will the forecast be for my stores?",
+       "acceptedAnswer": {"@type": "Answer", "text": "Your first forecast comes with a backtest on your own last 8 weeks of sales. That is the accuracy figure to trust, because it is measured on your stores rather than quoted from someone else's."}},
+      {"@type": "Question", "name": "Can someone simply change a stock number?",
+       "acceptedAnswer": {"@type": "Answer", "text": "No. Stock is never typed over. Every change is a movement with a reason, such as a sale, a delivery, a count, wastage or a transfer, and stock changes only when something is final: a paid bill, a received delivery or an approved count."}},
+      {"@type": "Question", "name": "How is the suggested order worked out?",
+       "acceptedAnswer": {"@type": "Answer", "text": "It is the stock target, minus stock on hand, minus what is already on order, rounded up to the case pack and raised to the supplier minimum. The store manager approves each supplier's draft order before the purchaser sends it."}},
+      {"@type": "Question", "name": "What happens when the internet goes down?",
+       "acceptedAnswer": {"@type": "Answer", "text": "Work saves as it happens and keeps working offline. Nothing can be counted twice, and every action is logged. If you use the optional Checkout screen, it can keep billing offline too."}},
+      {"@type": "Question", "name": "Can one store use a scanner while another uploads a file?",
+       "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each store runs standalone, with a daily sales file or typed totals, or connected, with a scanner or your existing billing software. A company can run both at once."}},
+      {"@type": "Question", "name": "Who in my team sees what?",
+       "acceptedAnswer": {"@type": "Answer", "text": "There are seven roles: Owner, Admin, Store manager, Purchaser, Stock clerk, Cashier and Viewer. Each person sees only their stores, and roles are checked on the server."}},
+      {"@type": "Question", "name": "Does it handle Indian formats and festivals?",
+       "acceptedAnswer": {"@type": "Answer", "text": "Yes. Amounts are in rupees with lakh and crore, times are in IST, and festival calendars are set by state."}},
+      {"@type": "Question", "name": "How do orders reach suppliers?",
+       "acceptedAnswer": {"@type": "Answer", "text": "Once a draft order is approved, the purchaser sends it by email, WhatsApp or PDF."}},
+      {"@type": "Question", "name": "How is our data kept apart from other companies?",
+       "acceptedAnswer": {"@type": "Answer", "text": "Every query is filtered by company on the server. Passwords are stored as hashes, accounts lock after repeated failed sign in attempts, and an activity log that can only be added to records every action."}},
+      {"@type": "Question", "name": "What happens to our records if we stop using DQ-Stack?",
+       "acceptedAnswer": {"@type": "Answer", "text": "We export all of your records on request, then delete them after a period we confirm with you."}}
+    ]
+  }
+  </script>
+</head>
+<body class="body-3">
+  <a class="skip-link button-sm" href="#main">Skip to content</a>
+
+  <!-- Icons: Phosphor Icons, regular weight, MIT licence (phosphoricons.com) -->
+  <svg class="sprite" aria-hidden="true" focusable="false" width="0" height="0">
+    <symbol id="i-arrow-right" viewBox="0 0 256 256"><path d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></symbol>
+    <symbol id="i-arrow-up-right" viewBox="0 0 256 256"><path d="M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></symbol>
+    <symbol id="i-storefront" viewBox="0 0 256 256"><path d="M232,96a7.89,7.89,0,0,0-.3-2.2L217.35,43.6A16.07,16.07,0,0,0,202,32H54A16.07,16.07,0,0,0,38.65,43.6L24.31,93.8A7.89,7.89,0,0,0,24,96h0v16a40,40,0,0,0,16,32v72a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V144a40,40,0,0,0,16-32V96ZM54,48H202l11.42,40H42.61Zm50,56h48v8a24,24,0,0,1-48,0Zm-16,0v8a24,24,0,0,1-35.12,21.26,7.88,7.88,0,0,0-1.82-1.06A24,24,0,0,1,40,112v-8ZM200,208H56V151.2a40.57,40.57,0,0,0,8,.8,40,40,0,0,0,32-16,40,40,0,0,0,64,0,40,40,0,0,0,32,16,40.57,40.57,0,0,0,8-.8Zm4.93-75.8a8.08,8.08,0,0,0-1.8,1.05A24,24,0,0,1,168,112v-8h48v8A24,24,0,0,1,204.93,132.2Z"/></symbol>
+    <symbol id="i-chart-line-up" viewBox="0 0 256 256"><path d="M232,208a8,8,0,0,1-8,8H32a8,8,0,0,1-8-8V48a8,8,0,0,1,16,0V156.69l50.34-50.35a8,8,0,0,1,11.32,0L128,132.69,180.69,80H160a8,8,0,0,1,0-16h40a8,8,0,0,1,8,8v40a8,8,0,0,1-16,0V91.31l-58.34,58.35a8,8,0,0,1-11.32,0L96,123.31l-56,56V200H224A8,8,0,0,1,232,208Z"/></symbol>
+    <symbol id="i-arrows-left-right" viewBox="0 0 256 256"><path d="M213.66,181.66l-32,32a8,8,0,0,1-11.32-11.32L188.69,184H48a8,8,0,0,1,0-16H188.69l-18.35-18.34a8,8,0,0,1,11.32-11.32l32,32A8,8,0,0,1,213.66,181.66Zm-139.32-64a8,8,0,0,0,11.32-11.32L67.31,88H208a8,8,0,0,0,0-16H67.31L85.66,53.66A8,8,0,0,0,74.34,42.34l-32,32a8,8,0,0,0,0,11.32Z"/></symbol>
+    <symbol id="i-file-arrow-up" viewBox="0 0 256 256"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-77.66a8,8,0,0,1-11.32,11.32L136,139.31V184a8,8,0,0,1-16,0V139.31l-10.34,10.35a8,8,0,0,1-11.32-11.32l24-24a8,8,0,0,1,11.32,0Z"/></symbol>
+    <symbol id="i-barcode" viewBox="0 0 256 256"><path d="M232,48V88a8,8,0,0,1-16,0V56H184a8,8,0,0,1,0-16h40A8,8,0,0,1,232,48ZM72,200H40V168a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16Zm152-40a8,8,0,0,0-8,8v32H184a8,8,0,0,0,0,16h40a8,8,0,0,0,8-8V168A8,8,0,0,0,224,160ZM32,96a8,8,0,0,0,8-8V56H72a8,8,0,0,0,0-16H32a8,8,0,0,0-8,8V88A8,8,0,0,0,32,96ZM80,80a8,8,0,0,0-8,8v80a8,8,0,0,0,16,0V88A8,8,0,0,0,80,80Zm104,88V88a8,8,0,0,0-16,0v80a8,8,0,0,0,16,0ZM144,80a8,8,0,0,0-8,8v80a8,8,0,0,0,16,0V88A8,8,0,0,0,144,80Zm-32,0a8,8,0,0,0-8,8v80a8,8,0,0,0,16,0V88A8,8,0,0,0,112,80Z"/></symbol>
+    <symbol id="i-cash-register" viewBox="0 0 256 256"><path d="M239.76,158.06,217.28,68.12A16,16,0,0,0,201.75,56H136V40a16,16,0,0,0-16-16H80A16,16,0,0,0,64,40V56H54.25A16,16,0,0,0,38.72,68.12L16.24,158.06A7.93,7.93,0,0,0,16,160v32a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V160A7.93,7.93,0,0,0,239.76,158.06ZM80,40h40V56H80ZM54.25,72h147.5l20,80H34.25ZM32,192V168H224v24ZM64,96a8,8,0,0,1,8-8H88a8,8,0,0,1,0,16H72A8,8,0,0,1,64,96Zm48,0a8,8,0,0,1,8-8h16a8,8,0,0,1,0,16H120A8,8,0,0,1,112,96Zm48,0a8,8,0,0,1,8-8h16a8,8,0,0,1,0,16H168A8,8,0,0,1,160,96ZM64,128a8,8,0,0,1,8-8H88a8,8,0,0,1,0,16H72A8,8,0,0,1,64,128Zm48,0a8,8,0,0,1,8-8h16a8,8,0,0,1,0,16H120A8,8,0,0,1,112,128Zm48,0a8,8,0,0,1,8-8h16a8,8,0,0,1,0,16H168A8,8,0,0,1,160,128Z"/></symbol>
+    <symbol id="i-clipboard-text" viewBox="0 0 256 256"><path d="M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 256 256"><path d="M255.42,117l-14-35A15.93,15.93,0,0,0,226.58,72H192V64a8,8,0,0,0-8-8H32A16,16,0,0,0,16,72V184a16,16,0,0,0,16,16H49a32,32,0,0,0,62,0h50a32,32,0,0,0,62,0h17a16,16,0,0,0,16-16V120A7.94,7.94,0,0,0,255.42,117ZM192,88h34.58l9.6,24H192ZM32,72H176v64H32ZM80,208a16,16,0,1,1,16-16A16,16,0,0,1,80,208Zm81-24H111a32,32,0,0,0-62,0H32V152H176v12.31A32.11,32.11,0,0,0,161,184Zm31,24a16,16,0,1,1,16-16A16,16,0,0,1,192,208Zm48-24H223a32.06,32.06,0,0,0-31-24V128h48Z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 256 256"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/></symbol>
+    <symbol id="i-device-mobile" viewBox="0 0 256 256"><path d="M176,16H80A24,24,0,0,0,56,40V216a24,24,0,0,0,24,24h96a24,24,0,0,0,24-24V40A24,24,0,0,0,176,16ZM72,64H184V192H72Zm8-32h96a8,8,0,0,1,8,8v8H72V40A8,8,0,0,1,80,32Zm96,192H80a8,8,0,0,1-8-8v-8H184v8A8,8,0,0,1,176,224Z"/></symbol>
+    <symbol id="i-users-three" viewBox="0 0 256 256"><path d="M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z"/></symbol>
+    <symbol id="i-buildings" viewBox="0 0 256 256"><path d="M240,208H224V96a16,16,0,0,0-16-16H144V32a16,16,0,0,0-24.88-13.32L39.12,72A16,16,0,0,0,32,85.34V208H16a8,8,0,0,0,0,16H240a8,8,0,0,0,0-16ZM208,96V208H144V96ZM48,85.34,128,32V208H48ZM112,112v16a8,8,0,0,1-16,0V112a8,8,0,1,1,16,0Zm-32,0v16a8,8,0,0,1-16,0V112a8,8,0,1,1,16,0Zm0,56v16a8,8,0,0,1-16,0V168a8,8,0,0,1,16,0Zm32,0v16a8,8,0,0,1-16,0V168a8,8,0,0,1,16,0Z"/></symbol>
+    <symbol id="i-password" viewBox="0 0 256 256"><path d="M48,56V200a8,8,0,0,1-16,0V56a8,8,0,0,1,16,0Zm92,54.5L120,117V96a8,8,0,0,0-16,0v21L84,110.5a8,8,0,0,0-5,15.22l20,6.49-12.34,17a8,8,0,1,0,12.94,9.4l12.34-17,12.34,17a8,8,0,1,0,12.94-9.4l-12.34-17,20-6.49A8,8,0,0,0,140,110.5ZM246,115.64A8,8,0,0,0,236,110.5L216,117V96a8,8,0,0,0-16,0v21l-20-6.49a8,8,0,0,0-4.95,15.22l20,6.49-12.34,17a8,8,0,1,0,12.94,9.4l12.34-17,12.34,17a8,8,0,1,0,12.94-9.4l-12.34-17,20-6.49A8,8,0,0,0,246,115.64Z"/></symbol>
+    <symbol id="i-lock-key" viewBox="0 0 256 256"><path d="M128,112a28,28,0,0,0-8,54.83V184a8,8,0,0,0,16,0V166.83A28,28,0,0,0,128,112Zm0,40a12,12,0,1,1,12-12A12,12,0,0,1,128,152Zm80-72H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Z"/></symbol>
+    <symbol id="i-identification-badge" viewBox="0 0 256 256"><path d="M75.19,198.4a8,8,0,0,0,11.21-1.6,52,52,0,0,1,83.2,0,8,8,0,1,0,12.8-9.6A67.88,67.88,0,0,0,155,165.51a40,40,0,1,0-53.94,0A67.88,67.88,0,0,0,73.6,187.2,8,8,0,0,0,75.19,198.4ZM128,112a24,24,0,1,1-24,24A24,24,0,0,1,128,112Zm72-88H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V40A16,16,0,0,0,200,24Zm0,192H56V40H200ZM88,64a8,8,0,0,1,8-8h64a8,8,0,0,1,0,16H96A8,8,0,0,1,88,64Z"/></symbol>
+    <symbol id="i-clock-counter-clockwise" viewBox="0 0 256 256"><path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49c7.15-8.42,14.27-16.35,22.39-24.57a80,80,0,1,1,1.66,114.75,8,8,0,1,0-11,11.64A96,96,0,1,0,128,32Z"/></symbol>
+    <symbol id="i-warning-circle" viewBox="0 0 256 256"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm-8-80V80a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,172Z"/></symbol>
+    <symbol id="i-envelope-simple" viewBox="0 0 256 256"><path d="M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48ZM203.43,64,128,133.15,52.57,64ZM216,192H40V74.19l82.59,75.71a8,8,0,0,0,10.82,0L216,74.19V192Z"/></symbol>
+    <symbol id="i-whatsapp-logo" viewBox="0 0 256 256"><path d="M187.58,144.84l-32-16a8,8,0,0,0-8,.5l-14.69,9.8a40.55,40.55,0,0,1-16-16l9.8-14.69a8,8,0,0,0,.5-8l-16-32A8,8,0,0,0,104,64a40,40,0,0,0-40,40,88.1,88.1,0,0,0,88,88,40,40,0,0,0,40-40A8,8,0,0,0,187.58,144.84ZM152,176a72.08,72.08,0,0,1-72-72A24,24,0,0,1,99.29,80.46l11.48,23L101,118a8,8,0,0,0-.73,7.51,56.47,56.47,0,0,0,30.15,30.15A8,8,0,0,0,138,155l14.61-9.74,23,11.48A24,24,0,0,1,152,176ZM128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></symbol>
+    <symbol id="i-file-pdf" viewBox="0 0 256 256"><path d="M224,152a8,8,0,0,1-8,8H192v16h16a8,8,0,0,1,0,16H192v16a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8h32A8,8,0,0,1,224,152ZM92,172a28,28,0,0,1-28,28H56v8a8,8,0,0,1-16,0V152a8,8,0,0,1,8-8H64A28,28,0,0,1,92,172Zm-16,0a12,12,0,0,0-12-12H56v24h8A12,12,0,0,0,76,172Zm88,8a36,36,0,0,1-36,36H112a8,8,0,0,1-8-8V152a8,8,0,0,1,8-8h16A36,36,0,0,1,164,180Zm-16,0a20,20,0,0,0-20-20h-8v40h8A20,20,0,0,0,148,180ZM40,112V40A16,16,0,0,1,56,24h96a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88v24a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H56v72a8,8,0,0,1-16,0ZM160,80h28.69L160,51.31Z"/></symbol>
+  </svg>
+
+  <header class="site-header">
+    <nav class="nav" aria-label="Main">
+      <a class="brand" href="/" aria-current="page" aria-label="DQ-Stack home">
+        <svg class="mark" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path class="mark-rule" d="M5.25 1.75V14.25"/><path class="mark-outer" d="M5.25 8 L14.75 2.75 V13.25 Z"/><path class="mark-inner" d="M5.25 8 L14.75 5.4 V10.6 Z"/></svg>
+        <span class="title-3">DQ-Stack</span>
+      </a>
+      <ul class="nav-links">
+        <li><a class="nav-link title-4" href="#product" data-spy>Product</a></li>
+        <li><a class="nav-link title-4" href="#how" data-spy>How it works</a></li>
+        <li><a class="nav-link title-4" href="#stores" data-spy>Your stores</a></li>
+        <li><a class="nav-link title-4" href="#security" data-spy>Security</a></li>
+        <li><a class="nav-link title-4" href="#faq" data-spy>Questions</a></li>
+      </ul>
+      <div class="nav-actions">
+        <a class="nav-link title-4" href="/app/#/signin">Sign in</a>
+        <a class="btn btn-primary button-sm" href="/app/#/signup">Set up your first store</a>
+      </div>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="menu" aria-label="Open menu">
+        <span class="bar" aria-hidden="true"></span>
+        <span class="bar" aria-hidden="true"></span>
+      </button>
+    </nav>
+    <div class="menu" id="menu">
+      <ul class="menu-links">
+        <li><a class="menu-link heading-5" style="--i:0" href="#product">Product</a></li>
+        <li><a class="menu-link heading-5" style="--i:1" href="#how">How it works</a></li>
+        <li><a class="menu-link heading-5" style="--i:2" href="#stores">Your stores</a></li>
+        <li><a class="menu-link heading-5" style="--i:3" href="#security">Security</a></li>
+        <li><a class="menu-link heading-5" style="--i:4" href="#faq">Questions</a></li>
+      </ul>
+      <div class="menu-actions menu-link" style="--i:5">
+        <a class="btn btn-primary button-md" href="/app/#/signup">Set up your first store
+          <svg class="icon icon-sm icon-arrow" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></a>
+        <a class="btn btn-ghost button-md" href="/app/#/signin">Sign in</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+
+    <!-- ============================================================ hero -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container">
+        <div class="hero-copy">
+          <p class="eyebrow caption-1" style="--i:0">
+            <svg class="mark" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path class="mark-rule" d="M5.25 1.75V14.25"/><path class="mark-outer" d="M5.25 8 L14.75 2.75 V13.25 Z"/><path class="mark-inner" d="M5.25 8 L14.75 5.4 V10.6 Z"/></svg>
+            Stock and ordering for Indian retailers
+          </p>
+          <h1 id="hero-title" class="hero-title grad-text heading-4 sm:heading-3 md:heading-2 lg:heading-1" style="--i:1">Order what will sell,<br> from stock you can trust</h1>
+          <p class="hero-sub body-7" style="--i:2">DQ-Stack keeps an exact record of what is on the shelf in every store, then tells you what will sell and how much to order. All you need to start is a browser and a spreadsheet.</p>
+          <div class="hero-actions" style="--i:3">
+            <a class="btn btn-primary button-md" href="/app/#/signup">Set up your first store
+              <svg class="icon icon-sm icon-arrow" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></a>
+          </div>
+          <p class="hero-proof caption-2" style="--i:4">
+            <svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>
+            <span>Your first forecast comes with a backtest on your own last 8 weeks.</span>
+          </p>
+        </div>
+
+        <figure class="hero-figure">
+          <div class="mock" role="img" aria-label="Sample of the Today screen. Toor dal 1 kg is flagged because a festival week is ahead. The forecast for the next 7 days is 41 units, with a range of 33 to 52. Stock target 46, on hand 9, already on order 12, so the suggested order is 36 units, 3 cases of 12.">
+            <div class="mock-inner">
+              <div class="mock-bar">
+                <div class="mock-bar-group">
+                  <span class="title-3">Today</span>
+                  <span class="chip caption-4">Jayanagar store</span>
+                </div>
+                <span class="chip chip-data caption-4"><span class="num">19</span>&nbsp;flagged for review</span>
+              </div>
+              <div class="mock-body">
+                <ul class="worklist">
+                  <li class="wl-row is-selected">
+                    <span class="title-4">Toor dal 1 kg</span>
+                    <span class="wl-qty caption-4 num">36</span>
+                    <span class="caption-5 wl-why">Festival week ahead</span>
+                  </li>
+                  <li class="wl-row">
+                    <span class="title-4">Sunflower oil 1 L</span>
+                    <span class="wl-qty caption-4 num">24</span>
+                    <span class="caption-5 wl-why">Out of stock 2 days</span>
+                  </li>
+                  <li class="wl-row">
+                    <span class="title-4">Basmati rice 5 kg</span>
+                    <span class="wl-qty caption-4 num">10</span>
+                    <span class="caption-5 wl-why">Raised to supplier minimum</span>
+                  </li>
+                  <li class="wl-row">
+                    <span class="title-4">Sugar 1 kg</span>
+                    <span class="wl-qty caption-4 num">30</span>
+                    <span class="caption-5 wl-why">Sales above the range</span>
+                  </li>
+                  <li class="wl-row">
+                    <span class="title-4">Poha 500 g</span>
+                    <span class="wl-qty caption-4 num">20</span>
+                    <span class="caption-5 wl-why">Rounded up to a full case</span>
+                  </li>
+                </ul>
+
+                <div class="detail">
+                  <div class="detail-head">
+                    <div class="detail-name">
+                      <span class="title-2">Toor dal 1 kg</span>
+                      <span class="caption-5 text-3">Pulses, sold loose and packed</span>
+                    </div>
+                    <span class="chip chip-attn caption-4">Festival week ahead</span>
+                  </div>
+
+                  <div class="chart-well">
+                    <svg class="fan-chart" viewBox="0 0 600 220" aria-hidden="true" focusable="false">
+                      <defs>
+                        <pattern id="hatch-hero" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                          <rect width="6" height="6" fill="#F0624D" fill-opacity="0.08"/>
+                          <line x1="0" y1="0" x2="0" y2="6" stroke="#F0624D" stroke-opacity="0.55" stroke-width="2"/>
+                        </pattern>
+                      </defs>
+                      <line class="c-grid" x1="12" y1="200" x2="588" y2="200"/>
+                      <line class="c-grid" x1="12" y1="130.8" x2="588" y2="130.8"/>
+                      <line class="c-grid" x1="12" y1="61.5" x2="588" y2="61.5"/>
+                      <rect x="325.4" y="20" width="33.9" height="180" fill="url(#hatch-hero)"/>
+                      <path class="c-band-wide" d="M469.4,130.8 L486.4,98.9 L503.3,88.1 L520.2,77.3 L537.2,66.5 L554.1,55.7 L571.1,61.5 L588,70.1 L588,172.6 L571.1,155.7 L554.1,141.6 L537.2,144.1 L520.2,146.6 L503.3,149 L486.4,151.5 Z"/>
+                      <path class="c-band-core" d="M469.4,130.8 L486.4,115.5 L503.3,107.8 L520.2,100 L537.2,92.3 L554.1,84.5 L571.1,93.4 L588,105 L588,150.2 L571.1,134.9 L554.1,122.5 L537.2,126.6 L520.2,130.8 L503.3,134.9 L486.4,139.1 Z"/>
+                      <line class="c-origin" x1="469.4" y1="12" x2="469.4" y2="200"/>
+                      <polyline class="c-actual" points="12,130.8 28.9,144.6 45.9,130.8 62.8,116.9 79.8,103.1 96.7,89.2 113.6,103.1 130.6,130.8 147.5,144.6 164.5,130.8 181.4,116.9 198.4,116.9 215.3,75.4 232.2,89.2 249.2,116.9 266.1,130.8 283.1,130.8 300,103.1 316.9,103.1 333.9,200 350.8,200 367.8,130.8 384.7,116.9 401.6,116.9 418.6,103.1 435.5,89.2 452.5,116.9 469.4,130.8"/>
+                      <polyline class="c-median" points="469.4,130.8 486.4,128 503.3,122.5 520.2,116.9 537.2,111.4 554.1,105.8 571.1,116.9 588,130.8"/>
+                      <circle class="c-dot" cx="469.4" cy="130.8" r="4"/>
+                    </svg>
+                    <div class="chart-legend caption-5">
+                      <span class="key"><span class="swatch swatch-actual"></span>Sold, last 4 weeks</span>
+                      <span class="key"><svg class="swatch swatch-hatch" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect width="12" height="12" fill="#F0624D" fill-opacity="0.1"/><path d="M-3 3 L3 -3 M-3 9 L9 -3 M-3 15 L15 -3 M3 15 L15 3 M9 15 L15 9" stroke="#F0624D" stroke-opacity="0.75" stroke-width="1.5"/></svg>Out of stock</span>
+                      <span class="key"><span class="swatch swatch-fan"></span>Forecast and range</span>
+                    </div>
+                  </div>
+
+                  <dl class="stats">
+                    <div class="stat">
+                      <dt class="caption-5">Next 7 days</dt>
+                      <dd><span class="title-1 num">41</span> <span class="caption-5 text-3">range <span class="num">33</span> to <span class="num">52</span></span></dd>
+                    </div>
+                    <div class="stat">
+                      <dt class="caption-5">Stock target</dt>
+                      <dd><span class="title-1 num">46</span></dd>
+                    </div>
+                    <div class="stat">
+                      <dt class="caption-5">On hand</dt>
+                      <dd><span class="title-1 num">9</span></dd>
+                    </div>
+                    <div class="stat">
+                      <dt class="caption-5">Already on order</dt>
+                      <dd><span class="title-1 num">12</span></dd>
+                    </div>
+                  </dl>
+
+                  <div class="order-box">
+                    <div class="order-figure">
+                      <span class="caption-4 text-2">Suggested order</span>
+                      <span><span class="heading-5 num">36</span> <span class="caption-5 text-2">units, 3 cases of <span class="num">12</span></span></span>
+                    </div>
+                    <div class="mock-actions" aria-hidden="true">
+                      <span class="mock-btn mock-btn-primary button-xsm">Approve</span>
+                      <span class="mock-btn button-xsm">Change</span>
+                      <span class="mock-btn button-xsm">Skip</span>
+                    </div>
+                  </div>
+
+                  <p class="reason body-6">Festival week ahead in the state calendar. The two out of stock days last week are read as an empty shelf, not as low demand.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption class="figure-note caption-5">Sample screen. Products and numbers are illustrative.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ===================================================== two jobs -->
+    <section id="product" class="section section-band" aria-labelledby="product-title">
+      <div class="container">
+        <header class="section-head" data-reveal>
+          <h2 id="product-title" class="heading-4 md:heading-3">One product, two jobs that feed each other</h2>
+          <p class="body-7 text-2">The inventory checker keeps stock exact. The forecaster turns that record into what to order. Each one feeds the other.</p>
+        </header>
+
+        <div class="jobs">
+          <article class="card job" data-reveal>
+            <svg class="icon icon-lg" aria-hidden="true" focusable="false"><use href="#i-storefront"/></svg>
+            <h3 class="title-1">The inventory checker</h3>
+            <p class="body-3 text-2">Keeps an exact record of what is on the shelf in every store: each sale, delivery, count, wastage and transfer.</p>
+          </article>
+          <div class="jobs-link" aria-hidden="true">
+            <svg aria-hidden="true" class="icon" focusable="false"><use href="#i-arrows-left-right"/></svg>
+          </div>
+          <article class="card job" data-reveal style="--delay:80ms">
+            <svg class="icon icon-lg icon-data" aria-hidden="true" focusable="false"><use href="#i-chart-line-up"/></svg>
+            <h3 class="title-1">The forecaster</h3>
+            <p class="body-3 text-2">Says what will sell and how much to order, with a range, a stock target and the reason behind every number.</p>
+          </article>
+        </div>
+
+        <div class="card insight" data-reveal>
+          <div class="insight-copy">
+            <h3 class="heading-6">Why exact stock makes a better forecast</h3>
+            <p class="body-3 text-2">When a shelf is empty, sales read zero. A forecaster that cannot see the shelf takes those days as days nobody wanted the product, and learns to order less.</p>
+            <p class="body-3 text-2">DQ-Stack knows which days a product was out of stock, so it does not have to guess.</p>
+          </div>
+          <figure class="insight-figure">
+            <div class="chart-well">
+              <svg class="bar-chart" viewBox="0 0 560 200" aria-hidden="true" focusable="false">
+                <defs>
+                  <pattern id="hatch-bars" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <rect width="6" height="6" fill="#F0624D" fill-opacity="0.08"/>
+                    <line x1="0" y1="0" x2="0" y2="6" stroke="#F0624D" stroke-opacity="0.55" stroke-width="2"/>
+                  </pattern>
+                </defs>
+                <rect x="318" y="16" width="76" height="160" rx="4" fill="url(#hatch-bars)"/>
+                <line class="c-grid" x1="8" y1="176.5" x2="552" y2="176.5"/>
+                <rect class="c-bar" x="21" y="80" width="24" height="96" rx="4"/>
+                <rect class="c-bar" x="59" y="96" width="24" height="80" rx="4"/>
+                <rect class="c-bar" x="97" y="64" width="24" height="112" rx="4"/>
+                <rect class="c-bar" x="135" y="80" width="24" height="96" rx="4"/>
+                <rect class="c-bar" x="173" y="48" width="24" height="128" rx="4"/>
+                <rect class="c-bar" x="211" y="32" width="24" height="144" rx="4"/>
+                <rect class="c-bar" x="249" y="64" width="24" height="112" rx="4"/>
+                <rect class="c-bar" x="287" y="80" width="24" height="96" rx="4"/>
+                <rect class="c-zero" x="325" y="174" width="24" height="3" rx="1.5"/>
+                <rect class="c-zero" x="363" y="174" width="24" height="3" rx="1.5"/>
+                <rect class="c-bar" x="401" y="64" width="24" height="112" rx="4"/>
+                <rect class="c-bar" x="439" y="48" width="24" height="128" rx="4"/>
+                <rect class="c-bar" x="477" y="32" width="24" height="144" rx="4"/>
+                <rect class="c-bar" x="515" y="48" width="24" height="128" rx="4"/>
+              </svg>
+              <div class="chart-legend caption-5">
+                <span class="key"><span class="swatch swatch-bar"></span>Units sold each day</span>
+                <span class="key"><svg class="swatch swatch-hatch" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect width="12" height="12" fill="#F0624D" fill-opacity="0.1"/><path d="M-3 3 L3 -3 M-3 9 L9 -3 M-3 15 L15 -3 M3 15 L15 3 M9 15 L15 9" stroke="#F0624D" stroke-opacity="0.75" stroke-width="1.5"/></svg>Out of stock, so sales read zero</span>
+              </div>
+            </div>
+            <figcaption class="figure-note caption-5">Illustration: 14 days of sales for one product. On days 9 and 10 the shelf was empty.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================ tagline (B11) -->
+    <section class="tagline-section" aria-labelledby="tagline" data-spy-group="product">
+      <div class="container">
+        <h2 id="tagline" class="tagline heading-4 sm:heading-3 md:heading-2" data-tagline>
+          <span class="tl">Know what is on the shelf.</span>
+          <span class="tl">Know what will sell.</span>
+          <span class="tl">Order the difference.</span>
+        </h2>
+      </div>
+    </section>
+
+    <!-- ===================================================== benefits -->
+    <section id="benefits" class="section" aria-labelledby="benefits-title" data-spy-group="product">
+      <div class="container">
+        <header class="section-head" data-reveal>
+          <h2 id="benefits-title" class="heading-4 md:heading-3">Every number can be traced back</h2>
+          <p class="body-7 text-2">Stock, forecasts and orders all show how they were reached, so your team can check them instead of taking them on trust.</p>
+        </header>
+
+        <div class="feature" data-reveal>
+          <div class="feature-copy">
+            <h3 class="heading-6">Stock is never typed over</h3>
+            <p class="body-3 text-2">Every change is a movement with a reason: a sale, a delivery, a count, wastage or a transfer. Stock on hand is the sum of those movements, so any number can be followed line by line.</p>
+            <p class="body-3 text-2">And stock changes only when something is final: a paid bill, a received delivery, an approved count.</p>
+          </div>
+          <div class="card ledger feature-visual" role="img" aria-label="Sample stock record for Sunflower oil 1 litre at the Jayanagar store. Six movements: delivery received plus 24, transfer in plus 12, two paid sales minus 2 and minus 1, wastage minus 1, approved count minus 1. On hand is 31, the sum of the movements.">
+            <div class="ledger-head">
+              <span class="title-4">Sunflower oil 1 L</span>
+              <span class="caption-5 text-3">Jayanagar store</span>
+            </div>
+            <ol class="ledger-rows">
+              <li class="ledger-row"><span class="ledger-qty body-5 num">+24</span><span class="ledger-what"><span class="body-5">Delivery received</span><span class="caption-5 text-3">2 full cases</span></span><span class="ledger-when caption-5 num text-3">Fri 09:12</span></li>
+              <li class="ledger-row"><span class="ledger-qty body-5 num">+12</span><span class="ledger-what"><span class="body-5">Transfer in</span><span class="caption-5 text-3">From the Indiranagar store</span></span><span class="ledger-when caption-5 num text-3">Fri 16:40</span></li>
+              <li class="ledger-row"><span class="ledger-qty body-5 num">&minus;2</span><span class="ledger-what"><span class="body-5">Sale</span><span class="caption-5 text-3">Bill paid</span></span><span class="ledger-when caption-5 num text-3">Sat 11:05</span></li>
+              <li class="ledger-row"><span class="ledger-qty body-5 num">&minus;1</span><span class="ledger-what"><span class="body-5">Sale</span><span class="caption-5 text-3">Bill paid</span></span><span class="ledger-when caption-5 num text-3">Sat 18:32</span></li>
+              <li class="ledger-row"><span class="ledger-qty body-5 num">&minus;1</span><span class="ledger-what"><span class="body-5">Wastage</span><span class="caption-5 text-3">Leaking pouch</span></span><span class="ledger-when caption-5 num text-3">Sun 08:50</span></li>
+              <li class="ledger-row"><span class="ledger-qty body-5 num">&minus;1</span><span class="ledger-what"><span class="body-5">Count</span><span class="caption-5 text-3">Approved, 1 short</span></span><span class="ledger-when caption-5 num text-3">Sun 09:30</span></li>
+            </ol>
+            <div class="ledger-total">
+              <span class="body-5">On hand</span>
+              <span class="ledger-sum"><span class="heading-5 num">31</span><span class="caption-5 text-3">the sum of every movement</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature feature-flip" data-reveal>
+          <div class="feature-copy">
+            <h3 class="heading-6">Every forecast shows its working</h3>
+            <p class="body-3 text-2">Each forecast comes with its range, its stock target and the reason behind it. The suggested order is arithmetic anyone can check: the stock target, minus stock on hand, minus what is already on order, rounded up to the case pack and raised to the supplier minimum.</p>
+            <p class="body-3 text-2">Change any of the six numbers to see the order work itself out.</p>
+          </div>
+
+          <form class="card calc feature-visual" id="order-calc" novalidate aria-labelledby="calc-title">
+            <div class="calc-head">
+              <p class="title-3" id="calc-title">Suggested order, worked out</p>
+              <p class="caption-5 text-3">Sample numbers for Toor dal 1 kg</p>
+            </div>
+            <div class="calc-fields">
+              <div class="field">
+                <label class="caption-1" for="c-target">Stock target</label>
+                <input class="body-3 num" id="c-target" name="target" type="text" inputmode="numeric" autocomplete="off" value="46" data-default="46" required readonly aria-describedby="c-target-err">
+                <p class="field-error caption-5" id="c-target-err" hidden></p>
+              </div>
+              <div class="field">
+                <label class="caption-1" for="c-onhand">On hand</label>
+                <input class="body-3 num" id="c-onhand" name="onhand" type="text" inputmode="numeric" autocomplete="off" value="9" data-default="9" required readonly aria-describedby="c-onhand-err">
+                <p class="field-error caption-5" id="c-onhand-err" hidden></p>
+              </div>
+              <div class="field">
+                <label class="caption-1" for="c-onorder">Already on order</label>
+                <input class="body-3 num" id="c-onorder" name="onorder" type="text" inputmode="numeric" autocomplete="off" value="12" data-default="12" required readonly aria-describedby="c-onorder-err">
+                <p class="field-error caption-5" id="c-onorder-err" hidden></p>
+              </div>
+              <div class="field">
+                <label class="caption-1" for="c-pack">Case pack</label>
+                <input class="body-3 num" id="c-pack" name="pack" type="text" inputmode="numeric" autocomplete="off" value="12" data-default="12" required readonly aria-describedby="c-pack-err">
+                <p class="field-error caption-5" id="c-pack-err" hidden></p>
+              </div>
+              <div class="field">
+                <label class="caption-1" for="c-cost">Cost per unit, ₹</label>
+                <input class="body-3 num" id="c-cost" name="cost" type="text" inputmode="numeric" autocomplete="off" value="150" data-default="150" required readonly aria-describedby="c-cost-err">
+                <p class="field-error caption-5" id="c-cost-err" hidden></p>
+              </div>
+              <div class="field">
+                <label class="caption-1" for="c-min">Minimum order, ₹</label>
+                <input class="body-3 num" id="c-min" name="min" type="text" inputmode="numeric" autocomplete="off" value="5000" data-default="5000" required readonly aria-describedby="c-min-err">
+                <p class="field-error caption-5" id="c-min-err" hidden></p>
+              </div>
+            </div>
+
+            <div class="calc-out">
+              <ol class="calc-steps" data-calc-steps>
+                <li><span class="body-6 text-2">Still needed</span><span class="body-5 num" data-out="need">46 &minus; 9 &minus; 12 = 25</span></li>
+                <li><span class="body-6 text-2" data-out="pack-label">Rounded up to whole cases of 12</span><span class="body-5 num" data-out="cased">36</span></li>
+                <li><span class="body-6 text-2" data-out="min-label">Order value ₹5,400 meets the ₹5,000 minimum</span><span class="body-5 num" data-out="final">36</span></li>
+              </ol>
+              <p class="calc-result" aria-live="polite">
+                <span class="body-5 text-2">Suggested order</span>
+                <span class="calc-number heading-5 num" data-out="result">36</span>
+                <span class="body-6 text-2" data-out="unit">units, 3 cases</span>
+              </p>
+              <p class="calc-empty body-6 text-2" data-calc-empty aria-live="polite" hidden>Fill in all six boxes to see the suggested order.</p>
+            </div>
+
+            <div class="calc-foot">
+              <button class="btn btn-ghost button-sm" type="button" data-calc-reset>Reset the example</button>
+              <p class="caption-5 text-3">Whole units only. Nothing is suggested when stock already covers the target. With several products on one supplier's order, the minimum applies to the order total.</p>
+            </div>
+          </form>
+        </div>
+
+        <div class="feature-pair">
+          <article class="card pair-card" data-reveal>
+            <div class="pair-copy">
+              <h3 class="heading-6">Nothing is lost silently</h3>
+              <p class="body-3 text-2">Work saves as it happens and keeps going when the internet drops. An entry cannot be counted twice, and every action is logged.</p>
+            </div>
+            <ul class="status-list">
+              <li class="status"><span class="dot dot-ok" aria-hidden="true"></span><span class="status-text"><span class="title-4">Saved</span><span class="caption-5 text-3">Count of aisle 4, 12 products</span></span><span class="caption-5 num text-3">09:31</span></li>
+              <li class="status"><span class="dot dot-attn" aria-hidden="true"></span><span class="status-text"><span class="title-4">Offline</span><span class="caption-5 text-3">Still working on this phone, 3 entries waiting</span></span><span class="caption-5 num text-3">09:38</span></li>
+              <li class="status"><span class="dot dot-ok" aria-hidden="true"></span><span class="status-text"><span class="title-4">Back online</span><span class="caption-5 text-3">3 entries added, none counted twice</span></span><span class="caption-5 num text-3">09:52</span></li>
+              <li class="status"><span class="dot dot-data" aria-hidden="true"></span><span class="status-text"><span class="title-4">Logged</span><span class="caption-5 text-3">Who did what, and when</span></span><span class="caption-5 num text-3">09:52</span></li>
+            </ul>
+          </article>
+
+          <article class="card pair-card" data-reveal style="--delay:80ms">
+            <div class="pair-copy">
+              <h3 class="heading-6">Made for how Indian stores work</h3>
+              <p class="body-3 text-2">Plain language, rupees in lakh and crore, times in IST, and festival calendars by state.</p>
+            </div>
+            <dl class="formats">
+              <div class="format"><dt class="caption-5 text-3">Sales this week</dt><dd><span class="title-2 num">&#8377;12.46</span> <span class="body-6 text-2">lakh</span></dd></div>
+              <div class="format"><dt class="caption-5 text-3">Stock value, all stores</dt><dd><span class="title-2 num">&#8377;3.18</span> <span class="body-6 text-2">crore</span></dd></div>
+              <div class="format"><dt class="caption-5 text-3">Day closed</dt><dd><span class="title-2 num">21:40</span> <span class="body-6 text-2">IST</span></dd></div>
+              <div class="format"><dt class="caption-5 text-3">Festival calendar</dt><dd><span class="title-2">By state</span></dd></div>
+            </dl>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================== how it works -->
+    <section id="how" class="section section-band" aria-labelledby="how-title">
+      <div class="container">
+        <header class="section-head" data-reveal>
+          <h2 id="how-title" class="heading-4 md:heading-3">How it works</h2>
+          <p class="body-7 text-2">Set up once, check the forecast against your own sales, then run the same cycle every day.</p>
+        </header>
+
+        <ol class="steps">
+          <li class="card step" data-reveal>
+            <span class="step-num caption-3 num" aria-hidden="true">1</span>
+            <h3 class="title-1">Set up with a guided checklist</h3>
+            <p class="body-3 text-2">Add your stores and your people, then upload your products and your sales history from a spreadsheet.</p>
+          </li>
+          <li class="card step" data-reveal style="--delay:80ms">
+            <span class="step-num caption-3 num" aria-hidden="true">2</span>
+            <h3 class="title-1">Check the backtest on your own sales</h3>
+            <p class="body-3 text-2">Your first forecast comes with a backtest on your own last 8 weeks. That is the accuracy figure to trust, because it comes from your stores.</p>
+            <a class="link body-5" href="/planner/">See the planner demo
+              <svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></a>
+          </li>
+          <li class="card step" data-reveal style="--delay:160ms">
+            <span class="step-num caption-3 num" aria-hidden="true">3</span>
+            <h3 class="title-1">Run the daily cycle</h3>
+            <p class="body-3 text-2">Close the day, let the forecast refresh overnight, then review and order in the morning.</p>
+          </li>
+        </ol>
+
+        <div class="cycle" data-reveal>
+          <h3 class="title-2">The daily cycle</h3>
+          <ol class="cycle-list">
+            <li class="cycle-item">
+              <span class="cycle-dot" aria-hidden="true"></span>
+              <span class="cycle-when caption-3 text-3">Evening</span>
+              <span class="title-3">Close the day</span>
+              <span class="body-6 text-2">The store manager closes the day.</span>
+            </li>
+            <li class="cycle-item">
+              <span class="cycle-dot" aria-hidden="true"></span>
+              <span class="cycle-when caption-3 text-3">Overnight</span>
+              <span class="title-3">The forecast refreshes</span>
+              <span class="body-6 text-2">Ready for the morning review.</span>
+            </li>
+            <li class="cycle-item">
+              <span class="cycle-dot" aria-hidden="true"></span>
+              <span class="cycle-when caption-3 text-3">Morning</span>
+              <span class="title-3">Review the Today screen</span>
+              <span class="body-6 text-2">About 20 flagged products. Approve, change with a reason, or skip.</span>
+            </li>
+            <li class="cycle-item">
+              <span class="cycle-dot" aria-hidden="true"></span>
+              <span class="cycle-when caption-3 text-3">After review</span>
+              <span class="title-3">Approve draft orders</span>
+              <span class="body-6 text-2">The manager approves each supplier's draft order.</span>
+            </li>
+            <li class="cycle-item">
+              <span class="cycle-dot" aria-hidden="true"></span>
+              <span class="cycle-when caption-3 text-3">Then</span>
+              <span class="title-3">Send the orders</span>
+              <span class="body-6 text-2">The purchaser sends them by email, WhatsApp or PDF.</span>
+              <span class="send-icons" aria-hidden="true">
+                <svg aria-hidden="true" class="icon icon-sm" focusable="false"><use href="#i-envelope-simple"/></svg>
+                <svg aria-hidden="true" class="icon icon-sm" focusable="false"><use href="#i-whatsapp-logo"/></svg>
+                <svg aria-hidden="true" class="icon icon-sm" focusable="false"><use href="#i-file-pdf"/></svg>
+              </span>
+            </li>
+          </ol>
+          <p class="weekly body-6 text-2">
+            <svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-clock-counter-clockwise"/></svg>
+            <span>Every week the models retrain. A new model replaces the current one only if it would have earned more profit in the backtest.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================== your stores -->
+    <section id="stores" class="section" aria-labelledby="stores-title">
+      <div class="container">
+        <header class="section-head" data-reveal>
+          <h2 id="stores-title" class="heading-4 md:heading-3">Fits the way each store runs</h2>
+          <p class="body-7 text-2">Start with a browser and a spreadsheet. Add barcode scanners or a link to your billing software where they help.</p>
+        </header>
+
+        <div class="modes">
+          <article class="card mode" data-reveal>
+            <p class="mode-label caption-3">Standalone</p>
+            <h3 class="title-1">Upload the day's sales</h3>
+            <p class="body-3 text-2">Upload the day's sales file or type in the totals. A browser is all the store needs.</p>
+            <ul class="mode-kit body-5">
+              <li><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-file-arrow-up"/></svg>Spreadsheet upload or typed totals</li>
+            </ul>
+          </article>
+          <article class="card mode" data-reveal style="--delay:80ms">
+            <p class="mode-label caption-3">Connected</p>
+            <h3 class="title-1">Stock moves at the counter</h3>
+            <p class="body-3 text-2">Use a barcode scanner or your existing billing software. Stock updates within seconds of payment.</p>
+            <ul class="mode-kit body-5">
+              <li><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-barcode"/></svg>Barcode scanner</li>
+              <li><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-cash-register"/></svg>Your existing billing software</li>
+            </ul>
+          </article>
+        </div>
+        <p class="modes-note body-6 text-2" data-reveal>A company can run both at once: some stores standalone, others connected.</p>
+
+        <div class="ops">
+          <article class="card ops-card ops-floor" data-reveal>
+            <div class="ops-head">
+              <svg class="icon icon-lg" aria-hidden="true" focusable="false"><use href="#i-device-mobile"/></svg>
+              <h3 class="title-1">Floor work on a phone</h3>
+            </div>
+            <ul class="floor-list">
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clipboard-text"/></svg><span><span class="title-3">Counting</span><span class="body-6 text-2">Cycle counts by value, and blind counts that hide the expected number.</span></span></li>
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-truck"/></svg><span><span class="title-3">Receiving</span><span class="body-6 text-2">Full, partial and damaged deliveries.</span></span></li>
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-arrows-left-right"/></svg><span><span class="title-3">Transfers</span><span class="body-6 text-2">Move stock between your stores.</span></span></li>
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span><span class="title-3">Wastage</span><span class="body-6 text-2">Record what was lost, with the reason.</span></span></li>
+            </ul>
+          </article>
+
+          <article class="card ops-card" data-reveal style="--delay:80ms">
+            <div class="ops-head">
+              <svg class="icon icon-lg" aria-hidden="true" focusable="false"><use href="#i-cash-register"/></svg>
+              <h3 class="title-1">Checkout, if you want it</h3>
+            </div>
+            <p class="body-3 text-2">An optional Checkout screen for stores that bill in DQ-Stack.</p>
+            <ul class="chips" aria-label="Checkout features">
+              <li class="chip caption-4">Scan</li>
+              <li class="chip caption-4">Cash</li>
+              <li class="chip caption-4">UPI</li>
+              <li class="chip caption-4">Card</li>
+              <li class="chip caption-4">Offline bills</li>
+              <li class="chip caption-4">End of day Z report</li>
+            </ul>
+          </article>
+
+          <article class="card ops-card" data-reveal style="--delay:160ms">
+            <div class="ops-head">
+              <svg class="icon icon-lg" aria-hidden="true" focusable="false"><use href="#i-users-three"/></svg>
+              <h3 class="title-1">Seven roles</h3>
+            </div>
+            <p class="body-3 text-2">Each person sees only their stores.</p>
+            <ul class="chips" aria-label="Roles">
+              <li class="chip caption-4">Owner</li>
+              <li class="chip caption-4">Admin</li>
+              <li class="chip caption-4">Store manager</li>
+              <li class="chip caption-4">Purchaser</li>
+              <li class="chip caption-4">Stock clerk</li>
+              <li class="chip caption-4">Cashier</li>
+              <li class="chip caption-4">Viewer</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== security -->
+    <section id="security" class="section section-band" aria-labelledby="security-title">
+      <div class="container security">
+        <header class="section-head security-head" data-reveal>
+          <h2 id="security-title" class="heading-4 md:heading-3">Each company's data is kept apart</h2>
+          <p class="body-7 text-2">The checks that protect your records run on the server, not just in the screen you see.</p>
+          <a class="link body-5" href="/privacy.html">Read how your data is handled
+            <svg class="icon icon-sm icon-arrow" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></a>
+        </header>
+        <ul class="sec-list" data-reveal>
+          <li class="sec-item">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-buildings"/></svg>
+            <span><span class="title-3">Filtered by company</span><span class="body-6 text-2">Every query is filtered by company on the server, so each company sees only its own records.</span></span>
+          </li>
+          <li class="sec-item">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-password"/></svg>
+            <span><span class="title-3">Hashed passwords</span><span class="body-6 text-2">Passwords are stored only as hashes, never as the password itself.</span></span>
+          </li>
+          <li class="sec-item">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-lock-key"/></svg>
+            <span><span class="title-3">Lockout</span><span class="body-6 text-2">Repeated failed sign in attempts lock the account.</span></span>
+          </li>
+          <li class="sec-item">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-identification-badge"/></svg>
+            <span><span class="title-3">Roles checked on the server</span><span class="body-6 text-2">What each person can see and do is decided on the server, not by hiding buttons.</span></span>
+          </li>
+          <li class="sec-item">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-clock-counter-clockwise"/></svg>
+            <span><span class="title-3">An activity log that only grows</span><span class="body-6 text-2">Entries can be added but never edited, so the record of who did what stays intact.</span></span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================================================= FAQ -->
+    <section id="faq" class="section" aria-labelledby="faq-title">
+      <div class="container faq">
+        <header class="section-head faq-head" data-reveal>
+          <h2 id="faq-title" class="heading-4 md:heading-3">Questions before you start</h2>
+          <p class="body-7 text-2">Plain answers about setup, accuracy and your data.</p>
+        </header>
+        <div class="faq-list" data-reveal>
+          <details class="faq-item">
+            <summary><span class="title-3">Do I need a barcode scanner or new billing software?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">No. A browser and a spreadsheet upload are enough to start. Barcode scanners and links to your existing billing software are optional upgrades you can add store by store.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">How accurate will the forecast be for my stores?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">Your first forecast comes with a backtest on your own last 8 weeks of sales. That is the accuracy figure to trust, because it is measured on your stores rather than quoted from someone else's.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">Can someone simply change a stock number?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">No. Stock is never typed over. Every change is a movement with a reason, such as a sale, a delivery, a count, wastage or a transfer, and stock changes only when something is final: a paid bill, a received delivery or an approved count.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">How is the suggested order worked out?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">It is the stock target, minus stock on hand, minus what is already on order, rounded up to the case pack and raised to the supplier minimum. The store manager approves each supplier's draft order before the purchaser sends it.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">What happens when the internet goes down?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">Work saves as it happens and keeps working offline. Nothing can be counted twice, and every action is logged. If you use the optional Checkout screen, it can keep billing offline too.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">Can one store use a scanner while another uploads a file?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">Yes. Each store runs standalone, with a daily sales file or typed totals, or connected, with a scanner or your existing billing software. A company can run both at once.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">Who in my team sees what?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">There are seven roles: Owner, Admin, Store manager, Purchaser, Stock clerk, Cashier and Viewer. Each person sees only their stores, and roles are checked on the server.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">Does it handle Indian formats and festivals?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">Yes. Amounts are in rupees with lakh and crore, times are in IST, and festival calendars are set by state.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">How do orders reach suppliers?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">Once a draft order is approved, the purchaser sends it by email, WhatsApp or PDF.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">How is our data kept apart from other companies?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">Every query is filtered by company on the server. Passwords are stored as hashes, accounts lock after repeated failed sign in attempts, and an activity log that can only be added to records every action.</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span class="title-3">What happens to our records if we stop using DQ-Stack?</span><svg class="icon faq-icon" aria-hidden="true" focusable="false"><use href="#i-plus"/></svg></summary>
+            <div class="faq-body"><p class="body-3 text-2">We export all of your records on request, then delete them after a period we confirm with you.</p></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= final CTA -->
+    <section id="start" class="section section-tight" aria-labelledby="start-title">
+      <div class="container">
+        <div class="cta-panel" data-reveal>
+          <div class="cta-copy">
+            <h2 id="start-title" class="heading-4 md:heading-3">Start with one store and a spreadsheet</h2>
+            <p class="body-7 text-2">Setup is a guided checklist. Your first forecast arrives with a backtest on your own last 8 weeks, so you can judge it before you rely on it.</p>
+            <ul class="assurances body-5">
+              <li><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>No new hardware needed to start</li>
+              <li><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Accuracy measured on your own sales</li>
+              <li><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>All your records exported on request if you leave</li>
+            </ul>
+            <div class="cta-actions">
+              <a class="btn btn-primary button-md" href="/app/#/signup">Set up your first store
+                <svg class="icon icon-sm icon-arrow" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></a>
+              <a class="link body-5" href="/app/#/signin">Already set up? Sign in</a>
+            </div>
+          </div>
+          <div class="cta-art" aria-hidden="true">
+            <svg aria-hidden="true" viewBox="0 0 400 320" focusable="false">
+              <line class="art-rule" x1="64" y1="24" x2="64" y2="296"/>
+              <path class="art-outer" d="M64 160 L384 40 V280 Z"/>
+              <path class="art-mid" d="M64 160 L384 88 V232 Z"/>
+              <path class="art-inner" d="M64 160 L384 128 V192 Z"/>
+              <circle class="art-dot" cx="64" cy="160" r="6"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="/" aria-label="DQ-Stack home">
+            <svg class="mark" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path class="mark-rule" d="M5.25 1.75V14.25"/><path class="mark-outer" d="M5.25 8 L14.75 2.75 V13.25 Z"/><path class="mark-inner" d="M5.25 8 L14.75 5.4 V10.6 Z"/></svg>
+            <span class="title-3">DQ-Stack</span>
+          </a>
+          <p class="body-6 text-2">Store operations with demand forecasting built in, for Indian retailers.</p>
+        </div>
+        <nav class="footer-nav" aria-label="Footer">
+          <div class="footer-col">
+            <p class="caption-3 text-3">Product</p>
+            <ul>
+              <li><a class="footer-link body-6" href="#product">Product</a></li>
+              <li><a class="footer-link body-6" href="#how">How it works</a></li>
+              <li><a class="footer-link body-6" href="#stores">Your stores</a></li>
+              <li><a class="footer-link body-6" href="#security">Security</a></li>
+              <li><a class="footer-link body-6" href="#faq">Questions</a></li>
+            </ul>
+          </div>
+          <div class="footer-col">
+            <p class="caption-3 text-3">App</p>
+            <ul>
+              <li><a class="footer-link body-6" href="/app/#/signup">Set up your first store</a></li>
+              <li><a class="footer-link body-6" href="/app/#/signin">Sign in</a></li>
+              <li><a class="footer-link body-6" href="/planner/">Planner demo</a></li>
+            </ul>
+          </div>
+          <div class="footer-col">
+            <p class="caption-3 text-3">Legal</p>
+            <ul>
+              <li><a class="footer-link body-6" href="/privacy.html">Privacy</a></li>
+              <li><a class="footer-link body-6" href="/terms.html">Terms</a></li>
+            </ul>
+          </div>
+        </nav>
+      </div>
+      <div class="footer-base caption-5 text-3">
+        <p>Amounts in rupees. Times in IST.</p>
+        <a class="footer-link" href="#main">Back to top</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -4,8 +4,24 @@
     {
       "name": "dqstack",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "dqstack.serve", "--port", "8123"],
+      "runtimeArgs": [
+        "-m",
+        "dqstack.serve",
+        "--port",
+        "8123"
+      ],
       "port": 8123
+    },
+    {
+      "name": "dqstack-app",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "dqstack.app",
+        "--port",
+        "8130"
+      ],
+      "port": 8130
     }
   ]
 }
