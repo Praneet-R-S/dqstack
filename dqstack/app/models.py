@@ -336,6 +336,8 @@ class StockOnHand(Base):
     on_hand_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     avg_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
     known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Opening stock as set (file or first count); None until set, and again if undone.
+    opening_milli: Mapped[int | None] = mapped_column(BigInteger)
     last_counted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_movement_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_sale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -664,7 +666,8 @@ class ImportChange(IdMixin, Base):
                                         nullable=False)
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     entity: Mapped[str] = mapped_column(String(32), nullable=False)
-    entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # A record id, or "store_id:product_id" (65 characters) for per-store records.
+    entity_id: Mapped[str] = mapped_column(String(96), nullable=False)
     op: Mapped[str] = mapped_column(String(8), nullable=False)          # insert|update|delete
     before: Mapped[dict | None] = mapped_column(JSON)
     after: Mapped[dict | None] = mapped_column(JSON)

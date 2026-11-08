@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 22:08:18.896800
+Create Date: 2026-11-08 22:27:12.456915
 """
 
 from __future__ import annotations
@@ -525,7 +525,7 @@ def upgrade() -> None:
     sa.Column('job_id', sa.String(length=32), nullable=False),
     sa.Column('seq', sa.Integer(), nullable=False),
     sa.Column('entity', sa.String(length=32), nullable=False),
-    sa.Column('entity_id', sa.String(length=64), nullable=False),
+    sa.Column('entity_id', sa.String(length=96), nullable=False),
     sa.Column('op', sa.String(length=8), nullable=False),
     sa.Column('before', sa.JSON(), nullable=True),
     sa.Column('after', sa.JSON(), nullable=True),
@@ -685,6 +685,7 @@ def upgrade() -> None:
     sa.Column('on_hand_milli', sa.BigInteger(), nullable=False),
     sa.Column('avg_cost_paise', sa.BigInteger(), nullable=True),
     sa.Column('known', sa.Boolean(), nullable=False),
+    sa.Column('opening_milli', sa.BigInteger(), nullable=True),
     sa.Column('last_counted_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('last_movement_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('last_sale_at', sa.DateTime(timezone=True), nullable=True),

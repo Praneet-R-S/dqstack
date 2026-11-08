@@ -1030,3 +1030,7 @@ KINDS: dict[str, Kind] = {k.key: k for k in (Products(), Stores(), Suppliers(), 
 def register(kind: Kind) -> None:
     """Later build steps add their kinds (opening stock, sales) here."""
     KINDS[kind.key] = kind
+
+
+# Kinds that post to the stock ledger live in their own module and register here.
+from . import stock_kinds  # noqa: E402,F401
