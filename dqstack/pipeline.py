@@ -556,6 +556,11 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
             "wspl": evaluate.wspl(y_eval, qs_e[name], denom, wts, valid_eval),
             "mase": float(np.nanmean(evaluate.mase(y_eval, med(qs_e[name]), denom_abs, valid_eval))),
             "bias": evaluate.bias(y_eval, med(qs_e[name]), valid_eval),
+            # Bias of the forecast's *mean*. The median column above is negative for
+            # every model on skewed, zero-heavy demand by construction; this one says
+            # whether the model actually under- or over-forecasts.
+            "bias_mean": evaluate.bias(
+                y_eval, evaluate.mean_from_quantiles(qs_e[name]), valid_eval),
         })
     board.append({
         "method": "DQ-Stack (full)",
@@ -563,6 +568,22 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         "wspl": evaluate.wspl(y_eval, calib_e, denom, wts, valid_eval),
         "mase": float(np.nanmean(evaluate.mase(y_eval, med(calib_e), denom_abs, valid_eval))),
         "bias": evaluate.bias(y_eval, med(calib_e), valid_eval),
+        "bias_mean": evaluate.bias(y_eval, evaluate.mean_from_quantiles(calib_e), valid_eval),
+    })
+    # What the orders actually read. "DQ-Stack (full)" above is the reconciled
+    # forecast, which is the right one for the totals a manager reviews and the wrong
+    # one to judge item-level ordering by: reconciliation trades leaf accuracy for
+    # coherence and is ~18% worse at the product-store level by design. Orders read
+    # the unreconciled distribution (ReconcileConfig.for_decisions). Without this row
+    # the leaderboard told a business reader that the full system was 25% worse than
+    # its own best component, when the forecasts driving the orders were not.
+    board.append({
+        "method": "DQ-Stack (as issued for orders)",
+        "wrmsse": evaluate.wrmsse(y_eval, med(decide_src), denom, wts, valid_eval),
+        "wspl": evaluate.wspl(y_eval, decide_src, denom, wts, valid_eval),
+        "mase": float(np.nanmean(evaluate.mase(y_eval, med(decide_src), denom_abs, valid_eval))),
+        "bias": evaluate.bias(y_eval, med(decide_src), valid_eval),
+        "bias_mean": evaluate.bias(y_eval, evaluate.mean_from_quantiles(decide_src), valid_eval),
     })
     leaderboard = pd.DataFrame(board).sort_values("wspl")
     log("\n  candidate leaderboard:")

@@ -87,6 +87,30 @@ def bias(y, yhat, valid=None) -> float:
     return float(np.nansum(d) / max(np.nansum(np.where(valid, y, np.nan) if valid is not None else y), 1e-9))
 
 
+def mean_from_quantiles(q: np.ndarray, quantiles=QUANTILES) -> np.ndarray:
+    """Expected value implied by a stored quantile ladder, E[Y] = integral of Q(u).
+
+    Exists because `bias` was only ever scored on the median, and on demand that is
+    roughly 43% zeros and right-skewed the median sits below the mean by
+    construction. Every model therefore reported a negative bias of 15-30% against
+    actual totals, which reads as systematic under-forecasting when it is the median
+    behaving exactly as a median should. Whether a forecaster under-forecasts is a
+    question about its *mean*, so this provides one.
+
+    Trapezoidal between stored levels. The lower tail runs linearly from Q=0 at u=0
+    (demand cannot be negative); the upper tail is held flat at the top level, which
+    under-states a heavy tail slightly, so a small negative residual here is the
+    integration, not the model.
+    """
+    taus = np.asarray(quantiles, dtype="float64")
+    q = np.asarray(q, dtype="float64")
+    out = 0.5 * q[..., 0] * taus[0]                       # [0, tau_1]
+    for k in range(len(taus) - 1):                        # interior trapezoids
+        out = out + 0.5 * (q[..., k] + q[..., k + 1]) * (taus[k + 1] - taus[k])
+    out = out + q[..., -1] * (1.0 - taus[-1])             # [tau_K, 1]
+    return out
+
+
 # ------------------------------------------------------------------ tier 2
 
 def wspl(y: np.ndarray, q: np.ndarray, denom: np.ndarray, weights: np.ndarray,
@@ -239,6 +263,15 @@ def accuracy_vs_economics(table: pd.DataFrame) -> dict:
     (higher better).
     """
     t = table.dropna(subset=["wrmsse", "realized_margin"]).copy()
+    # Several arms share one forecast and differ only in the ordering policy built on
+    # it -- the current setup, "no reconciliation", "blanket 95% service". Their
+    # WRMSSE is equal in fact and unequal only in float noise at the twelfth decimal,
+    # and that noise decided which of them ranked "most accurate". Rho swung from
+    # 0.53 to 0.38 between two otherwise identical runs, and the inversion list
+    # reported arms as more accurate than themselves. Six decimals is far below any
+    # accuracy difference worth acting on and far above the noise, so equal forecasts
+    # now tie, as they should.
+    t["wrmsse"] = t["wrmsse"].round(6)
     t["rank_accuracy"] = t["wrmsse"].rank(ascending=True)
     t["rank_economics"] = t["realized_margin"].rank(ascending=False)
     rho, p = stats.spearmanr(t["rank_accuracy"], t["rank_economics"])

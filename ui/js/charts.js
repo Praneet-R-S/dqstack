@@ -339,6 +339,13 @@ window.Charts = (() => {
         const upper = cov.filter((c) => c.nominal >= 0.75);
         const worstUpper = Math.max(...upper.map((c) => Math.abs(c.empirical_after - c.nominal)));
         const okCount = hasStrict ? cov.filter((c) => c.tie_aware_ok).length : null;
+        /* Said plainly when it is true. Accounting for zero-sale days shrinks the
+           lower-tail gap a long way -- from about 30 points to about 5 at the 5% level
+           on the current data -- but does not close it. Where the floor is still too
+           high, the chart says so in words rather than leaving the reader to infer
+           from the dots that it is only an artifact. */
+        const floor = hasStrict ? cov.find((c) => c.nominal <= 0.05 + 1e-9) : null;
+        const floorHigh = floor && floor.strict_after > floor.nominal + 0.02;
         return {
           figure: svg(h, `${grid}
             <line class="ch-diag" x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}"/>
@@ -347,9 +354,12 @@ window.Charts = (() => {
             <text class="ch-cap" x="14" y="${(T + h - B) / 2}" text-anchor="middle" transform="rotate(-90 14 ${(T + h - B) / 2})">what actually happened</text>`),
           reads: `In the range orders are set from (75% and above), the forecast is within
             <b>${(worstUpper * 100).toFixed(1)} points</b> of what it promised.` +
-            (okCount != null ? ` Counting days of zero sales correctly, <b>${okCount} of ${cov.length}</b> levels are honest.` : ""),
-          how: "Dots on the diagonal mean the forecast keeps its promises. Low levels sit above the line because so many days sell nothing: a zero is at or below any forecast, so those levels cannot be judged by this test alone." +
-            (hasStrict ? " The vertical bars show the range a level is allowed to fall in once that is accounted for; a dot is honest when the diagonal crosses its bar." : ""),
+            (okCount != null ? ` Counting days of zero sales correctly, <b>${okCount} of ${cov.length}</b> levels are honest.` : "") +
+            (floorHigh ? ` The low end of the range is set too high: <b>${Math.round(floor.strict_after * 100)}%</b>
+              of outcomes fall below the stated ${Math.round(floor.nominal * 100)}% floor. That affects the
+              "likely between" figures, not the stock levels, which come from the upper range.` : ""),
+          how: "Dots on the diagonal mean the forecast keeps its promises. Low levels sit above the line partly because so many days sell nothing: a zero counts as at or below any forecast, which flatters nothing and inflates the low end." +
+            (hasStrict ? " The vertical bars show the range a level is allowed to fall in once that is accounted for. A dot is honest when the diagonal crosses its bar; a bar entirely above the diagonal is a real miss." : ""),
         };
       },
     },

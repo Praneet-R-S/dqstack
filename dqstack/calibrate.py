@@ -242,6 +242,14 @@ class ConformalCalibrator:
                     "nominal": tau,
                     "empirical_before": float((y[keep] <= q_before[keep, k]).mean()),
                     "empirical_after": float((y[keep] <= q_after[keep, k]).mean()),
+                    # P(y < q), the strict side. For count data the predictive CDF
+                    # jumps at every integer, so a level tau is calibrated when it
+                    # lies anywhere in [P(y < q), P(y <= q)] -- not when P(y <= q)
+                    # equals tau. With 43% of days at zero, P(y <= 0) alone exceeds
+                    # every lower level, so the non-strict column cannot reach the
+                    # nominal there however good the model is. The pair together
+                    # is the test that can actually pass or fail.
+                    "strict_after": float((y[keep] < q_after[keep, k]).mean()),
                     # The mean *level* of this quantile, not an interval width —
                     # a width needs two levels. Named accurately because "width"
                     # invites reading a P50 column as an interval.
@@ -252,6 +260,13 @@ class ConformalCalibrator:
         df = pd.DataFrame(rows)
         df["gap_before"] = (df["empirical_before"] - df["nominal"]).abs()
         df["gap_after"] = (df["empirical_after"] - df["nominal"]).abs()
+        # Calibrated in the discrete sense: nominal inside [strict, non-strict]. The
+        # distance outside that interval is the honest miscalibration -- zero when
+        # the nominal falls inside the jump, positive only when it genuinely misses.
+        lo, hi = df["strict_after"], df["empirical_after"]
+        df["tie_aware_gap"] = np.maximum(0.0, np.maximum(lo - df["nominal"],
+                                                         df["nominal"] - hi))
+        df["tie_aware_ok"] = df["tie_aware_gap"] <= 0.02
         return df
 
     def interval_coverage(
