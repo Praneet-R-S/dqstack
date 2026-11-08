@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 21:38:51.746721
+Create Date: 2026-11-08 21:57:06.984083
 """
 
 from __future__ import annotations
@@ -157,17 +157,20 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_api_keys_company_id'), ['company_id'], unique=False)
 
     op.create_table('calendar_events',
-    sa.Column('company_id', sa.String(length=32), nullable=True),
+    sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('name', sa.String(length=200), nullable=False),
     sa.Column('day', sa.Date(), nullable=False),
     sa.Column('kind', sa.String(length=16), nullable=False),
     sa.Column('states', sa.JSON(), nullable=False),
     sa.Column('store_ids', sa.JSON(), nullable=False),
+    sa.Column('approximate', sa.Boolean(), nullable=False),
+    sa.Column('source', sa.String(length=32), nullable=False),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('calendar_events', schema=None) as batch_op:
+        batch_op.create_index('ix_calendar_company_day', ['company_id', 'day'], unique=False)
         batch_op.create_index(batch_op.f('ix_calendar_events_company_id'), ['company_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_calendar_events_day'), ['day'], unique=False)
 
@@ -1026,6 +1029,7 @@ def downgrade() -> None:
     with op.batch_alter_table('calendar_events', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_calendar_events_day'))
         batch_op.drop_index(batch_op.f('ix_calendar_events_company_id'))
+        batch_op.drop_index('ix_calendar_company_day')
 
     op.drop_table('calendar_events')
     with op.batch_alter_table('api_keys', schema=None) as batch_op:

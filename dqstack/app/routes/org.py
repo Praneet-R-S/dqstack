@@ -337,6 +337,78 @@ def unlock_person(person_id: str, c: Ctx = Depends(ctx), db: Session = Depends(g
     return person_dict(p)
 
 
+@router.post("/people/{person_id}/reset-password")
+def admin_reset_password(person_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """'Admin can also reset' (section 13). The person gets a link to choose a new
+    password; nobody, the administrator included, ever learns it. The link is also
+    returned so it can be passed on by phone or WhatsApp to someone without email.
+    Their sessions end now, in case the reason is a lost or shared device."""
+    c.require("people.manage")
+    from ..models import PasswordReset
+    p = get_or_404(db, c, Person, person_id, store_attr=None, what="That person")
+    if p.role == "owner" and c.role != "owner":
+        raise HTTPException(403, "Only an Owner can reset an Owner's password.")
+    if p.status == "invited":
+        raise HTTPException(409, "This person has not joined yet. Send the invitation again "
+                                 "instead.")
+    if p.status == "disabled":
+        raise HTTPException(409, "This account is disabled. Enable it first.")
+    token = new_token()
+    db.add(PasswordReset(token_hash=token_hash(token), person_id=p.id, company_id=p.company_id,
+                         expires_at=utcnow() + timedelta(hours=24)))
+    p.failed_attempts = 0
+    p.locked_until = None
+    n = revoke_all_sessions(db, p.id)
+    audit.log(db, c, "person.reset_by_admin", "person", p.id, after={"sessions_ended": n})
+    db.commit()
+    link = f"{settings.public_url}/app/#/reset/{token}"
+    delivered = None
+    if p.email:
+        try:
+            co = db.get(Company, c.company_id)
+            send(p.email, "Choose a new DQ-Stack password",
+                 f"Hello {p.name},\n\n{c.person.name} at {co.name} has asked DQ-Stack to "
+                 f"let you choose a new password. Use this link within 24 hours:\n{link}\n")
+            delivered = "email"
+        except MailError:
+            delivered = None
+    return {**person_dict(p), "reset_link": link, "delivered_by": delivered}
+
+
+@router.post("/people/{person_id}/resend-invite")
+def resend_invite(person_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """A fresh link for someone who has not joined yet. Earlier links stop working."""
+    c.require("people.manage")
+    p = get_or_404(db, c, Person, person_id, store_attr=None, what="That person")
+    if p.status != "invited":
+        raise HTTPException(409, "This person has already joined." if p.status == "active"
+                            else "This account is disabled. Enable it first.")
+    now = utcnow()
+    match = (Invitation.email == p.email) if p.email else (Invitation.phone == p.phone)
+    for old in db.scalars(select(Invitation).where(Invitation.company_id == c.company_id,
+                                                   Invitation.accepted_at.is_(None), match)):
+        old.expires_at = now
+    token = new_token()
+    db.add(Invitation(company_id=c.company_id, token_hash=token_hash(token), name=p.name,
+                      email=p.email, phone=p.phone, role=p.role,
+                      store_ids=[st.id for st in p.stores], invited_by=c.person.id,
+                      expires_at=now + timedelta(days=7)))
+    audit.log(db, c, "person.reinvited", "person", p.id)
+    db.commit()
+    link = f"{settings.public_url}/app/#/invite/{token}"
+    delivered = None
+    if p.email:
+        try:
+            co = db.get(Company, c.company_id)
+            send(p.email, f"Your invitation to {co.name} on DQ-Stack",
+                 f"Hello {p.name},\n\nHere is a new link to join {co.name} on DQ-Stack. "
+                 f"Set your password within 7 days:\n{link}\n")
+            delivered = "email"
+        except MailError:
+            delivered = None
+    return {**person_dict(p), "invite_link": link, "delivered_by": delivered}
+
+
 class PinIn(BaseModel):
     pin: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
 

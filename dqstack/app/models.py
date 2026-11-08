@@ -278,16 +278,22 @@ class PriceRecord(IdMixin, Base):
 
 
 class CalendarEvent(IdMixin, Base):
-    """National and state festivals come pre-filled (company_id null); companies add
-    local events and closures."""
+    """Festivals, holidays, store closures and local events.
+
+    National and state festivals are copied into each company at sign-up
+    (festivals.py), so a company can correct or remove one without touching anyone
+    else's calendar. `kind` is festival, holiday, closure or local_event. A closure
+    tells the forecast that zero sales that day were not low demand (section 13)."""
     __tablename__ = "calendar_events"
-    company_id: Mapped[str | None] = mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"),
-                                                   index=True)
+    __table_args__ = (Index("ix_calendar_company_day", "company_id", "day"),)
+    company_id: Mapped[str] = company_fk()
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     day: Mapped[date] = mapped_column(Date, index=True, nullable=False)
     kind: Mapped[str] = mapped_column(String(16), default="festival", nullable=False)
     states: Mapped[list] = mapped_column(JSON, default=list, nullable=False)   # empty = national
-    store_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    store_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # empty = all
+    approximate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="company", nullable=False)
 
 
 # =============================================================== the ledger

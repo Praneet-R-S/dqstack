@@ -79,6 +79,8 @@ def signup(body: SignupIn, request: Request, response: Response, db: Session = D
     db.add(owner)
     company.setup = {"company": utcnow().isoformat()}
     db.flush()
+    from ..festivals import seed as seed_festivals
+    seed_festivals(db, company.id)
     c = build_ctx(db, owner, None, ip=client_ip(request), device=device_of(request))
     audit.log(db, c, "company.created", "company", company.id, after=audit.snapshot(company))
     db.commit()
@@ -202,6 +204,11 @@ def accept(body: AcceptIn, request: Request, response: Response, db: Session = D
                                             else (Person.phone == inv.phone)))
     if person is None:
         raise HTTPException(400, "This invitation no longer matches an account. Ask for a new one.")
+    if person.status == "disabled":
+        # An administrator disabled this account after inviting it. Accepting the old
+        # link must not quietly re-enable it.
+        raise HTTPException(400, "This invitation has expired or was already used. "
+                                 "Ask your administrator to send a new one.")
     person.password_hash = hash_password(body.password)
     person.status = "active"
     inv.accepted_at = utcnow()

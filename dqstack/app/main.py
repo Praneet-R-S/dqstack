@@ -124,8 +124,8 @@ def create_app() -> FastAPI:
 def _mount_later_routers(app: FastAPI) -> None:
     """Routers for later build steps register here as they are added."""
     import importlib
-    for name in ("catalogue", "imports", "stock", "floor", "sales", "orders", "checkout",
-                 "pos", "forecast", "alerts", "reports", "platform"):
+    for name in ("setup", "calendar", "catalogue", "imports", "stock", "floor", "sales",
+                 "orders", "checkout", "pos", "forecast", "alerts", "reports", "platform"):
         try:
             mod = importlib.import_module(f".routes.{name}", package=__package__)
         except ModuleNotFoundError as e:
