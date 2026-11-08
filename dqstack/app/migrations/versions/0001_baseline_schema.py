@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 22:43:08.163425
+Create Date: 2026-11-08 22:49:33.813911
 """
 
 from __future__ import annotations
@@ -713,8 +713,10 @@ def upgrade() -> None:
     sa.Column('on_hand_milli', sa.BigInteger(), nullable=False),
     sa.Column('avg_cost_paise', sa.BigInteger(), nullable=True),
     sa.Column('known', sa.Boolean(), nullable=False),
+    sa.Column('known_since', sa.DateTime(timezone=True), nullable=True),
     sa.Column('opening_milli', sa.BigInteger(), nullable=True),
     sa.Column('last_counted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('baseline_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('last_movement_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('last_sale_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),

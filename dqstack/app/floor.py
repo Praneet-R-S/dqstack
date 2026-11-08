@@ -141,10 +141,9 @@ def _post_line(db: Session, c, session: CountSession, line: CountLine, *, first:
                           device=line.device, idempotency_key=f"count:{line.id}",
                           at=line.counted_at)
         line.movement_id = res.movement.id
-    row.known = True
-    counted = _aware(line.counted_at)
-    if row.last_counted_at is None or _aware(row.last_counted_at) < counted:
-        row.last_counted_at = counted
+    at = _aware(line.counted_at)
+    ledger.mark_known(row, at)
+    ledger.counted(row, at)
 
 
 def record_count(db: Session, c, session: CountSession, product: Product, counted_milli: int,

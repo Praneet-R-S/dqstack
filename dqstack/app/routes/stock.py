@@ -120,7 +120,10 @@ def set_opening(body: OpeningIn, c: Ctx = Depends(ctx), db: Session = Depends(ge
                                  "Count the product to correct it.")
     if body.qty_milli == 0:
         row = ledger._soh(db, c.company_id, store.id, p.id)
-        row.known, row.opening_milli = True, 0
+        now = utcnow()
+        ledger.mark_known(row, now)
+        ledger.baselined(row, now)
+        row.opening_milli = 0
         audit.log(db, c, "stock.opening", "product", p.id, after={"qty_milli": 0},
                   store_id=store.id)
         db.commit()

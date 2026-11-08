@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from .. import ledger
+from ..db import utcnow
 from ..formats import qty as fmt_qty
 from ..models import ImportChange, Product, StockMovement, StockOnHand, Store
 from . import parsing as P
@@ -110,7 +111,9 @@ class OpeningStock(Kind):
             if clean["qty_milli"] == 0:
                 # Zero stock is still a fact worth recording: the product is known.
                 row = ledger._soh(db, c.company_id, clean["store_id"], clean["product_id"])
-                row.known = True
+                now = utcnow()
+                ledger.mark_known(row, now)
+                ledger.baselined(row, now)
                 row.opening_milli = 0
                 rec.add("opening_zero", f"{clean['store_id']}:{clean['product_id']}", "insert",
                         after={"store": clean["store_code"], "sku": clean["sku"]})
@@ -139,6 +142,8 @@ class OpeningStock(Kind):
                 StockMovement.store_id == store_id, StockMovement.product_id == product_id))
             if row is not None and not moved:
                 row.known = False
+                row.known_since = None
+                row.baseline_at = None
                 row.opening_milli = None
                 return None
             return f"{label} has moved since; count it to correct the opening stock"

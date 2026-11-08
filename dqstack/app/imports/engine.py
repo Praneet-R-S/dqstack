@@ -81,6 +81,7 @@ class Checked:
     warnings: list[dict] = field(default_factory=list)
     blank: int = 0
     rows_read: int = 0
+    good_rows: int = 0
     state: dict = field(default_factory=dict)
 
     def count(self, what: str) -> int:
@@ -113,7 +114,16 @@ def check(db: Session, c, job: ImportJob) -> Checked:
         if errors:
             out.errors.append({"row": n, "problems": errors})
             continue
-        out.items.append((n, clean, kind.classify(clean, out.state)))
+        out.good_rows += 1
+        if hasattr(kind, "aggregate"):
+            out.items.append((n, clean, ""))
+        else:
+            out.items.append((n, clean, kind.classify(clean, out.state)))
+    if hasattr(kind, "aggregate"):
+        # Kinds whose rows add up (bill-level sales) classify the totals, not the rows.
+        out.items, extra_errors = kind.aggregate(db, out.items, out.state)
+        out.errors.extend(extra_errors)
+        out.errors.sort(key=lambda e: e["row"])
     return out
 
 
@@ -122,7 +132,7 @@ def _store_summary(job: ImportJob, res: Checked) -> None:
     job.rows_new = res.count("new")
     job.rows_updated = res.count("update")
     job.rows_unchanged = res.count("same")
-    job.rows_accepted = len(res.items)
+    job.rows_accepted = res.good_rows
     job.rows_failed = len(res.errors)
     job.errors = res.errors[:KEEP]
     job.warnings = res.warnings[:KEEP]
@@ -184,7 +194,7 @@ def undo(db: Session, c, job: ImportJob) -> ImportJob:
     kind = kind_of(job.kind)
     changes = list(db.scalars(select(ImportChange).where(ImportChange.job_id == job.id)
                               .order_by(ImportChange.seq.desc())))
-    reverted, kept = kind.undo_batch(db, changes)
+    reverted, kept = kind.undo_batch(db, changes, c)
     db.flush()
     job.status = "undone"
     job.undone_at = utcnow()

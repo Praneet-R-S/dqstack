@@ -336,9 +336,15 @@ class StockOnHand(Base):
     on_hand_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     avg_cost_paise: Mapped[int | None] = mapped_column(BigInteger)
     known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When the stock first became known (opening or first count). Before this moment a
+    # zero on the books is "not recorded yet", not "out of stock".
+    known_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Opening stock as set (file or first count); None until set, and again if undone.
     opening_milli: Mapped[int | None] = mapped_column(BigInteger)
     last_counted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The latest moment on-hand was set to a known truth: an opening figure or a count.
+    # Sales dated before it are already reflected in it, so they do not move stock.
+    baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_movement_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_sale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

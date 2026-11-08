@@ -97,7 +97,8 @@ class Kind:
     def undo(self, db: Session, ch: ImportChange) -> str | None:
         raise NotImplementedError
 
-    def undo_batch(self, db: Session, changes: list[ImportChange]) -> tuple[int, list[str]]:
+    def undo_batch(self, db: Session, changes: list[ImportChange],
+                   c=None) -> tuple[int, list[str]]:
         """Undo changes newest first. Kinds with large files override this."""
         reverted, kept = 0, []
         for ch in changes:
@@ -386,7 +387,7 @@ class Products(Kind):
                 st["per_product"][p.id] = want
         db.flush()
 
-    def undo_batch(self, db, changes):
+    def undo_batch(self, db, changes, c=None):
         """Bulk version for files of thousands of products. Same rules as `undo`:
         barcodes this import added go; barcodes it removed come back unless taken;
         updates are reversed unless changed again; products it created are deleted
@@ -1032,5 +1033,5 @@ def register(kind: Kind) -> None:
     KINDS[kind.key] = kind
 
 
-# Kinds that post to the stock ledger live in their own module and register here.
-from . import stock_kinds  # noqa: E402,F401
+# Kinds that post to the stock ledger live in their own modules and register here.
+from . import sales_kinds, stock_kinds  # noqa: E402,F401

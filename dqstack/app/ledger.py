@@ -179,14 +179,41 @@ def post(db: Session, *, company_id: str, store_id: str, product_id: str, qty_mi
             (row.opening_milli or 0) + qty_milli
     if makes_known is True or (makes_known is None and type in ("opening", "count_adjustment")
                                and source_type != "import_undo"):
-        row.known = True
+        mark_known(row, now)
+    if type == "opening" and source_type != "import_undo":
+        # An opening figure is the truth at that moment: sales dated before it are
+        # already reflected in it (sales.py anchors on baseline_at). It is not a
+        # physical count, so the cycle-count schedule is untouched.
+        baselined(row, now)
     if type == "opening" and source_type == "import_undo":
         others = db.scalar(select(func.count()).select_from(StockMovement).where(
             StockMovement.store_id == store_id, StockMovement.product_id == product_id,
             StockMovement.type != "opening"))
         if not others:
             row.known = False
+            row.known_since = None
+            row.baseline_at = None
     return Posted(mv, False, row.on_hand_milli)
+
+
+def mark_known(row: StockOnHand, at: datetime) -> None:
+    if not row.known or row.known_since is None:
+        row.known_since = at
+    row.known = True
+
+
+def baselined(row: StockOnHand, at: datetime) -> None:
+    from .security import _aware
+    if row.baseline_at is None or _aware(row.baseline_at) < at:
+        row.baseline_at = at
+
+
+def counted(row: StockOnHand, at: datetime) -> None:
+    """A physical count: resets the cycle-count clock and sets the baseline."""
+    from .security import _aware
+    if row.last_counted_at is None or _aware(row.last_counted_at) < at:
+        row.last_counted_at = at
+    baselined(row, at)
 
 
 def on_hand(db: Session, store_id: str, product_id: str) -> int:
