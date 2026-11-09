@@ -311,3 +311,65 @@ def test_viewer_and_cashier_cannot_do_floor_work(make_client):
                                          "qty_milli": 1000, "reason": "damaged"}).status_code == 403
         assert who.post("/api/deliveries", {"store_id": s1["id"], "lines": [
             {"product_id": prods["RICE"], "received_milli": 1000}]}).status_code == 403
+
+
+def _two_counters(make_client):
+    owner, mgr, clerk, s1, s2, prods = _world(make_client)
+    other = make_client()
+    invite_and_join(owner, other, "Om Other", "stock_clerk", [s1["id"]])
+    s = clerk.post("/api/counts", {"store_id": s1["id"], "kind": "full"}).json()
+    return mgr, clerk, other, s1, prods, s
+
+
+def test_a_count_matching_the_system_still_flags_a_colleagues_different_count(make_client):
+    mgr, clerk, other, s1, prods, s = _two_counters(make_client)
+    # DAL is 50 on the system. Kabir finds 40 (large, waits); Om finds 50 (matches).
+    a = clerk.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 40_000}).json()
+    b = other.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 50_000}).json()
+    assert a["status"] == "waiting" and b["status"] == "conflict"
+    pending = mgr.get(f"/api/counts/approvals?store_id={s1['id']}").json()
+    assert sorted(l["status"] for l in pending) == ["conflict", "conflict"]
+    # Approving either alone is refused; the manager must pick.
+    assert mgr.post(f"/api/counts/lines/{a['line_id']}/decide",
+                    {"action": "approve", "reason": "Looks right"}).status_code == 409
+    r = mgr.post(f"/api/counts/lines/{b['line_id']}/decide", {"action": "pick", "reason": "Om checked twice"})
+    assert r.status_code == 200 and r.json()["status"] == "confirmed"
+    assert _on_hand(s1["id"], prods["DAL"]) == 50_000
+
+
+def test_two_people_who_agree_are_not_flagged_and_nothing_posts_twice(make_client):
+    mgr, clerk, other, s1, prods, s = _two_counters(make_client)
+    a = clerk.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 40_000}).json()
+    # Two units sell between the counts; Om's 38 agrees with Kabir's 40.
+    with dbmod.SessionLocal() as db:
+        cid = db.get(Product, prods["DAL"]).company_id
+        ledger.post(db, company_id=cid, store_id=s1["id"], product_id=prods["DAL"],
+                    qty_milli=-2_000, type="sale")
+        db.commit()
+    b = other.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 38_000}).json()
+    assert a["status"] == "waiting" and b["status"] == "waiting"
+    before = _movements()
+    mgr.post(f"/api/counts/lines/{a['line_id']}/decide", {"action": "approve", "reason": "Both agree"})
+    assert _on_hand(s1["id"], prods["DAL"]) == 38_000          # 50 - 10 found missing - 2 sold
+    assert _movements() == before + 1                           # one correction, not two
+    lines = {l["id"]: l["status"] for l in mgr.get(f"/api/counts/{s['id']}").json()["lines"]}
+    assert lines[a["line_id"]] == "posted" and lines[b["line_id"]] == "superseded"
+    assert mgr.post(f"/api/counts/lines/{b['line_id']}/decide",
+                    {"action": "approve", "reason": "Approve again"}).status_code == 409
+
+
+def test_a_recount_sets_both_counts_aside_and_keeps_the_product_due(make_client):
+    mgr, clerk, other, s1, prods, s = _two_counters(make_client)
+    a = clerk.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 40_000}).json()
+    other.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 47_000})
+    before = _movements()
+    r = mgr.post(f"/api/counts/lines/{a['line_id']}/decide", {"action": "recount", "reason": "Too far apart"})
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    assert _movements() == before and _on_hand(s1["id"], prods["DAL"]) == 50_000
+    assert mgr.get(f"/api/counts/approvals?store_id={s1['id']}").json() == []
+    # A fresh count of the product afterwards is judged on its own.
+    c = clerk.post(f"/api/counts/{s['id']}/lines", {"product_id": prods["DAL"], "counted_milli": 49_000}).json()
+    assert c["status"] == "posted" and _on_hand(s1["id"], prods["DAL"]) == 49_000
+    # A clerk cannot decide.
+    assert clerk.post(f"/api/counts/lines/{a['line_id']}/decide",
+                      {"action": "recount", "reason": "x" * 5}).status_code in (403, 409)

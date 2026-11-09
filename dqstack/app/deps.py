@@ -42,8 +42,26 @@ def ctx(request: Request, db: Session = Depends(get_db)) -> Ctx:
         raise HTTPException(status_code=403,
                             detail="This request could not be verified. Reload the page and try again.")
     c = build_ctx(db, person, sess, ip=client_ip(request), device=device_of(request))
+    if c.role in TILL_ONLY_ROLES and not till_path(request.method, request.url.path):
+        raise HTTPException(status_code=403,
+                            detail="A cashier's account is for the till. Ask a store manager "
+                                   "if you need this.")
     request.state.ctx = c
     return c
+
+
+# A cashier bills customers and nothing else (section 2), so beyond the role matrix the
+# server answers a cashier only on what the till uses: their own session, the catalogue
+# and prices, checkout and bills, alerts, and the company's and stores' names.
+TILL_ONLY_ROLES = frozenset({"cashier"})
+_TILL_PREFIXES = ("/api/auth/", "/api/checkout/", "/api/products", "/api/alerts")
+_TILL_READS = ("/api/company", "/api/stores", "/api/forecast/status")
+
+
+def till_path(method: str, path: str) -> bool:
+    if path.startswith(_TILL_PREFIXES):
+        return True
+    return method in SAFE_METHODS and path in _TILL_READS
 
 
 def optional_ctx(request: Request, db: Session = Depends(get_db)) -> Ctx | None:

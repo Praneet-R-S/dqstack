@@ -55,6 +55,10 @@ class Company(IdMixin, CreatedMixin, Base):
     # Setup checklist progress (section 5): step key -> ISO timestamp completed.
     setup: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Sign-in security (Settings -> Company): {"two_step": "off" | "admins" | "everyone",
+    # "idp": bool}. Null means the defaults in signin.py (two-step off, Google and
+    # Microsoft allowed when the server has their keys).
+    signin: Mapped[dict | None] = mapped_column(JSON)
 
 
 class Store(IdMixin, CreatedMixin, Base):
@@ -156,6 +160,27 @@ class PasswordReset(IdMixin, CreatedMixin, Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     person_id: Mapped[str] = mapped_column(String(32), ForeignKey("people.id", ondelete="CASCADE"),
                                            nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OneTimeCode(IdMixin, CreatedMixin, Base):
+    """A 6-digit code sent by text message or email: a password reset by phone
+    ("reset") or the second step of signing in ("signin"). Only a keyed hash of the
+    code is stored. Five wrong tries and the code is dead (`attempts`); `used_at`
+    marks one that was used or replaced. A sign-in code also carries the hash of the
+    ticket the browser holds for the half-finished sign-in."""
+    __tablename__ = "one_time_codes"
+    company_id: Mapped[str | None] = mapped_column(String(32), ForeignKey(CO, ondelete="CASCADE"),
+                                                   index=True)
+    person_id: Mapped[str] = mapped_column(String(32), ForeignKey("people.id", ondelete="CASCADE"),
+                                           index=True, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    channel: Mapped[str] = mapped_column(String(8), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    ticket_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sends: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

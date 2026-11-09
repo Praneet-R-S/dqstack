@@ -1412,15 +1412,26 @@ much simulated margin. Stock targets use each product's own supplier lead time a
 order frequency (`live.targets`, grouped by risk period) — which resolves C14 item 1
 without touching `decide.py`.
 
-**Step 12, honestly.** Done: `scripts/loadtest.py` (checked at small scale), the
-section 15 status in `docs/SECURITY.md`, the restore drill written in
-`deploy/README.md`, platform portal, export and deletion. Not done: the 200-till load
-test on staging PostgreSQL; a WCAG audit with assistive technology; point-in-time
-recovery (nightly dumps only — needs managed PostgreSQL or WAL-G); OTP and Google or
-Microsoft sign-in; WhatsApp Business API (WhatsApp is by link); the 2-store pilot;
-legal review of the privacy and terms drafts; a chartered accountant's check before
-Checkout is used as a GST invoice system. Training a very large company in parallel by
+**Step 12, honestly.** Done: `scripts/loadtest.py` and `scripts/scale_seed.py`, the
+section 15 status in `docs/SECURITY.md`, platform portal, export and deletion;
+point-in-time recovery with WAL-G (`deploy/postgres/`, `deploy/restore-to-time.sh`);
+the CI jobs `pitr-drill` and `scale` (200 tills, 100 stores x 10,000 products) — written
+and syntax-checked, first proven when CI runs, since Docker was not available while
+building; OTP (two-step sign-in, reset by phone) and Google/Microsoft sign-in
+(`signin.py`, `oidc.py`); WhatsApp Business Cloud API and SMS (`whatsapp.py`, `sms.py`)
+for orders, alerts and receipts, falling back to links when not configured. Not done: a
+WCAG audit with assistive technology; the 2-store pilot; legal review of the privacy and
+terms drafts; a chartered accountant's check before Checkout is used as a GST invoice
+system; real-service trials of Google, Microsoft, WhatsApp and an SMS gateway (needs the
+client's accounts and approved templates). Training a very large company in parallel by
 category is not built.
+
+**After step 12.** The 23 screens (`webapp/js/screens-a/b/c.js`). A cashier's app is
+the till only (menu, routes and, in `deps.py`, the server). "My shift" gives a cashier
+their own takings. Reports download as Excel, PDF or CSV, or all in one workbook.
+Two people counting one product are compared count against count (carried forward by
+sales between them), never against the system figure; the manager picks one, or sends
+it for a recount.
 
 **Running it.** `python -m dqstack.app` (development, migrates SQLite first);
 `python -m dqstack.app.manage seed-demo --email ...` makes a demo company with a trained
@@ -1429,9 +1440,17 @@ forecast (login written to the git-ignored `data/demo-login.txt` on this machine
 
 ### Traps added by C17
 
-- **The baseline migration is regenerated, not appended to,** until the first deploy
-  (`scratchpad/regen_baseline.py` keeps the frozen guard block). The drift test fails if
-  the models and migration disagree. After the first real deploy, add revisions instead.
+- **Migrations are now added as revisions** (`0002_signin_extras.py` follows the
+  baseline); do not regenerate `0001` any more. The drift test fails if the models and
+  migrations disagree.
+- **Browsers keep the app's files**: without `Cache-Control: no-cache` on `/app` a new
+  release ran old JavaScript until a hard reload (fixed in `main.py`).
+- **The app's own log lines were invisible**: uvicorn configures only its loggers, so
+  `main._app_logging` attaches one for `dqstack.*` (development mail and codes show there).
+- **A bill locks its stock rows in sorted order** (`ledger.lock_rows`) before posting
+  lines; locking in scan order can deadlock two tills on PostgreSQL.
+- **Writes during a request hold row locks to the end**: an API key's `last_used_at`
+  once serialised every request on that key; it is now written in its own transaction.
 - **`diagnose.run` writes `data/processed/` on every call.** Any engine call for a
   company must run inside `forecast.jobs.scratch()` (in-process) or with
   `DQ_ARTIFACTS_DIR`, `DQ_INTERIM_DIR`, `DQ_PROCESSED_DIR` set (subprocess), or it

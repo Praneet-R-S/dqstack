@@ -7,12 +7,14 @@ the day or week -- so evaluating every few minutes raises each one once. When th
 condition clears, the alert resolves itself.
 
 Who hears about what follows the notification table of section 14. In-app is
-always on; email is sent to people who chose it. WhatsApp needs a WhatsApp
-Business account and is not connected yet: the setting is kept for when it is.
+always on; email and WhatsApp go to people who chose them. WhatsApp needs the
+WhatsApp Business API set up on the server (whatsapp.py); without it the choice is
+kept but nothing is sent, and the settings screen says so.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -26,6 +28,8 @@ from .mailer import MailError, send
 from .models import (Alert, Company, CountLine, CountSession, DailySales, DayClose, Person,
                      Product, PurchaseOrder, Recommendation, StockMovement, StockOnHand, Store)
 from .security import _aware
+
+log = logging.getLogger("dqstack.alerts")
 
 # kind -> (roles that receive it, severity, where to act)
 KINDS: dict[str, tuple[tuple[str, ...], str, str]] = {
@@ -207,22 +211,44 @@ def recipients(db: Session, a: Alert) -> list[Person]:
 
 
 def deliver(db: Session, company_id: str) -> int:
-    """Email new alerts to the people who chose email. Returns how many were sent."""
+    """Send new alerts to the people who chose email or WhatsApp (and did not mute that
+    kind). Each alert is sent once: it is marked notified whether or not a message got
+    through, and a failure is logged. WhatsApp alerts raised together reach a person as
+    one message. Returns how many messages were sent."""
+    from . import whatsapp as wa
     sent = 0
+    by_whatsapp: dict[str, tuple[Person, list[Alert]]] = {}
     for a in db.scalars(select(Alert).where(Alert.company_id == company_id,
                                             Alert.notified_at.is_(None),
                                             Alert.resolved_at.is_(None))):
         for p in recipients(db, a):
             prefs = p.notify or {}
-            if not prefs.get("email") or not p.email or a.kind in prefs.get("muted", []):
+            if a.kind in prefs.get("muted", []):
                 continue
-            try:
-                send(p.email, f"DQ-Stack: {LABELS.get(a.kind, a.kind)}",
-                     f"Hello {p.name},\n\n{a.message}\n")
-                sent += 1
-            except MailError:
-                pass
+            if prefs.get("email") and p.email:
+                try:
+                    send(p.email, f"DQ-Stack: {LABELS.get(a.kind, a.kind)}",
+                         f"Hello {p.name},\n\n{a.message}\n")
+                    sent += 1
+                except MailError as e:
+                    log.warning("alert %s not emailed to person %s: %s", a.id, p.id, e)
+            if prefs.get("whatsapp") and p.phone and wa.configured():
+                by_whatsapp.setdefault(p.id, (p, []))[1].append(a)
         a.notified_at = utcnow()
+    for p, items in by_whatsapp.values():
+        lines = [f"{LABELS.get(a.kind, a.kind)}: {a.message}" for a in items]
+        if len(lines) == 1:
+            text = f"Hello {p.name}, a DQ-Stack alert.\n\n{lines[0]}"
+        else:
+            shown = lines[:10] + ([f"and {len(lines) - 10} more in the app"]
+                                  if len(lines) > 10 else [])
+            text = (f"Hello {p.name}, {len(lines)} DQ-Stack alerts.\n\n"
+                    + "\n".join("- " + s for s in shown))
+        try:
+            wa.send(p.phone, text, "alert", [p.name, "; ".join(lines)])
+            sent += 1
+        except wa.WhatsAppError as e:
+            log.warning("%d alert(s) not sent by WhatsApp to person %s: %s", len(items), p.id, e)
     db.flush()
     return sent
 

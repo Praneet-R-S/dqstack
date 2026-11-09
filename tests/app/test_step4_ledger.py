@@ -281,3 +281,41 @@ def test_concurrent_sales_of_one_product_lose_nothing(client):
     with dbmod.SessionLocal() as db:
         assert ledger.on_hand(db, sid, pid) == 1_000_000 - 300_000
         assert ledger.verify(db, cid) == []
+
+
+@pytest.mark.skipif(not ON_PG, reason="row locks are a PostgreSQL feature")
+def test_two_tills_selling_the_same_items_in_opposite_order_do_not_deadlock(client):
+    """A bill takes all its stock-row locks first, in one fixed order, before posting its
+    lines in whatever order they were scanned (ledger.lock_rows, used by Checkout)."""
+    stores, prods = _setup(client)
+    cid, sid = client.me["company"]["id"], stores[0]["id"]
+    a, b = prods["P0"], prods["P1"]
+    with dbmod.SessionLocal() as db:
+        for pid in (a, b):
+            ledger.post(db, company_id=cid, store_id=sid, product_id=pid, qty_milli=1_000_000,
+                        type="opening")
+        db.commit()
+    errors = []
+
+    def till(n: int, order):
+        try:
+            for i in range(40):
+                with dbmod.SessionLocal() as db:
+                    ledger.lock_rows(db, cid, sid, order)
+                    for pid in order:
+                        ledger.post(db, company_id=cid, store_id=sid, product_id=pid,
+                                    qty_milli=-1000, type="sale", idempotency_key=f"x{n}-{i}-{pid}")
+                    db.commit()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=till, args=(n, (a, b) if n % 2 else (b, a)))
+               for n in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
+    with dbmod.SessionLocal() as db:
+        assert ledger.on_hand(db, sid, a) == ledger.on_hand(db, sid, b) == 1_000_000 - 240_000
+        assert ledger.verify(db, cid) == []

@@ -32,6 +32,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -97,6 +98,21 @@ def revoke_key(key_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)
     return {"ok": True}
 
 
+def _touch(key_id: str) -> None:
+    """Note when a key was last used, at most once a minute and in its own short
+    transaction. Writing it inside the request's transaction would lock the key's row
+    until the bill is saved, so every request on one key would wait for the one before."""
+    from sqlalchemy import or_, update
+
+    from .. import db as dbmod
+    now = utcnow()
+    with dbmod.SessionLocal() as s:
+        s.execute(update(ApiKey).where(ApiKey.id == key_id, or_(
+            ApiKey.last_used_at.is_(None), ApiKey.last_used_at < now - timedelta(minutes=1)))
+            .values(last_used_at=now))
+        s.commit()
+
+
 def pos_ctx(request: Request, db: Session = Depends(get_db),
             authorization: str | None = Header(default=None),
             x_api_key: str | None = Header(default=None)):
@@ -108,7 +124,7 @@ def pos_ctx(request: Request, db: Session = Depends(get_db),
     if k is None or k.revoked_at is not None:
         raise HTTPException(401, "That API key is not valid, or has been revoked.")
     limiter.check(f"pos:{k.id}", limit=600, window_s=60)
-    k.last_used_at = utcnow()
+    _touch(k.id)
     return SimpleNamespace(company_id=k.company_id, key=k, role="admin",
                            person=SimpleNamespace(id=None, name=f"POS: {k.name}"),
                            device=f"pos:{k.prefix}", ip=request.client.host if request.client else None,

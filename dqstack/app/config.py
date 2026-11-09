@@ -63,6 +63,14 @@ class Settings:
     inline_jobs: bool = True
     train_timeout_s: int = 4 * 3600
     nightly_timeout_s: int = 1800
+    # Google and Microsoft sign-in (OpenID Connect). Each is on only when both its id
+    # and secret are set. The tenant limits which Microsoft accounts may try:
+    # "organizations" (any work or school account), "common", or one tenant id.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    microsoft_client_id: str | None = None
+    microsoft_client_secret: str | None = None
+    microsoft_tenant: str = "organizations"
 
     @property
     def is_sqlite(self) -> bool:
@@ -93,6 +101,11 @@ def load() -> Settings:
         inline_jobs=_bool("DQ_INLINE_JOBS", env in ("development", "test")),
         train_timeout_s=int(_env("DQ_TRAIN_TIMEOUT_S", str(4 * 3600)) or 4 * 3600),
         nightly_timeout_s=int(_env("DQ_NIGHTLY_TIMEOUT_S", "1800") or 1800),
+        google_client_id=_env("DQ_GOOGLE_CLIENT_ID"),
+        google_client_secret=_env("DQ_GOOGLE_CLIENT_SECRET"),
+        microsoft_client_id=_env("DQ_MICROSOFT_CLIENT_ID"),
+        microsoft_client_secret=_env("DQ_MICROSOFT_CLIENT_SECRET"),
+        microsoft_tenant=_env("DQ_MICROSOFT_TENANT", "organizations") or "organizations",
     )
     if env == "production":
         problems = []

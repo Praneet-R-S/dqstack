@@ -1,5 +1,6 @@
 # DQ-Stack on one server: PostgreSQL, the application, the scheduler, HTTPS and
-# nightly backups. Copy .env.example to .env, fill it in, then:
+# backups (continuous WAL archiving for point-in-time restore, plus a nightly dump).
+# Copy .env.example to .env, fill it in, then:
 #
 #   docker compose up -d --build
 #   docker compose run --rm app manage create-platform-admin --email you@company.in --name "You"
@@ -21,18 +22,66 @@ x-app: &app
     db: { condition: service_healthy }
     migrate: { condition: service_completed_successfully }
 
+# Where WAL-G keeps base backups and archived WAL, and how (deploy/README.md
+# section 5, .env.example). Shared by db (archives WAL), pitr (base backups) and
+# deploy/restore-to-time.sh. Object storage when WALG_S3_PREFIX is set; otherwise the
+# local walg volume, which is not a real backup: it dies with the server's disk.
+x-walg-env: &walg-env
+  WALG_S3_PREFIX: ${WALG_S3_PREFIX:-}
+  WALG_FILE_PREFIX: ${WALG_FILE_PREFIX-/walg/dqstack}
+  AWS_ENDPOINT: ${AWS_ENDPOINT:-}
+  AWS_REGION: ${AWS_REGION:-ap-south-1}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
+  WALG_S3_SSE: ${WALG_S3_SSE:-}
+  WALG_S3_SSE_KMS_ID: ${WALG_S3_SSE_KMS_ID:-}
+  WALG_LIBSODIUM_KEY: ${WALG_LIBSODIUM_KEY:-}
+  WALG_LIBSODIUM_KEY_TRANSFORM: ${WALG_LIBSODIUM_KEY_TRANSFORM:-hex}
+  WALG_COMPRESSION_METHOD: ${WALG_COMPRESSION_METHOD:-lz4}
+  WALG_DELTA_MAX_STEPS: ${WALG_DELTA_MAX_STEPS:-6}
+  DQ_PITR_RETAIN_DAYS: ${DQ_PITR_RETAIN_DAYS:-8}
+  DQ_PITR_BACKUP_AT: ${DQ_PITR_BACKUP_AT:-01:30}
+
+# The database image: PostgreSQL 16.15 with WAL-G 3.0.9, versions pinned in
+# deploy/postgres/Dockerfile. deploy/restore-to-time.sh uses the same tag.
+x-db-image: &db-image
+  build: ./deploy/postgres
+  image: dqstack-db:16.15-walg3.0.9
+
 services:
   db:
-    image: postgres:16-alpine
+    <<: *db-image
     restart: unless-stopped
     environment:
+      <<: *walg-env
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       DQ_OWNER_PASSWORD: ${DQ_OWNER_PASSWORD}
       DQ_APP_PASSWORD: ${DQ_APP_PASSWORD}
+    # Every finished WAL segment goes to backup storage, and a segment is finished at
+    # least every DQ_PITR_ARCHIVE_TIMEOUT seconds (5 minutes) while anything is being
+    # written: so losing the whole server loses at most about 5 minutes of data.
+    # wal_recycle=off makes every segment start zeroed, so a part-filled segment
+    # shipped by the timeout compresses to almost nothing.
+    # max_connections covers WEB_CONCURRENCY=4 web processes (30 connections each at
+    # most) plus the worker; PostgreSQL's default of 100 does not.
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=/usr/local/bin/dq-pitr archive %p
+      - -c
+      - archive_timeout=${DQ_PITR_ARCHIVE_TIMEOUT:-300}
+      - -c
+      - wal_recycle=off
+      - -c
+      - max_connections=${DQ_PG_MAX_CONNECTIONS:-200}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - walg:/walg
       - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -75,13 +124,47 @@ services:
       - caddy-config:/config
     depends_on: [app]
 
+  # Base backups every night (and at once if none exists), retention, and the
+  # archiving health check: `docker compose exec pitr dq-pitr check`. Reads the data
+  # directory read-only; runs as the same postgres user as db.
+  pitr:
+    <<: *db-image
+    restart: unless-stopped
+    user: postgres
+    environment:
+      <<: *walg-env
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+      DQ_PG_MAX_CONNECTIONS: ${DQ_PG_MAX_CONNECTIONS:-200}
+      TZ: ${DQ_BACKUP_TZ:-Asia/Kolkata}
+    volumes:
+      - pgdata:/var/lib/postgresql/data:ro
+      - walg:/walg
+    command: ["dq-pitr", "loop"]
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "dq-pitr", "health"]
+      interval: 5m
+      timeout: 30s
+      start_period: 15m
+      retries: 1
+
+  # The independent second copy: a nightly pg_dump, kept 30 days. A different tool
+  # and format from the WAL-G backups, so one bug cannot spoil both.
   backup:
-    image: postgres:16-alpine
+    <<: *db-image
     restart: unless-stopped
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_DB: ${POSTGRES_DB}
+      TZ: ${DQ_BACKUP_TZ:-Asia/Kolkata}
     volumes:
       - backups:/backups
       - ./deploy/backup-loop.sh:/usr/local/bin/backup-loop.sh:ro
@@ -90,7 +173,11 @@ services:
     command: ["sh", "/usr/local/bin/backup-loop.sh"]
 
 volumes:
+  # deploy/restore-to-time.sh points DQ_PGDATA_VOLUME at a restored copy; the old
+  # volume is kept until you remove it.
   pgdata:
+    name: ${DQ_PGDATA_VOLUME:-dqstack_pgdata}
+  walg:
   planner-data:
   caddy-data:
   caddy-config:

@@ -251,7 +251,7 @@
     confirmed: ["Matches", "ok", "Saved. Matches the system."],
     waiting: ["Waits for a manager", "attention", "The difference is large, so a manager will review it."],
     conflict: ["Conflict", "risk", "Someone else counted this differently; a manager will pick one."],
-    superseded: ["Replaced", "neutral", "A later count of this product replaced this one."],
+    superseded: ["Set aside", "neutral", "Another count of this product was used instead."],
     rejected: ["Rejected", "risk", "A manager rejected this count. Count it again."]
   };
   var COUNT_STATUS = { open: ["Open", "data"], submitted: ["Submitted, waiting for a manager", "attention"], closed: ["Closed", "ok"] };
@@ -338,8 +338,18 @@
         rows.forEach(function (r) { var g = r.session_id + ":" + r.product_id; (groups[g] = groups[g] || []).push(r); });
         Object.keys(groups).forEach(function (g) {
           var lines = groups[g], first = lines[0], conflict = lines.some(function (l) { return l.status === "conflict"; });
+          var all = (lines.filter(function (l) { return l.all_counts && l.all_counts.length; })[0] || {}).all_counts || [];
+          var applied = all.filter(function (o) { return o.status === "posted" || o.status === "confirmed"; });
+          var people = {}; all.concat(lines).forEach(function (o) { people[o.counted_by || "Someone"] = 1; });
           body.appendChild(card(first.name, h("div", { class: "c-approve" },
-            h("p", { class: "text-2" }, first.sku + (conflict ? " · Counted differently by " + lines.length + " people. Pick the right count, or reject both and count again." : " · The difference is above the automatic limit.")),
+            h("p", { class: "text-2" }, first.sku + (conflict ? " · " + Object.keys(people).length + " people counted this differently. Pick the right count, or have it counted again." : " · The difference is above the automatic limit.")),
+            conflict && all.length ? h("ul", { class: "c-all-counts", "aria-label": "Every count of " + first.name },
+              all.map(function (o) {
+                return h("li", null, h("span", { class: "mono" }, qty(o.counted_milli, first.unit)), " by " + (o.counted_by || "someone") + ", " + T.time(o.counted_at),
+                  o.status === "posted" || o.status === "confirmed" ? h("span", { class: "text-3" }, " · already in stock") : null);
+              })) : null,
+            applied.length ? h("p", { class: "text-3" }, "A count already in stock stays unless you pick another one.") : null,
+            conflict ? h("div", { class: "row" }, ui.button("Count it again", function () { decide(first, "recount"); }, "ghost", { "aria-label": "Set these counts aside and count " + first.name + " again" })) : null,
             lines.map(function (l) {
               var diff = l.difference_milli;
               return h("div", { class: "c-approve-line" },
@@ -359,11 +369,12 @@
     function decide(l, action) {
       var t = { approve: ["Approve this difference?", "The stock of " + l.name + " changes to " + qty(l.counted_milli, l.unit) + ".", "Approve"],
         pick: ["Pick this count?", "This count of " + qty(l.counted_milli, l.unit) + " stands and the other is set aside.", "Pick this count"],
-        reject: ["Reject this count?", "Nothing posts. Someone should count " + l.name + " again.", "Reject"] }[action];
-      DQ.confirm({ title: t[0], message: t[1], reason: true, reasonLabel: "Why? For example: recounted, found stock in the back room", confirmLabel: t[2], danger: action === "reject" }).then(function (r) {
+        reject: ["Reject this count?", "Nothing posts. Someone should count " + l.name + " again.", "Reject"],
+        recount: ["Count " + l.name + " again?", "Every waiting count of " + l.name + " is set aside and nothing posts. It stays on the list of products to count.", "Set aside and recount"] }[action];
+      DQ.confirm({ title: t[0], message: t[1], reason: true, reasonLabel: "Why? For example: recounted, found stock in the back room", confirmLabel: t[2], danger: action === "reject" || action === "recount" }).then(function (r) {
         if (!r.ok) return;
         DQ.post("/api/counts/lines/" + l.line_id + "/decide", { action: action, reason: r.reason }).then(function (res) {
-          DQ.toast(l.name + ": " + (action === "reject" ? "rejected. Count it again." : res.message));
+          DQ.toast(l.name + ": " + (action === "reject" || action === "recount" ? "set aside. Count it again." : res.message));
           load();
         }, function (e) { DQ.toast(e.message, { kind: "risk" }); });
       });
@@ -1107,24 +1118,45 @@
     document.body.appendChild(h("pre", { id: "c-print", class: "c-print-only", "aria-hidden": "true" }, text));
     window.print();
   }
+  /* How this server sends receipts, asked once: WhatsApp by the server ("api") or by a
+     link the cashier opens ("link"); SMS only when a text provider is set up. */
+  var rcptChannels = null, rcptKnown = null;
+  function receiptChannels() {
+    if (!rcptChannels) rcptChannels = DQ.get("/api/checkout/receipt-channels").then(function (c) { rcptKnown = c; return c; }, function () { rcptChannels = null; return { whatsapp: "link", sms: false }; });
+    return rcptChannels;
+  }
   function receiptActions(getId) {
     var phone = ui.input({ type: "tel", inputmode: "tel", autocomplete: "off", placeholder: "10-digit mobile", maxlength: 15, id: "c-wa-" + Math.random().toString(36).slice(2, 7) });
     var err = h("p", { class: "field-error", role: "alert", hidden: true });
-    var wa = ui.button("Send on WhatsApp", function () {
-      err.hidden = true;
+    var ok = h("p", { class: "field-help", role: "status", hidden: true });
+    var smsNote = h("p", { class: "field-help", hidden: true }, "Text messages are not set up on this server.");
+    function fail(msg) { err.textContent = msg; err.hidden = false; }
+    function send(channel, btn) {
+      err.hidden = true; ok.hidden = true;
       var digits = phone.value.replace(/\D/g, "");
-      if (digits.length < 10) { err.textContent = "Enter the customer's 10-digit mobile number."; err.hidden = false; phone.focus(); return; }
-      if (!navigator.onLine) { err.textContent = "WhatsApp needs the internet. Print the receipt instead, or try again later."; err.hidden = false; return; }
-      var win = window.open("", "_blank");
+      if (digits.length < 10) { fail("Enter the customer's 10-digit mobile number."); phone.focus(); return; }
+      if (!navigator.onLine) { fail("Sending needs the internet. Print the receipt instead, or try again later."); return; }
+      // A link has to open in a window made during the click, or the browser blocks it.
+      var win = channel === "whatsapp" && !(rcptKnown && rcptKnown.whatsapp === "api") ? window.open("", "_blank") : null;
+      btn.disabled = true;
       getId().then(function (id) {
         if (!id) throw new Error("This bill has not reached the server yet. Try again in a minute.");
-        return DQ.get("/api/checkout/bills/" + id + DQ.qs({ phone: digits }));
-      }).then(function (b) {
-        if (!b.whatsapp_link) throw new Error("That phone number does not look right. Check it and try again.");
-        if (win) { win.opener = null; win.location.href = b.whatsapp_link; } else window.location.href = b.whatsapp_link;
-      }, function (e) { if (win) win.close(); err.textContent = e.message; err.hidden = false; });
-    }, "ghost");
-    return h("div", { class: "c-wa" }, ui.field("Customer's mobile for WhatsApp", phone), err, wa);
+        return DQ.post("/api/checkout/bills/" + id + "/receipt", { channel: channel, phone: phone.value });
+      }).then(function (r) {
+        btn.disabled = false;
+        if (r.whatsapp_link) {
+          if (win) { win.opener = null; win.location.href = r.whatsapp_link; } else window.open(r.whatsapp_link, "_blank", "noopener");
+          return;
+        }
+        if (win) win.close();
+        ok.textContent = "Receipt sent " + (channel === "sms" ? "by text" : "on WhatsApp") + " to " + r.sent_to + ".";
+        ok.hidden = false;
+      }, function (e) { btn.disabled = false; if (win) win.close(); fail(e.message); });
+    }
+    var wa = ui.button("Send on WhatsApp", function (e) { send("whatsapp", e.currentTarget); }, "ghost");
+    var sms = ui.button("Send by SMS", function (e) { send("sms", e.currentTarget); }, "ghost");
+    receiptChannels().then(function (c) { if (!c.sms) { sms.disabled = true; smsNote.hidden = false; } });
+    return h("div", { class: "c-wa" }, ui.field("Customer's mobile for the receipt", phone), err, ok, h("div", { class: "row" }, wa, sms), smsNote);
   }
 
   /* ================================================================ CHECKOUT */
@@ -1572,7 +1604,9 @@
     var body = h("div", null, ui.skeleton(5));
     main.appendChild(body);
     var amt = query.amount ? fmt.toPaise(query.amount) : null;
-    return DQ.get("/api/checkout/bills" + DQ.qs({ store_id: store.id, number: query.number || null, day: query.day !== undefined ? query.day : fmt.today(), amount_paise: amt, limit: 100 })).then(function (rows) {
+    var mineOnly = DQ.tillOnly() && !query.number && !query.amount;
+    if (mineOnly) main.appendChild(h("p", { class: "text-2" }, "Showing your bills. Search by number or amount to find any bill in this store, for a return."));
+    return DQ.get("/api/checkout/bills" + DQ.qs({ store_id: store.id, number: query.number || null, day: query.day !== undefined ? query.day : fmt.today(), amount_paise: amt, limit: 100, mine: mineOnly || null })).then(function (rows) {
       if (!alive()) return;
       DQ.clear(body);
       body.appendChild(ui.table([
@@ -1883,5 +1917,77 @@
         out.appendChild(h("div", { class: "c-sticky-foot" }, err, result, h("div", { class: "row" }, btn, h("a", { class: "btn btn-ghost", href: "#/day-close" + DQ.qs({ day: day }) }, "Go to Day close"))));
       });
     }
+  } });
+
+  /* ---------------------------------------------------------------- my shift (cashier) */
+  /* A cashier's own day at the till: what they billed, how it was paid, and the cash to
+     hand over. The server gives a cashier only their own totals. */
+  DQ.route("#/shift", { title: "My shift", nav: "My shift", can: "sales.bill", render: function (main, params, query, alive) {
+    var store = DQ.storeObj();
+    if (!store) return noStore(main);
+    var day = query.day || fmt.today();
+    var dayIn = ui.input({ type: "date", value: day, max: fmt.today(), "aria-label": "Day", class: "input c-day-in" });
+    dayIn.addEventListener("change", function () { if (dayIn.value) DQ.go("#/shift" + DQ.qs({ day: dayIn.value })); });
+    main.appendChild(ui.page("My shift", { sub: DQ.me.person.name + " at " + store.name + ", " + T.date(day) + ".", actions: dayIn }));
+    if (store.mode !== "connected") {
+      main.appendChild(ui.empty({ title: store.name + " does not use the till", text: "Its sales come from the daily file, so there is no shift to show." }));
+      return;
+    }
+    var body = h("div", { class: "c-stack" }, ui.skeleton(5));
+    main.appendChild(body);
+    return Promise.all([
+      DQ.get("/api/checkout/z-report" + DQ.qs({ store_id: store.id, day: day, mine: true })),
+      DQ.get("/api/checkout/bills" + DQ.qs({ store_id: store.id, day: day, mine: true, limit: 500 }))
+    ]).then(function (r) {
+      if (!alive()) return;
+      var z = r[0], bills = r[1], bm = z.by_method_paise || {};
+      DQ.clear(body);
+      if (z.devices_waiting) body.appendChild(msgBox("risk", z.devices_waiting + " bill(s) are still waiting on a till to be sent. Keep the till online until they go."));
+      body.appendChild(card("Takings", h("div", { class: "tiles c-tiles" },
+        tile("Bills", fmt.num(z.bills), z.made_offline ? z.made_offline + " made offline" : null),
+        tile("Sales", money(z.sales_paise), "GST inside " + money(z.tax_paise)),
+        tile("Discounts", money(z.discounts_paise)),
+        tile("Refunds", money(z.refunds_paise), fmt.num(z.refunds) + " refund" + (z.refunds === 1 ? "" : "s")),
+        tile("Voids", fmt.num(z.voids)),
+        tile("Cash", money(bm.cash || 0)), tile("UPI", money(bm.upi || 0)), tile("Card", money(bm.card || 0)))));
+      var cashIn = ui.input({ inputmode: "decimal", autocomplete: "off", class: "input c-big-input", id: "c-shift-cash" });
+      var diffEl = h("p", { class: "c-value", "aria-live": "polite" });
+      function diffText() {
+        var c = fmt.toPaise(cashIn.value);
+        if (!cashIn.value.trim() || c === null) return null;
+        var d = c - (bm.cash || 0);
+        return d === 0 ? "The cash matches." : (d < 0 ? "Short by " : "Over by ") + money(Math.abs(d)) + ".";
+      }
+      function paint() {
+        var t = diffText();
+        diffEl.textContent = t || "Count the cash you took and type it, before handing it over.";
+        if (t) diffEl.setAttribute("data-kind", t === "The cash matches." ? "ok" : "risk"); else diffEl.removeAttribute("data-kind");
+      }
+      cashIn.addEventListener("input", paint);
+      var slip = ui.button("Print handover slip", function () {
+        var line = function (a, b) { a = String(a); b = String(b); return a + " ".repeat(Math.max(1, 32 - a.length - b.length)) + b; };
+        var counted = fmt.toPaise(cashIn.value);
+        printText([store.name, "Shift handover", DQ.me.person.name, T.date(day) + ", printed " + fmt.time(new Date().toISOString()), "--------------------------------",
+          line("Bills", z.bills), line("Sales", money(z.sales_paise)), line("Refunds", money(z.refunds_paise)), line("Voids", z.voids),
+          line("Cash", money(bm.cash || 0)), line("UPI", money(bm.upi || 0)), line("Card", money(bm.card || 0)), "--------------------------------",
+          line("Cash expected", money(bm.cash || 0)), line("Cash counted", counted === null ? "-" : money(counted)), diffText() || "",
+          "", "Handed to: ____________________", "Signature: ____________________"].join("\n"));
+      }, "ghost");
+      body.appendChild(card("Cash to hand over", h("div", { class: "c-form" },
+        h("div", { class: "c-cash" }, h("div", null, h("p", { class: "tile-label" }, "Cash expected"), h("p", { class: "c-total-value mono" }, money(bm.cash || 0))),
+          h("div", null, ui.field("Cash counted (₹)", cashIn))), diffEl,
+        h("p", { class: "text-2" }, "The store manager closes the day for the whole store. This is your part of it."),
+        h("div", { class: "row" }, slip))));
+      paint();
+      body.appendChild(card("My bills (" + bills.length + ")", ui.table([
+        { key: "bill_number", label: "Bill", render: function (b) { return h("span", { class: "mono" }, b.bill_number); } },
+        { key: "paid_at", label: "Time", render: function (b) { return b.paid_at ? T.time(b.paid_at) : "Not paid"; } },
+        { key: "state", label: "State", render: function (b) { var st = BILL_STATE[b.state] || [b.state, "neutral"]; return ui.badge(st[0], st[1]); } },
+        { key: "payments", label: "Paid by", render: function (b) { return b.payments.map(function (p) { return methodName(p.method); }).join(", ") || "—"; } },
+        { key: "total_paise", label: "Total", kind: "money" }
+      ], bills, { onRow: function (b) { DQ.go("#/bills/" + b.id); }, caption: "My bills",
+        empty: { title: "No bills yet", text: "Bills you take on Checkout show here.", action: { label: "Go to Checkout", href: "#/checkout" } } })));
+    });
+    function tile(label, value, note) { return h("div", { class: "tile" }, h("p", { class: "tile-label" }, label), h("p", { class: "tile-value" }, value), note ? h("p", { class: "tile-note" }, note) : null); }
   } });
 })();

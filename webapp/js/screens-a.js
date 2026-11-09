@@ -682,10 +682,50 @@
             });
           }, { disabled: !edit })]));
         box.appendChild(sectionCard("Plan", h("dl", { class: "a-kv" }, kv("Plan", cap(co.plan || "—")), kv("Currency", co.currency || "INR"))));
+        box.appendChild(signinSecurityCard(alive));
       }, run);
     }
     return run();
   };
+
+  /* Sign-in security: the optional code after the password, and Google / Microsoft
+     sign-in. Owner and Admin change it; everyone else sees how it is set. */
+  function signinSecurityCard(alive) {
+    var holder = h("div", null, ui.skeleton(2));
+    function draw(s) {
+      DQ.clear(holder);
+      var edit = s.can_edit;
+      var twoStep = ui.select([
+        { value: "off", label: "Off: a password is enough" },
+        { value: "admins", label: "For Owners and Admins" },
+        { value: "everyone", label: "For everyone" }], s.two_step);
+      var anyIdp = s.providers.google || s.providers.microsoft;
+      var names = ["google", "microsoft"].filter(function (p) { return s.providers[p]; }).map(function (p) { return p === "google" ? "Google" : "Microsoft"; }).join(" or ");
+      var idp = anyIdp ? checkbox("Allow sign-in with " + names, s.idp,
+        "People still need an account here with the same email. Signing in this way skips the extra code.") : null;
+      var tenant = s.providers.microsoft ? ui.input({ value: s.microsoft_tenant || "", maxlength: 36, autocomplete: "off", spellcheck: "false", class: "input mono", placeholder: "1b2c3d4e-0000-1111-2222-333344445555" }) : null;
+      holder.appendChild(sectionCard("Sign-in security", [
+        edit ? null : notice("data", "Only an Owner or Admin can change these."),
+        form([
+          ui.field("Ask for a 6-digit code after the password", twoStep,
+            s.texts ? "The code goes by text message to the person's phone, or by email if they have no phone."
+              : "Text messages are not set up on this server, so the code goes by email. People with no email cannot get one."),
+          idp ? idp.el : h("p", { class: "field-help" }, "Google and Microsoft sign-in are not set up on this server."),
+          tenant ? ui.field("Your Microsoft organisation (tenant id)", tenant, "Microsoft sign-in works only for accounts from this organisation. Find the id in Microsoft Entra admin centre, under Overview.") : null
+        ], "Save sign-in security", function () {
+          var body = { two_step: twoStep.value };
+          if (idp) body.idp = idp.input.checked;
+          if (tenant) body.microsoft_tenant = tenant.value.trim();
+          return DQ.api("PUT", "/api/auth/security", body).then(function (s2) {
+            DQ.toast("Sign-in security saved."); draw(s2);
+          });
+        }, { disabled: !edit })
+      ], { sub: "Extra checks when people sign in." }));
+    }
+    DQ.get("/api/auth/security").then(function (s) { if (alive()) draw(s); },
+      function (err) { if (!alive()) return; DQ.clear(holder); holder.appendChild(ui.error(err)); });
+    return holder;
+  }
 
   /* ---------------------------------------------------------------- stores */
   function storeForm(s, onSaved, onCancel) {
@@ -1578,7 +1618,7 @@
 
   DQ.route("#/alerts/settings", { title: "My alert settings", render: function (main, params, query, alive) {
     markNav("#/alerts");
-    main.appendChild(ui.page("My alert settings", { sub: "Alerts always appear in the app. Choose which ones are also emailed to you.",
+    main.appendChild(ui.page("My alert settings", { sub: "Alerts always appear in the app. Choose which ones also reach you by email or WhatsApp.",
       actions: [h("a", { class: "btn btn-ghost", href: "#/alerts" }, "Back to alerts")] }));
     var body = h("div", { class: "stack" }, ui.skeleton(5));
     main.appendChild(body);
@@ -1590,11 +1630,12 @@
         var email = checkbox("Email me alerts", s.email, hasEmail ? "Sent to " + DQ.me.person.email + "." : "Your account has no email address, so alerts stay in the app.");
         if (!hasEmail) email.input.disabled = true;
         var wa = checkbox("WhatsApp me alerts", s.whatsapp, s.whatsapp_note);
-        var kinds = checkGroup("Email me about", s.kinds.map(function (k) { return { value: k.kind, label: k.label }; }),
+        if (s.whatsapp_available === false) wa.input.disabled = true;
+        var kinds = checkGroup("Send me these alerts", s.kinds.map(function (k) { return { value: k.kind, label: k.label }; }),
           s.kinds.filter(function (k) { return s.muted.indexOf(k.kind) < 0; }).map(function (k) { return k.kind; }),
           "Only the alerts your role receives are listed. Unticked ones still show in the app.");
-        function sync() { kinds.el.disabled = !email.input.checked; }
-        email.input.addEventListener("change", sync); sync();
+        function sync() { kinds.el.disabled = !email.input.checked && !wa.input.checked; }
+        email.input.addEventListener("change", sync); wa.input.addEventListener("change", sync); sync();
         body.appendChild(h("div", { class: "card" }, form([
           email.el, wa.el, kinds.el
         ], "Save my settings", function () {

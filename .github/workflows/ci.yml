@@ -7,13 +7,18 @@
 # found in this project were silent and would never have surfaced from a run that
 # merely completed without raising.
 #
-# Three jobs:
+# Jobs:
 #   tests     the whole suite on SQLite: engine, planner interface, application server
 #   postgres  every application test again on PostgreSQL 16, the production database,
 #             then the migrations applied to an empty database and checked against
 #             the models
 #   smoke     the forecasting pipeline end to end, its run invariants, and the tests
 #             that need the exported bundle
+#   pitr-drill  the bundled stack's point-in-time restore: write, note a time T, write
+#             more, kill the database, restore to T, and only the rows before T are
+#             back (S3-compatible storage and the local-folder option)
+#   scale     100 stores x 10,000 products on PostgreSQL 16, 200 tills at once
+#             through the POS API; no sale lost or doubled (pushes and on demand)
 #
 # torch comes from the CPU-only index: the engine needs it for NHITS, and the
 # default PyPI wheel on Linux drags in several gigabytes of CUDA libraries.
@@ -237,3 +242,166 @@ jobs:
         with:
           name: pipeline-artifacts
           path: artifacts/
+
+  pitr-drill:
+    name: point-in-time restore drill (${{ matrix.storage }} storage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Acceptance scenario 19: restore to a chosen time, no more than 15 minutes of data
+    # missing. The real docker-compose.yml and deploy/restore-to-time.sh, against
+    # S3-compatible object storage and against the local-folder option, both with
+    # WAL-G's libsodium encryption on. archive_timeout is 60 s here (300 s in
+    # production) only to keep the job short. The script asserts; see its header.
+    strategy:
+      fail-fast: false
+      matrix:
+        storage: [s3, local]
+    env:
+      COMPOSE_FILE: docker-compose.yml:deploy/ci/pitr-drill.compose.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Settings for a throwaway stack
+        run: |
+          cat > .env <<ENV
+          DQ_DOMAIN=localhost
+          DQ_SECRET_KEY=ci-only-secret-key-that-is-long-enough-1234567890
+          DQ_PUBLIC_URL=https://localhost
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=ci-postgres-pw
+          POSTGRES_DB=dqstack
+          DQ_OWNER_PASSWORD=ci-owner-pw
+          DQ_APP_PASSWORD=ci-app-pw
+          WALG_LIBSODIUM_KEY=$(openssl rand -hex 32)
+          WALG_LIBSODIUM_KEY_TRANSFORM=hex
+          DQ_PITR_ARCHIVE_TIMEOUT=60
+          ENV
+          if [ "${{ matrix.storage }}" = s3 ]; then
+            {
+              echo "WALG_S3_PREFIX=s3://dq-drill/pitr"
+              echo "AWS_ENDPOINT=http://s3:9090"
+              echo "AWS_REGION=us-east-1"
+              echo "AWS_ACCESS_KEY_ID=ci-access-key"
+              echo "AWS_SECRET_ACCESS_KEY=ci-secret-key"
+              echo "AWS_S3_FORCE_PATH_STYLE=true"
+            } >> .env
+          else
+            echo "WALG_FILE_PREFIX=/walg/dqstack" >> .env
+          fi
+      - name: Object storage (S3-compatible)
+        if: matrix.storage == 's3'
+        env:
+          AWS_ACCESS_KEY_ID: ci-access-key
+          AWS_SECRET_ACCESS_KEY: ci-secret-key
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          docker compose up -d s3
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:9090/ && break; sleep 2; done
+          aws --endpoint-url http://127.0.0.1:9090 s3api head-bucket --bucket dq-drill \
+            || aws --endpoint-url http://127.0.0.1:9090 s3api create-bucket --bucket dq-drill
+      - name: The drill
+        run: bash deploy/ci/pitr-drill.sh
+      - name: Logs
+        if: always()
+        run: |
+          docker compose logs --no-color --tail 150 db pitr || true
+          docker ps -a
+      - name: Clean up
+        if: always()
+        run: docker compose down -v || true
+
+  scale:
+    name: scale (100 stores x 10,000 products, 200 tills)
+    # The specification's first-year scale. Slower than the rest, so it runs on pushes
+    # to the main branches and on demand, not on every pull request.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql+psycopg://dq:dq-ci-only@localhost:5432/dq_scale
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: PostgreSQL 16, set up as in docker-compose.yml
+        # The same base image and max_connections as the bundled database; a service
+        # container cannot take server settings, so it is started here.
+        run: |
+          docker run -d --name pg -p 5432:5432 \
+            -e POSTGRES_USER=dq -e POSTGRES_PASSWORD=dq-ci-only -e POSTGRES_DB=dq_scale \
+            postgres:16.15-bookworm@sha256:5264710be20f409750ac6dc4e5706dcef929c87e241605463f0f9aefa932a8d9 \
+            -c max_connections=200 -c shared_buffers=1GB
+          for i in $(seq 1 60); do docker exec pg pg_isready -U dq -d dq_scale && break; sleep 2; done
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.15.0+cpu"
+          pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
+
+      - name: Schema from the migrations
+        run: alembic -x url="$DATABASE_URL" upgrade head
+
+      - name: Seed 100 stores x 10,000 products (1,000,000 stock rows) in bulk
+        run: python scripts/scale_seed.py seed --stores 100 --products 10000 --targets scale-targets.json
+
+      - name: Start the application with 4 worker processes
+        run: |
+          nohup uvicorn dqstack.app.main:app --host 127.0.0.1 --port 8000 --workers 4 \
+            --log-level warning --no-access-log > uvicorn.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8000/api/health
+
+      - name: 200 tills at once, busy (about a bill a second each), p95 under 2 s
+        # Two tills per store, each store with its own key, three items a bill, a
+        # fifth of items from 20 best-sellers that both tills of a store sell at once.
+        run: |
+          python scripts/loadtest.py --base-url http://127.0.0.1:8000 --targets scale-targets.json \
+            --tills 200 --bills 25 --lines 3 --think-ms 1000 --hot-skus 20 --hot-share 0.2 \
+            --p95-ms 2000 --json paced.json
+
+      - name: 200 tills at once, flat out (no pause between bills; latency reported only)
+        run: |
+          python scripts/loadtest.py --base-url http://127.0.0.1:8000 --targets scale-targets.json \
+            --tills 200 --bills 25 --lines 3 --think-ms 0 --hot-skus 20 --hot-share 0.2 \
+            --p95-ms 600000 --json burst.json
+
+      - name: No sale lost or doubled; every stock row equals its ledger
+        run: python scripts/scale_seed.py verify --summary paced.json --summary burst.json --report scale-report.json
+
+      - name: Report
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY" || true
+          import json, pathlib
+          print("### Scale: 100 stores x 10,000 products, 200 tills\n")
+          print("| run | bills | lines | bills/s | p50 ms | p95 ms | p99 ms | errors |")
+          print("|---|---|---|---|---|---|---|---|")
+          for name in ("paced", "burst"):
+              p = pathlib.Path(f"{name}.json")
+              if p.exists():
+                  s = json.loads(p.read_text())
+                  l = s["latency_ms"]
+                  print(f"| {name} | {s['bills_sent']} | {s['lines_sent']} | {s['bills_per_second']} "
+                        f"| {l['p50']} | {l['p95']} | {l['p99']} | {s['errors']} |")
+          r = pathlib.Path("scale-report.json")
+          if r.exists():
+              r = json.loads(r.read_text())
+              print(f"\nstock rows: {r['stock_rows']}, not matching the ledger: "
+                    f"{r['stock_rows_not_matching_ledger']}; failures: {r['failures'] or 'none'}")
+          PY
+          cat paced.json burst.json 2>/dev/null || true
+          tail -50 uvicorn.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scale-results
+          path: |
+            paced.json
+            burst.json
+            scale-report.json
+            uvicorn.log

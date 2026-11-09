@@ -199,3 +199,14 @@ a.tile:hover { background: var(--bg-raised); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ---------------------------------------------------------------- sign-in extras
+   Google / Microsoft buttons, the six-digit code box, and the "Send a new code" link
+   (start.js, sign-in and forgot-password screens; Settings -> Company sign-in card). */
+.sso { margin-top: 16px; display: grid; gap: 8px; }
+.sso-or { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; font-size: 13px; color: var(--text-secondary); }
+.sso-or::before, .sso-or::after { content: ""; flex: 1; height: 1px; background: var(--border-subtle); }
+.sso-btn { text-decoration: none; }
+.code-input { font-size: 22px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
+.link-btn { padding: 0; border: 0; background: none; color: var(--ui-accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.link-btn:disabled { opacity: .55; cursor: default; text-decoration: none; }

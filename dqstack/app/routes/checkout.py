@@ -9,6 +9,8 @@
     POST /api/checkout/heartbeat             a till reports how many bills it holds
     GET  /api/checkout/bills                 find a bill (number, date, amount)
     GET  /api/checkout/bills/{id}            one bill, its receipt and a WhatsApp link
+    POST /api/checkout/bills/{id}/receipt    send the receipt by WhatsApp or SMS
+    GET  /api/checkout/receipt-channels      which of those this server can send
     GET  /api/checkout/z-report?store_id&day the end-of-day report
 """
 
@@ -224,10 +226,13 @@ def heartbeat(body: HeartbeatIn, c: Ctx = Depends(ctx), db: Session = Depends(ge
 @router.get("/bills")
 def find_bills(store_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db),
                day: date | None = None, number: str | None = Query(None, max_length=64),
-               amount_paise: int | None = None, limit: int = Query(50, ge=1, le=500)):
+               amount_paise: int | None = None, limit: int = Query(50, ge=1, le=500),
+               mine: bool = False):
     store = store_or_404(db, c, store_id)
     c.require("data.read", store.id)
     q = select(Bill).where(Bill.company_id == c.company_id, Bill.store_id == store.id)
+    if mine:
+        q = q.where(Bill.cashier_id == c.person.id)
     if day:
         q = q.where(Bill.business_day == day)
     if number:
@@ -254,10 +259,67 @@ def get_bill(bill_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db),
     return out
 
 
+@router.get("/receipt-channels")
+def receipt_channels(c: Ctx = Depends(ctx)):
+    """How this server sends receipts: WhatsApp by the server ("api") or by a link the
+    cashier opens ("link"); SMS only when a text provider is set up."""
+    from .. import sms, whatsapp
+    return {"whatsapp": "api" if whatsapp.configured() else "link", "sms": sms.configured()}
+
+
+class ReceiptIn(BaseModel):
+    channel: str = Field(max_length=16)          # whatsapp | sms
+    phone: str = Field(max_length=20)
+
+
+@router.post("/bills/{bill_id}/receipt")
+def send_receipt(bill_id: str, body: ReceiptIn, c: Ctx = Depends(ctx),
+                 db: Session = Depends(get_db)):
+    """Send a paid bill's receipt to the customer's phone. WhatsApp goes from the server
+    when the WhatsApp Business API is set up, else the answer is a wa.me link; SMS needs
+    a text provider. Limited per store, so a till cannot be used to send texts in bulk."""
+    from .. import audit, sms, whatsapp
+    from ..ratelimit import limiter
+    b = get_or_404(db, c, Bill, bill_id, what="That bill")
+    c.require("sales.bill", b.store_id)
+    if b.state not in ("paid", "refund"):
+        raise HTTPException(409, "Only a paid bill or a refund has a receipt to send.")
+    if body.channel not in ("whatsapp", "sms"):
+        raise HTTPException(422, "Send the receipt by whatsapp or sms.")
+    number = sms.normalise(body.phone)
+    if number is None:
+        raise HTTPException(422, "That phone number does not look right. Enter the customer's "
+                                 "10-digit mobile number.")
+    text, params = K.receipt_message(db, b)
+    if body.channel == "whatsapp" and not whatsapp.configured():
+        return {"sent_by": None,
+                "whatsapp_link": f"https://wa.me/{number.lstrip('+')}?text={quote(text)}"}
+    if body.channel == "sms" and not sms.configured():
+        raise HTTPException(409, "Text messages are not set up on this server. Send the receipt "
+                                 "on WhatsApp, or print it.")
+    limiter.check(f"receipt:{b.store_id}", limit=60, window_s=600)
+    try:
+        if body.channel == "whatsapp":
+            whatsapp.send(number, text, "receipt", params)
+        else:
+            sms.send(number, text)
+    except (whatsapp.WhatsAppError, sms.SmsError) as e:
+        raise HTTPException(502, str(e)) from None
+    audit.log(db, c, "bill.receipt_sent", "bill", b.id, store_id=b.store_id,
+              after={"channel": body.channel, "to": "…" + number[-4:]})
+    db.commit()
+    return {"sent_by": body.channel, "sent_to": number}
+
+
 @router.get("/z-report")
 def z_report(store_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db),
-             day: date | None = None):
+             day: date | None = None, mine: bool = False):
+    """The store's day, or with mine=true the signed-in cashier's own shift. A cashier
+    sees only their own: the store's takings are for whoever closes the day."""
     store = store_or_404(db, c, store_id)
     c.require("data.read", store.id)
+    if c.role == "cashier":
+        mine = True
     from ..sales import local_today, tz_of
-    return K.z_report(db, c.company_id, store, day or local_today(tz_of(db, c.company_id)))
+    return K.z_report(db, c.company_id, store, day or local_today(tz_of(db, c.company_id)),
+                      cashier_id=c.person.id if mine else None)

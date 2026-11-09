@@ -33,7 +33,7 @@ SQLite, cookies without HTTPS, or a non-https address. `manage check` says which
 
 ```bash
 docker compose up -d --build
-docker compose ps                         # db, app, worker, caddy, backup: running
+docker compose ps                         # db, app, worker, caddy, pitr, backup: running
 docker compose run --rm app manage check  # every line should read well
 ```
 
@@ -65,32 +65,140 @@ the app with the app role's.
 
 ## 5. Backups and restores
 
-The `backup` service writes a compressed dump every night at about 02:30 to the
-`backups` volume and keeps 30 days. Copy that volume off the server every day (for
-example to object storage in another region).
+Two independent copies, made by different tools in different formats, so one fault
+cannot spoil both:
 
-**Restore drill (do it every quarter, section 15):**
+| | What | Restore to | Most data lost |
+|---|---|---|---|
+| `db` + `pitr` (WAL-G) | Every change, as PostgreSQL's write-ahead log (WAL), shipped to backup storage at least every 5 minutes; a base backup every night at 01:30 (a full one weekly, changes-only in between); kept 8 days | any moment in the last 7 days | about 5 minutes (`DQ_PITR_ARCHIVE_TIMEOUT=300`) |
+| `backup` (pg_dump) | A compressed dump every night at about 02:30 in the `backups` volume; kept 30 days | that night | a day |
+
+The specification's targets are "at most 15 minutes of server-side data" lost and a
+restore to a chosen time "within 4 hours". Tills and phones lose nothing either way:
+their unsent work stays on the device until the server accepts it.
+
+### Where backups go
+
+Set these in `.env` (`.env.example` explains each):
+
+* **Object storage, somewhere other than this server.** This is the real backup.
+  `WALG_S3_PREFIX=s3://bucket/dqstack`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`; for a non-AWS S3-compatible store also `AWS_ENDPOINT` and
+  usually `AWS_S3_FORCE_PATH_STYLE=true`. Use a bucket in another region or with
+  another provider, give the key access to that bucket only, and turn on the
+  bucket's versioning or object lock if it has them, so a stolen server key cannot
+  delete the history.
+* **The local folder** (`WALG_FILE_PREFIX=/walg/dqstack`, the default when no bucket
+  is set) puts backups in the `walg` volume on this same server. It undoes mistakes
+  (a dropped table, a bad import) but **is not a backup**: a lost disk or server takes
+  it too. For a small install only, and copy the volume off the server daily.
+* **Encryption.** `WALG_LIBSODIUM_KEY` (`openssl rand -hex 32`, with
+  `WALG_LIBSODIUM_KEY_TRANSFORM=hex`) encrypts every file on the server before it is
+  sent. Keep the key in a password manager as well as in `.env`: without it the
+  backups cannot be read by anyone. Object storage can also encrypt at rest
+  (`WALG_S3_SSE=AES256`, or `aws:kms` with `WALG_S3_SSE_KMS_ID`). Backups sent to
+  object storage with neither are reported as a problem.
+
+Pinned versions: PostgreSQL 16.15 (Debian image, by digest) and WAL-G 3.0.9, whose
+download is checked against its published SHA-256 when the image is built
+(`deploy/postgres/Dockerfile`).
+
+**Moving an existing install.** Earlier versions of this setup ran
+`postgres:16-alpine`. Do not point the new image at that data volume: the two sort
+text differently, which leaves indexes on text columns out of order. Take a dump
+with the old setup, start the new one on an empty volume, and restore the dump into
+it (the pg_dump steps below).
+
+### Is it working?
+
+```bash
+docker compose ps pitr                        # "healthy"
+docker compose exec pitr dq-pitr check        # storage, encryption, backups, WAL chain; ends OK
+```
+
+`dq-pitr check` reports a problem when WAL archiving is failing (WAL then piles up on
+the database server's disk until it fills), when the newest base backup is more than
+26 hours old, or when there is no storage or no encryption. The `pitr` service runs
+the same check every 10 minutes and turns unhealthy on a problem; point your
+monitoring at `docker compose ps` or its logs.
+
+### Restore to a chosen time
+
+```bash
+bash deploy/restore-to-time.sh "2026-11-09 14:30:00+05:30"
+```
+
+Run it on the server from the DQ-Stack folder. Give the time with its offset
+(`+05:30` for India, `Z` for UTC). It:
+
+1. makes a fresh volume and fetches into it the newest base backup that finished
+   before that time;
+2. starts a private PostgreSQL on it (no ports, archiving off) that replays the WAL
+   up to that time and pauses there, read-only, and prints what it holds (bills, the
+   last stock movement, the last activity) and how long fetch and replay took;
+3. asks you to type `yes`. Until you do, **nothing in use is touched**: the live
+   database, its volume and the backup storage are as they were. Look first if you
+   like: `docker exec -it dqstack_pgdata_restore_...-check psql -U postgres -d dqstack`.
+4. On `yes` it stops app, worker, pitr, backup and db, points `DQ_PGDATA_VOLUME` in
+   `.env` at the restored volume (the old `.env` is kept beside it), lets the
+   database finish recovery and open on a new timeline, takes a fresh base backup,
+   and starts everything again.
+
+The old volume is kept. To go back, set `DQ_PGDATA_VOLUME` to the old name it
+printed and run `docker compose up -d` (anything written since the switch is then
+lost). Remove the old volume only when sure: `docker volume rm <name>`.
+
+If you answer anything but `yes`, it prints how to switch later
+(`bash deploy/restore-to-time.sh --switch-to <volume>`) or throw the restore away.
+
+If it says the recovery target was not reached, the archive does not yet hold WAL up
+to that time (it is shipped within 5 minutes). If the old database still runs, ship
+it now with `docker compose exec db psql -U postgres -c "SELECT pg_switch_wal()"`
+and try again a minute later, or choose an earlier time.
+
+### Restore from a nightly dump
+
+The independent copy, for when the WAL-G backups themselves are unusable:
 
 ```bash
 docker compose exec backup ls -1 /backups                       # pick a dump
-docker compose stop app worker
+docker compose stop app worker pitr
 docker compose exec db dropdb -U postgres dqstack
 docker compose exec db createdb -U postgres -O dqstack_owner dqstack
 docker compose exec backup pg_restore -h db -U postgres -d dqstack --no-owner \
   --role=dqstack_owner /backups/dqstack-YYYY-MM-DD-HHMM.dump
 docker compose run --rm migrate                                 # no-op if current
-docker compose start app worker
+docker compose start app worker pitr
+docker compose exec pitr dq-pitr backup                         # a base backup of it
 docker compose run --rm app manage check
 ```
 
-Record the time it took. The target is service back within 4 hours.
+Copy the `backups` volume off the server every day as well (for example to the same
+object storage, under another prefix).
 
-**What this does not yet meet.** Nightly dumps lose up to a day of data in the worst
-case. The specification's target is at most 15 minutes lost and restore to any point
-in the last 7 days. That needs continuous archiving of PostgreSQL's write-ahead log:
-use a managed PostgreSQL with point-in-time recovery (RDS, Azure Database for
-PostgreSQL and Cloud SQL all offer it), or add WAL-G to this setup. Tills and phones
-lose nothing either way: their unsent work stays on the device until it is accepted.
+### The quarterly drill (section 15)
+
+Every quarter, and after any change to the server or the backup settings:
+
+1. Pick a time about an hour ago and note what you did around then (a bill, a stock
+   count) so you can recognise it.
+2. Run `bash deploy/restore-to-time.sh "<that time>+05:30"` and answer **no** at the
+   question. The live system keeps running throughout.
+3. Check the printed summary and look inside the restored copy: your change from
+   just before the time is there, nothing from after it.
+4. Record the fetch and replay times it printed, and the database size
+   (`docker compose exec db psql -U postgres -c "SELECT pg_size_pretty(pg_database_size('dqstack'))"`).
+   The target is the service back within 4 hours; if the drill takes more than about
+   an hour, plan before the database grows further (a faster store, more frequent
+   full backups with `WALG_DELTA_MAX_STEPS`).
+5. Throw the restore away with the two commands it printed.
+6. Once a year, also restore a nightly dump into a scratch database the same way.
+
+CI runs the same drill on every push (job `pitr-drill`): it writes rows, notes a time
+T, writes more, kills the database, restores to T with this script, and fails unless
+exactly the rows from before T are back, the old volume is untouched, the last write
+reached storage within `archive_timeout`, and archiving carries on afterwards. That
+proves the mechanism; only your drill proves your storage, your key and your timing.
 
 ## 6. Upgrades
 
@@ -138,5 +246,116 @@ company's training by category is the next step and is not built yet.
 * If a store will use Checkout as its legal billing system, confirm the receipt
   format with a chartered accountant (GST invoice rules). Until then Checkout is a
   stock register beside the existing billing system.
-* WhatsApp sending is by link from the user's own phone; automatic WhatsApp alerts
-  need a WhatsApp Business API account.
+* WhatsApp works by link from the user's own phone until a WhatsApp Business API
+  account is set up (section 11); then orders, alerts and receipts go from the server.
+
+## 11. WhatsApp and text messages (optional)
+
+Without these settings nothing changes: WhatsApp works by link (the person's own
+phone opens WhatsApp with the order or receipt filled in and they press send),
+alerts come in the app and by email, and the till's "Send by SMS" button says text
+messages are not set up.
+
+### WhatsApp Business Cloud API
+
+With it, the server sends purchase orders (the PDF itself), alerts to people who
+chose WhatsApp, and receipts from the till.
+
+1. In Meta Business Manager, create a WhatsApp Business account and add the
+   business phone number (it cannot stay registered in the WhatsApp phone app).
+2. Make a system user with the `whatsapp_business_messaging` permission and a
+   permanent access token.
+3. Set in `.env`:
+
+   | Variable | What |
+   |---|---|
+   | `DQ_WHATSAPP_TOKEN` | the permanent token |
+   | `DQ_WHATSAPP_PHONE_NUMBER_ID` | the number's id from WhatsApp Manager (not the number) |
+   | `DQ_WHATSAPP_API_VERSION` | optional, default `v21.0` |
+   | `DQ_WHATSAPP_TEMPLATE_PO` | approved template for purchase orders |
+   | `DQ_WHATSAPP_TEMPLATE_ALERT` | approved template for alerts |
+   | `DQ_WHATSAPP_TEMPLATE_RECEIPT` | approved template for receipts |
+   | `DQ_WHATSAPP_LANGUAGE` | the templates' language code, default `en` |
+
+4. Restart (`docker compose up -d`).
+
+**Templates must be approved by Meta before use.** WhatsApp delivers a message the
+business starts only through an approved template; plain text is delivered only
+within 24 hours of the other person's last message to the business. Leave a
+template name empty and that message goes as plain text (a PO as a PDF with a
+caption), which in practice reaches only suppliers or customers who wrote recently.
+Create the templates in WhatsApp Manager (category Utility) with exactly these
+blanks, in this order; wording is yours:
+
+| Template | Header | Body blanks | Example body |
+|---|---|---|---|
+| PO | Document | `{{1}}` order number, `{{2}}` company and store, `{{3}}` total | New purchase order {{1}} from {{2}}. Total {{3}}. The order is attached. |
+| Alert | none | `{{1}}` person's name, `{{2}}` the alert (several are joined with semicolons) | Hello {{1}}, DQ-Stack alert: {{2}} |
+| Receipt | none | `{{1}}` store (with GSTIN), `{{2}}` bill number, `{{3}}` date and time, `{{4}}` items, `{{5}}` total and payment | Thank you for shopping at {{1}}. Bill {{2}} on {{3}}: {{4}}. Total {{5}}. |
+
+A refusal from WhatsApp (expired token, unapproved template, number not on
+WhatsApp, outside the 24-hour window) is shown on screen in plain words; for alerts,
+which are sent by the worker, it is written to the log (`docker compose logs
+worker`) and the alert still shows in the app. Each alert is sent once; several
+raised together reach a person as one message. People need a mobile number on their
+account for WhatsApp alerts; the alert settings screen says when one is missing.
+
+Receipts are limited to 60 a store per 10 minutes. Meta charges per conversation;
+see its current price list for India.
+
+### Text messages (SMS)
+
+Used for receipts. Set `DQ_SMS_PROVIDER`:
+
+* `twilio` with `DQ_TWILIO_ACCOUNT_SID`, `DQ_TWILIO_AUTH_TOKEN` and `DQ_SMS_FROM`;
+* `webhook` with `DQ_SMS_WEBHOOK_URL` (https) and optionally `DQ_SMS_WEBHOOK_TOKEN`,
+  for an Indian gateway (MSG91, Gupshup, Exotel ...) behind a small adapter that
+  takes `{"to": "+9198...", "text": "..."}` as JSON with a bearer token.
+
+**Indian SMS needs DLT registration before anything is delivered.** Register the
+business as a principal entity on a DLT portal (Jio, Vodafone Idea, Airtel or BSNL),
+register a sender id (header), and register the receipt text as a transactional
+content template, with its variable parts marked, before turning SMS on. Messages
+that do not match a registered template are dropped by the operators without an
+error to the sender. Amounts are written "Rs." so a receipt stays in the plain SMS
+alphabet.
+
+## 12. Sign-in codes, and Google and Microsoft sign-in (optional)
+
+**Codes by text message.** "Forgot password" can send a 6-digit code to the phone
+on the person's account, and a company can ask for a code after the password
+(Settings, Company, *Sign-in security*: off, for Owners and Admins, or for everyone).
+Codes go by text message through the SMS provider in section 11 (`DQ_SMS_PROVIDER`
+and its variables, documented in `dqstack/app/sms.py`); without one, a production
+server does not offer reset by phone and sends sign-in codes by email instead. In
+India, register the two code messages as DLT templates as well as the receipt:
+
+* `Your DQ-Stack sign-in code is {#var#}. It works for 10 minutes. Do not share it with anyone.`
+* `Your DQ-Stack password reset code is {#var#}. It works for 10 minutes. If you did not ask for it, ignore this message.`
+
+A code works for 10 minutes and five tries; only a keyed hash of it is stored.
+
+**Google and Microsoft.** Each sign-in button appears only when the server has that
+provider's keys. It signs in people who already have an account here with the same
+email; it never creates a company or an account. Owners and Admins can turn it off
+for their company (Settings, Company). A Google or Microsoft sign-in counts as
+strong, so the company's extra code is not asked for.
+
+| Variable | What |
+|---|---|
+| `DQ_GOOGLE_CLIENT_ID`, `DQ_GOOGLE_CLIENT_SECRET` | Google Cloud console, APIs and services, Credentials: an OAuth client of type *Web application* |
+| `DQ_MICROSOFT_CLIENT_ID`, `DQ_MICROSOFT_CLIENT_SECRET` | Microsoft Entra admin centre, App registrations: the application (client) id and a client secret |
+| `DQ_MICROSOFT_TENANT` | optional. `organizations` (default: any work or school account), `common` (also personal accounts), `consumers`, or one tenant id (a GUID) to admit only that organisation |
+
+Register this redirect address with each provider (Google: *Authorised redirect
+URIs*; Microsoft: *Authentication*, platform *Web*):
+
+    https://YOUR-DOMAIN/api/auth/oidc/google/callback
+    https://YOUR-DOMAIN/api/auth/oidc/microsoft/callback
+
+It is built from `DQ_PUBLIC_URL`, so that must be the exact address people use.
+Google accounts must have a verified email. For Microsoft the email is taken from
+the `email` claim or, failing that, `preferred_username`; with a multi-tenant
+setting any Microsoft organisation can present any address there, so for a client
+on Microsoft 365 prefer setting `DQ_MICROSOFT_TENANT` to that client's tenant id.
+Restart after changing these (`docker compose up -d`).

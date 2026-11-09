@@ -1,0 +1,10 @@
+# CI only (.github/workflows/ci.yml, job pitr-drill): an S3-compatible object store
+# for the point-in-time restore drill, added with
+#   COMPOSE_FILE=docker-compose.yml:deploy/ci/pitr-drill.compose.yml
+# The drill points WALG_S3_PREFIX at s3://dq-drill/... and AWS_ENDPOINT at http://s3:9090.
+services:
+  s3:
+    image: adobe/s3mock:5.2.2@sha256:e7c36014dcf4c7f0f6bec9de888477d1d9b8f55eceb7d9c1186f70d7aadf81ca
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: dq-drill
+    ports: ["127.0.0.1:9090:9090"]

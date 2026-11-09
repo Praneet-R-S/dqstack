@@ -240,6 +240,7 @@ def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
     if seen is None:
         db.add(bill)
     db.flush()
+    ledger.lock_rows(db, c.company_id, store.id, [ln.product_id for ln in bill.lines])
     for i, ln in enumerate(bill.lines):
         if ln.product_id is None:
             if ln.unmapped_barcode:
@@ -400,6 +401,7 @@ def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True
     bill.payments.append(BillPayment(company_id=c.company_id, method=method, amount_paise=-total))
     db.add(bill)
     db.flush()
+    ledger.lock_rows(db, c.company_id, store.id, [l.product_id for l in bill.lines])
     for i, l in enumerate(bill.lines):
         ledger.post(db, company_id=c.company_id, store_id=store.id, product_id=l.product_id,
                     qty_milli=l.qty_milli, type="customer_return", reason=reason,
@@ -436,17 +438,20 @@ def heartbeat(db: Session, c, store: Store, device_id: str, pending: int,
     return d
 
 
-def z_report(db: Session, company_id: str, store: Store, day: date) -> dict:
-    """End of day: bills, totals by payment method, refunds, voids, cash expected."""
+def z_report(db: Session, company_id: str, store: Store, day: date,
+             cashier_id: str | None = None) -> dict:
+    """End of day: bills, totals by payment method, refunds, voids, cash expected.
+    With cashier_id, only that cashier's bills: their shift, for handing over the cash."""
+    mine = (Bill.cashier_id == cashier_id) if cashier_id else True
     bills = list(db.scalars(select(Bill).where(Bill.store_id == store.id,
-                                               Bill.business_day == day)))
+                                               Bill.business_day == day, mine)))
     paid = [b for b in bills if b.state == "paid"]
     refunds = [b for b in bills if b.state == "refund"]
     tz = _tz(db, company_id)
     start = datetime.combine(day, time(0, 0), tzinfo=tz).astimezone(timezone.utc)
     voids = db.scalar(select(func.count()).select_from(Bill).where(
         Bill.store_id == store.id, Bill.state == "voided", Bill.voided_at >= start,
-        Bill.voided_at < start + timedelta(days=1))) or 0
+        Bill.voided_at < start + timedelta(days=1), mine)) or 0
     by_method = {m: 0 for m in METHODS}
     for b in paid + refunds:
         for p in b.payments:
@@ -524,3 +529,38 @@ def receipt_text(db: Session, bill: Bill, width: int = 32) -> str:
         out.append("Change" + ch.rjust(width - 6))
     out.append("Thank you".center(width))
     return "\n".join(out)
+
+
+def receipt_message(db: Session, bill: Bill) -> tuple[str, list[str]]:
+    """The receipt as a phone message (WhatsApp or SMS): the text, and the same facts as
+    the parameters of the approved WhatsApp receipt template (see whatsapp.py). Amounts
+    are written "Rs." because a rupee sign turns an SMS into a shorter Unicode one."""
+    co = db.get(Company, bill.company_id)
+    store = db.get(Store, bill.store_id)
+    names = {p.id: p.name for p in db.scalars(select(Product).where(
+        Product.id.in_([l.product_id for l in bill.lines if l.product_id])))}
+    tz = _tz(db, bill.company_id)
+    at = _aware(bill.paid_at or bill.created_at or utcnow()).astimezone(tz)
+    zone = "IST" if tz.key == "Asia/Kolkata" else tz.key
+    when = f"{at:%d %b %Y, %I:%M %p} {zone}"
+
+    def rs(paise: int) -> str:
+        return f"Rs. {abs(paise) / 100:.2f}"
+
+    items = []
+    for l in bill.lines:
+        name = names.get(l.product_id) or l.description or "Item"
+        amount = l.qty_milli * l.unit_price_paise // 1000 - l.discount_paise
+        items.append(f"{name} x {l.qty_milli / 1000:g} = {rs(amount)}")
+    label = "Refund" if bill.state == "refund" else "Total"
+    paid_by = ", ".join(p.method.upper() for p in bill.payments) or "-"
+    shop = store.name if store.name.strip().lower() == co.name.strip().lower() \
+        else f"{co.name}, {store.name}"
+    head = [shop] + ([f"GSTIN {co.gstin}"] if co.gstin else [])
+    text = "\n".join(head + [f"Bill {bill.bill_number}", when, ""] + items + [
+        "", f"{label} {rs(bill.total_paise)}" + (f" (incl. GST {rs(bill.tax_paise)})"
+                                                 if bill.tax_paise else ""),
+        f"Paid by {paid_by}", "Thank you"])
+    params = [shop + (f" (GSTIN {co.gstin})" if co.gstin else ""), bill.bill_number, when,
+              "; ".join(items) or "-", f"{rs(bill.total_paise)} by {paid_by}"]
+    return text, params

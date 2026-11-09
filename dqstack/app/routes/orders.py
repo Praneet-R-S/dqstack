@@ -302,9 +302,10 @@ class SendIn(BaseModel):
 
 @router.post("/{order_id}/send")
 def send_order(order_id: str, body: SendIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
-    """By email with the PDF attached, or as a WhatsApp message the purchaser sends
-    from their own phone (a link that opens WhatsApp with the order filled in; a
-    WhatsApp Business API account can replace this later)."""
+    """By email with the PDF attached, or by WhatsApp: with the WhatsApp Business API
+    set up (whatsapp.py) the server sends the PDF to the supplier and the answer has
+    sent_by "whatsapp"; without it the answer has a whatsapp_link that opens WhatsApp
+    on the purchaser's phone with the order filled in."""
     from urllib.parse import quote
 
     from ..formats import rupees
@@ -332,12 +333,30 @@ def send_order(order_id: str, body: SendIn, c: Ctx = Depends(ctx), db: Session =
             raise HTTPException(502, str(e)) from None
         out = {"sent_to": to}
     elif body.channel == "whatsapp":
-        digits = "".join(ch for ch in (body.to or (sup.phone if sup else "") or "") if ch.isdigit())
-        if len(digits) == 10:
-            digits = "91" + digits
-        if len(digits) < 11:
+        from .. import whatsapp as wa
+        from ..models import Company
+        from ..sms import normalise
+        raw = (body.to or (sup.phone if sup else "") or "").strip()
+        number = normalise(raw)
+        if not raw:
             raise HTTPException(422, "This supplier has no phone number. Add one, or send by email.")
-        out = {"whatsapp_link": f"https://wa.me/{digits}?text={quote(summary)}"}
+        if number is None:
+            raise HTTPException(422, f"{raw} is not a mobile number WhatsApp can be sent to. "
+                                     "Check it on the supplier's page.")
+        if wa.configured():
+            co = db.get(Company, po.company_id)
+            try:
+                wa.send_document(number, render_pdf(db, po), f"{po.number}.pdf",
+                                 summary, kind="po",
+                                 params=[po.number, f"{co.name}, {d['store']}",
+                                         rupees(d["total_paise"], decimals=False)
+                                         + " excluding GST"])
+            except wa.WhatsAppError as e:
+                raise HTTPException(502, str(e)) from None
+            out = {"sent_to": number, "sent_by": "whatsapp",
+                   "supplier": sup.name if sup else None}
+        else:
+            out = {"whatsapp_link": f"https://wa.me/{number.lstrip('+')}?text={quote(summary)}"}
     else:
         raise HTTPException(422, "Channel must be email or whatsapp.")
     if po.status == "approved":
@@ -361,6 +380,8 @@ def get_order(order_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db
         Person.id.in_([x for x in (po.created_by, po.approved_by) if x])))}
     out["created_by"] = names.get(po.created_by)
     out["approved_by"] = names.get(po.approved_by)
+    from .. import whatsapp
+    out["whatsapp_api"] = whatsapp.configured()   # the server sends, or a link opens
     return out
 
 

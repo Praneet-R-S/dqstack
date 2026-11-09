@@ -174,3 +174,15 @@
 .b-prodcell { min-width: 150px; }
 .b-why { min-width: 200px; font-size: 13px; color: var(--text-secondary); }
 .b-grid-top > *, .b-section { min-width: 0; }
+
+/* ---------------------------------------------------------------- report downloads */
+.b-dl-card { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.b-dl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.b-dl-quick { gap: 8px; flex-wrap: wrap; }
+.b-report-tiles .b-report-tile { display: flex; flex-direction: column; gap: 8px; }
+.b-report-link { color: inherit; text-decoration: none; }
+.b-report-link:hover, .b-report-link:focus-visible { text-decoration: underline; }
+.b-report-dl { margin-top: auto; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .b-dl-grid { grid-template-columns: minmax(0, 1fr); }
+}

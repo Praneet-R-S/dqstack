@@ -381,14 +381,28 @@ def _cell(v, kind):
     return v
 
 
-def to_xlsx(rep: Report) -> bytes:
-    from openpyxl import Workbook
+def _sheet_name(title: str, used: set[str]) -> str:
+    """Excel sheet names: at most 31 characters, none of the characters Excel forbids,
+    and unique."""
+    base = "".join(" " if ch in "[]:*?/" + chr(92) else ch for ch in title).strip()[:31] or "Report"
+    name, n = base, 2
+    while name.lower() in used:
+        suffix = f" ({n})"
+        name, n = base[:31 - len(suffix)] + suffix, n + 1
+    used.add(name.lower())
+    return name
+
+
+def _fill_sheet(ws, rep: Report, heading: str | None = None) -> None:
     from openpyxl.styles import Font
-    wb = Workbook()
-    ws = wb.active
-    ws.title = rep["title"][:31]
+    first = 1
+    if heading:
+        ws.append([heading])
+        ws[1][0].font = Font(bold=True, size=12)
+        ws.append([])
+        first = 3
     ws.append([c["label"] or "" for c in rep["columns"]])
-    for cell in ws[1]:
+    for cell in ws[first]:
         cell.font = Font(bold=True)
     for r in rep["rows"]:
         ws.append([_cell(r.get(c["key"]), c["kind"]) for c in rep["columns"]])
@@ -398,17 +412,70 @@ def to_xlsx(rep: Report) -> bytes:
         for cell in ws[ws.max_row]:
             cell.font = Font(bold=True)
     for i, c in enumerate(rep["columns"], start=1):
-        ws.column_dimensions[ws.cell(1, i).column_letter].width = max(12, len(c["label"]) + 4)
+        ws.column_dimensions[ws.cell(first, i).column_letter].width = max(12, len(c["label"] or "") + 4)
         fmt = {"money": "#,##,##0.00", "qty": "#,##0.###", "pct": "0.0%"}.get(c["kind"])
         if fmt:
-            for row in ws.iter_rows(min_row=2, min_col=i, max_col=i):
+            for row in ws.iter_rows(min_row=first + 1, min_col=i, max_col=i):
                 row[0].number_format = fmt
+    ws.freeze_panes = ws.cell(first + 1, 1)
     for n in rep["notes"]:
         ws.append([])
         ws.append([n])
+
+
+def to_xlsx(rep: Report) -> bytes:
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = _sheet_name(rep["title"], set())
+    _fill_sheet(ws, rep)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
+
+
+def to_xlsx_many(reps: list[Report], period: str) -> bytes:
+    """Every report in one workbook, a sheet each, with a contents sheet first."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    toc = wb.active
+    toc.title = "Contents"
+    toc.append(["DQ-Stack reports"])
+    toc[1][0].font = Font(bold=True, size=14)
+    toc.append([period])
+    toc.append([])
+    toc.append(["Report", "Rows"])
+    for cell in toc[4]:
+        cell.font = Font(bold=True)
+    toc.column_dimensions["A"].width = 36
+    used = {"contents"}
+    for rep in reps:
+        name = _sheet_name(rep["title"], used)
+        _fill_sheet(wb.create_sheet(name), rep, heading=f"{rep['title']} · {period}")
+        toc.append([rep["title"], len(rep["rows"])])
+        toc.cell(toc.max_row, 1).hyperlink = f"#'{name}'!A1"
+        toc.cell(toc.max_row, 1).style = "Hyperlink"
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def to_csv(rep: Report) -> bytes:
+    """Plain CSV in rupees and units, UTF-8 with a byte-order mark so Excel opens the
+    rupee sign and Indian names correctly."""
+    import csv
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([c["label"] or "" for c in rep["columns"]])
+    for r in rep["rows"]:
+        w.writerow(["" if (v := _cell(r.get(c["key"]), c["kind"])) is None else v
+                    for c in rep["columns"]])
+    if rep["totals"]:
+        w.writerow([("Total" if i == 0 else ("" if (v := _cell(rep["totals"].get(c["key"]),
+                                                                 c["kind"])) is None else v))
+                    for i, c in enumerate(rep["columns"])])
+    return buf.getvalue().encode("utf-8-sig")
 
 
 def to_pdf(rep: Report, subtitle: str = "") -> bytes:

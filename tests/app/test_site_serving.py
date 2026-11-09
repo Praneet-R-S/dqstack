@@ -34,3 +34,11 @@ def test_unknown_addresses_get_the_designed_not_found_page(client):
 
 def test_pages_cannot_escape_the_site_folder(client):
     assert client.get("/..%2Fdqstack%2Fapp%2Fconfig.html").status_code == 404
+
+
+def test_app_files_are_revalidated_so_updates_reach_every_device(client):
+    for path in ("/app/js/core.js", "/app/css/app.css", "/app/"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers.get("cache-control") == "no-cache", path
+    assert client.get("/api/health").headers.get("cache-control") == "no-store"

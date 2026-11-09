@@ -249,3 +249,7 @@ a.c-list-item:hover, .c-list-btn:hover { background: var(--bg-hover); }
   body { background: #fff; color: #000; }
   #c-print { display: block !important; margin: 0; font: 12px/1.4 "Geist Mono", ui-monospace, monospace; color: #000; white-space: pre; }
 }
+
+/* ---------------------------------------------------------------- disagreeing counts */
+.c-all-counts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.c-all-counts li { padding: 6px 10px; border-radius: 8px; background: var(--bg-inset); }

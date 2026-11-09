@@ -63,13 +63,33 @@ class SecurityHeaders(BaseHTTPMiddleware):
         if settings.cookie_secure:
             resp.headers.setdefault("Strict-Transport-Security",
                                     "max-age=31536000; includeSubDomains")
-        if request.url.path.startswith("/api/"):
+        path = request.url.path
+        if path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
+        elif path.startswith(("/app", "/planner", "/platform")) or path.endswith((".html", ".js", ".css"))                 or path == "/":
+            # The app's own files: the browser keeps them but checks with the server (by
+            # ETag) on every load, so an update reaches every till on its next page load.
+            resp.headers.setdefault("Cache-Control", "no-cache")
         resp.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - t0) * 1000:.1f}"
         return resp
 
 
+def _app_logging() -> None:
+    """The app's own messages (warnings everywhere; in development also the mail and text
+    messages that were not sent, so invitation links and codes can be read) go to the
+    server's output beside uvicorn's. Uvicorn configures only its own loggers."""
+    root = logging.getLogger("dqstack")
+    if root.handlers:
+        return
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(h)
+    root.setLevel(logging.INFO)
+    root.propagate = False
+
+
 def create_app() -> FastAPI:
+    _app_logging()
     app = FastAPI(title="DQ-Stack", version=VERSION, docs_url="/api/docs",
                   redoc_url=None, openapi_url="/api/openapi.json")
     app.add_middleware(SecurityHeaders)

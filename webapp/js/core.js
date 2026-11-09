@@ -183,7 +183,36 @@
   DQ.get = function (path, opts) { return DQ.api("GET", path, null, opts); };
   DQ.post = function (path, body, opts) { return DQ.api("POST", path, body || {}, opts); };
   DQ.upload = function (path, form) { return DQ.api("POST", path, form); };
-  DQ.download = function (path) { window.location.href = path; };
+  /* Fetch a file and save it under the server's file name. The button (if given) says
+     "Preparing…" meanwhile; a failure becomes a message, never an error page. */
+  DQ.download = function (path, btn) {
+    var label = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.setAttribute("aria-busy", "true"); btn.textContent = "Preparing…"; }
+    function done() { if (btn) { btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = label; } }
+    return fetch(path, { credentials: "same-origin" }).then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          throw new Error((j && (j.detail || j.message)) || "The file could not be made (" + r.status + ").");
+        });
+      }
+      var cd = r.headers.get("Content-Disposition") || "";
+      var m = /filename="?([^";]+)"?/i.exec(cd);
+      var name = m ? m[1] : path.split("?")[0].split("/").pop();
+      return r.blob().then(function (b) {
+        var url = URL.createObjectURL(b);
+        var a = document.createElement("a");
+        a.href = url; a.download = name; a.style.display = "none";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+        DQ.toast("Downloaded " + name + ".");
+        done();
+        return name;
+      });
+    }).catch(function (e) {
+      done();
+      DQ.toast(navigator.onLine ? e.message : "You are offline. Downloads need a connection.", { kind: "risk" });
+    });
+  };
   DQ.qs = function (o) {
     var p = Object.keys(o).filter(function (k) { return o[k] !== null && o[k] !== undefined && o[k] !== ""; })
       .map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(o[k]); });

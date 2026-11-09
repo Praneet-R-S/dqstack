@@ -3,9 +3,10 @@
 # Runs inside the postgres image. A dump is written to a .part file first and renamed
 # only when complete, so a half-written file is never mistaken for a backup.
 #
-# This gives a daily restore point. The specification's target (any point in the
-# last 7 days, at most 15 minutes lost) needs continuous WAL archiving: use a managed
-# PostgreSQL with point-in-time recovery, or add WAL-G. See deploy/README.md.
+# This is the second, independent copy: a daily restore point in a different format
+# from a different tool. Point-in-time restore (any moment in the last 7 days, at most
+# about 5 minutes lost) comes from the pitr service's WAL-G archive; see
+# deploy/README.md section 5. The time of day is in TZ (Asia/Kolkata by default).
 set -eu
 KEEP_DAYS="${KEEP_DAYS:-30}"
 while true; do

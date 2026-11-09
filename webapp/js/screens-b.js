@@ -371,7 +371,7 @@
       function go(o) { DQ.go("#/stock" + DQ.qs(Object.assign({ q: query.q, status: status, category: query.category }, o))); }
       main.appendChild(ui.page("Stock", {
         sub: h("span", null, st.store.name, " · ", fresh("Stock as of", st.as_of)),
-        actions: [ui.button("Export to a spreadsheet", function () { DQ.download("/api/stock/export.csv" + DQ.qs({ store_id: sid })); }, "ghost", { title: "Downloads every product in this store as a CSV file" })]
+        actions: [ui.button("Export to a spreadsheet", function (e) { DQ.download("/api/stock/export.csv" + DQ.qs({ store_id: sid }), e.currentTarget); }, "ghost", { title: "Downloads every product in this store as a CSV file" })]
       }));
       var q = ui.input({ type: "search", value: query.q || "", placeholder: "Name, SKU or barcode" });
       var cat = ui.select([{ value: "", label: "All categories" }].concat(cats.map(function (c) { return { value: c.category, label: c.category + " (" + c.products + ")" }; })), query.category || "", { onchange: function () { go({ category: cat.value }); } });
@@ -846,7 +846,7 @@
         setBusy(btn, true);
         return DQ.post("/api/orders/" + po.id + path, body || {}).then(function (r) { if (done) done(r); else DQ.render(); }, function (err) { setBusy(btn, false); DQ.toast(apiErr(err), { kind: "risk" }); });
       }
-      var actions = [ui.button("Download PDF", function () { DQ.download("/api/orders/" + po.id + "/pdf"); }, "ghost")];
+      var actions = [ui.button("Download PDF", function (e) { DQ.download("/api/orders/" + po.id + "/pdf", e.currentTarget); }, "ghost")];
       if (st === "draft" && canApprove) actions.push(ui.button("Approve", function (e) { act(e.target, "/approve", null, function () { DQ.toast("Approved " + po.number + ". Send it to the supplier next."); DQ.render(); }); }, "primary"));
       if ((st === "approved" || st === "sent") && canCreate) {
         actions.push(ui.button(st === "sent" ? "Email again" : "Send by email", function (e) {
@@ -856,10 +856,23 @@
             act(e.target, "/send", { channel: "email" }, function (res) { DQ.toast("Emailed " + po.number + " to " + res.sent_to + "."); DQ.render(); });
           });
         }, "ghost"));
-        actions.push(ui.button("Send by WhatsApp", function (e) {
+        actions.push(ui.button(st === "sent" && po.whatsapp_api ? "WhatsApp again" : "Send by WhatsApp", function (e) {
+          var supName = po.supplier || "the supplier";
+          if (po.whatsapp_api) {
+            var ph = sup && sup.phone;
+            DQ.confirm({ title: "Send " + po.number + " on WhatsApp?", message: ph ? "The order PDF goes to " + supName + " on WhatsApp at " + ph + "." : "This supplier has no phone number on file. Add one on the supplier's page, or send by email.", confirmLabel: ph ? "Send on WhatsApp" : "Try anyway" }).then(function (r) {
+              if (!r.ok) return;
+              act(e.target, "/send", { channel: "whatsapp" }, function (res) {
+                if (res.whatsapp_link) { window.open(res.whatsapp_link, "_blank", "noopener"); DQ.render(); return; }
+                DQ.toast("Sent " + po.number + " to " + (res.supplier || supName) + " on WhatsApp."); DQ.render();
+              });
+            });
+            return;
+          }
           var win = null;
           try { win = window.open("", "_blank"); } catch (x) { win = null; }
           act(e.target, "/send", { channel: "whatsapp" }, function (res) {
+            if (!res.whatsapp_link) { DQ.toast("Sent " + po.number + " to " + (res.supplier || supName) + " on WhatsApp."); DQ.render(); return; }
             if (win && !win.closed) { try { win.opener = null; win.location.href = res.whatsapp_link; } catch (x) { win = null; } }
             DQ.render();
             setTimeout(function () {
@@ -1130,9 +1143,50 @@
     return DQ.get("/api/reports").then(function (list) {
       if (!alive()) return;
       DQ.clear(main);
-      main.appendChild(ui.page("Reports", { sub: "Each opens for the last 28 days in " + storeName() + "; change the dates or choose all stores inside. Download any as Excel or PDF." }));
-      main.appendChild(h("div", { class: "tiles" }, list.map(function (r) {
-        return h("a", { class: "tile", href: "#/reports/" + r.name }, h("div", { class: "title-3" }, r.title), h("div", { class: "tile-note" }, REPORT_HELP[r.name] || ""));
+      main.appendChild(ui.page("Reports", { sub: "Open a report to read it on screen, or download it as Excel, PDF or CSV for the period and stores chosen here." }));
+      /* One period and store choice for every download on this page. */
+      var to = /^\d{4}-\d{2}-\d{2}$/.test(query.to || "") ? query.to : todayIst();
+      var from = /^\d{4}-\d{2}-\d{2}$/.test(query.from || "") ? query.from : addDays(to, -27);
+      var fromIn = ui.input({ type: "date", value: from, max: todayIst() });
+      var toIn = ui.input({ type: "date", value: to, max: todayIst() });
+      var stores = DQ.stores();
+      var storeIn = ui.select([{ value: "all", label: stores.length > 1 ? "All my stores" : "All stores" }].concat(stores.map(function (s) { return { value: s.id, label: s.name }; })),
+        query.store || DQ.store() || "all");
+      var periodErr = h("p", { class: "field-error", role: "alert", hidden: true });
+      function params(extra) {
+        var f = fromIn.value, t = toIn.value;
+        if (!f || !t || f > t) { periodErr.textContent = "Choose a start date on or before the end date."; periodErr.hidden = false; return null; }
+        periodErr.hidden = true;
+        return DQ.qs(Object.assign({ from: f, to: t, store_id: storeIn.value === "all" ? null : storeIn.value }, extra || {}));
+      }
+      function quick(days) {
+        return ui.button(days === 7 ? "Last 7 days" : days === 28 ? "Last 28 days" : "Last 90 days", function () {
+          toIn.value = todayIst(); fromIn.value = addDays(todayIst(), -(days - 1)); periodErr.hidden = true;
+        }, "ghost", { class: "btn btn-ghost btn-sm" });
+      }
+      var allBtn = ui.button("Download all reports (Excel)", function (e) {
+        var q = params(); if (q === null) return;
+        DQ.download("/api/reports/all.xlsx" + q, e.currentTarget);
+      }, "primary", { title: "One Excel workbook with every report, a sheet each" });
+      main.appendChild(h("section", { class: "card b-dl-card", "aria-label": "Downloads" },
+        h("h2", { class: "title-3" }, "Period and stores for downloads"),
+        h("div", { class: "b-dl-grid" }, ui.field("From", fromIn), ui.field("To", toIn), ui.field("Stores", storeIn)),
+        h("div", { class: "row b-dl-quick" }, quick(7), quick(28), quick(90)),
+        periodErr,
+        h("div", { class: "row" }, allBtn, h("span", { class: "text-3" }, "Every report in one workbook, with a contents sheet."))));
+      main.appendChild(h("div", { class: "tiles b-report-tiles" }, list.map(function (r) {
+        function dl(fmtName, label, title) {
+          return ui.button(label, function (e) {
+            var q = params({ format: fmtName }); if (q === null) return;
+            DQ.download("/api/reports/" + r.name + q, e.currentTarget);
+          }, "ghost", { class: "btn btn-ghost btn-sm", title: title, "aria-label": label + ": " + r.title });
+        }
+        return h("div", { class: "tile b-report-tile" },
+          h("a", { class: "title-3 b-report-link", href: "#/reports/" + r.name }, r.title),
+          h("div", { class: "tile-note" }, REPORT_HELP[r.name] || ""),
+          h("div", { class: "row b-report-dl" },
+            h("a", { class: "btn btn-ghost btn-sm", href: "#/reports/" + r.name, "aria-label": "Open " + r.title }, "Open"),
+            dl("xlsx", "Excel", "Download as an Excel workbook"), dl("pdf", "PDF", "Download as a PDF"), dl("csv", "CSV", "Download as a CSV file")));
       })));
     }, failed(main, alive, "Reports"));
   } });
@@ -1152,8 +1206,9 @@
       main.appendChild(ui.page(rep.title, {
         sub: h("span", null, where + " · " + fmt.date(rep.from) + " to " + fmt.date(rep.to) + " · ", fresh("Made at", nowIso())),
         actions: [h("a", { class: "btn btn-ghost", href: "#/reports" }, "All reports"),
-          ui.button("Excel", function () { DQ.download("/api/reports/" + params.name + DQ.qs(Object.assign({ format: "xlsx" }, qsBase))); }, "ghost", { title: "Download as an Excel workbook" }),
-          ui.button("PDF", function () { DQ.download("/api/reports/" + params.name + DQ.qs(Object.assign({ format: "pdf" }, qsBase))); }, "ghost", { title: "Download as a PDF" })]
+          ui.button("Excel", function (e) { DQ.download("/api/reports/" + params.name + DQ.qs(Object.assign({ format: "xlsx" }, qsBase)), e.currentTarget); }, "ghost", { title: "Download as an Excel workbook" }),
+          ui.button("PDF", function (e) { DQ.download("/api/reports/" + params.name + DQ.qs(Object.assign({ format: "pdf" }, qsBase)), e.currentTarget); }, "ghost", { title: "Download as a PDF" }),
+          ui.button("CSV", function (e) { DQ.download("/api/reports/" + params.name + DQ.qs(Object.assign({ format: "csv" }, qsBase)), e.currentTarget); }, "ghost", { title: "Download as a CSV file" })]
       }));
       var f = ui.input({ type: "date", value: from, max: todayIst() });
       var t = ui.input({ type: "date", value: to, max: todayIst() });

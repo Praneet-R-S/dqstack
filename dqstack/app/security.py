@@ -86,25 +86,22 @@ def authenticate(db: Session, login: str, password: str) -> Person:
     """Check a sign-in attempt, applying the lockout rule."""
     login = (login or "").strip().lower()
     person = db.scalar(select(Person).where((Person.email == login) | (Person.phone == login)))
+    if person is None and "@" not in login:
+        # A phone number written another way (98765 43210, +91 98765-43210 ...).
+        from .signin import find_by_phone
+        person = find_by_phone(db, login)
     now = utcnow()
     if person is None:
         # Do the same amount of hashing work as a real check, so response time does
         # not reveal whether the account exists.
         verify_password(_DUMMY_HASH, password)
         raise AuthError(GENERIC_FAILURE)
-    locked = _aware(person.locked_until)
-    if locked and locked > now:
-        minutes = max(1, int((locked - now).total_seconds() // 60) + 1)
-        raise AuthError(f"This account is locked after too many wrong passwords. "
-                        f"Try again in {minutes} minute{'s' if minutes != 1 else ''}, "
-                        "or ask an administrator to unlock it.")
+    if (locked := lock_message(person)):
+        raise AuthError(locked)
     if person.status == "disabled":
         raise AuthError("This account has been disabled. Ask your administrator.")
     if not verify_password(person.password_hash, password):
-        person.failed_attempts = (person.failed_attempts or 0) + 1
-        if person.failed_attempts >= settings.lockout_failures:
-            person.locked_until = now + timedelta(minutes=settings.lockout_minutes)
-            person.failed_attempts = 0
+        count_failure(person)
         db.commit()
         raise AuthError(GENERIC_FAILURE)
     if person.status == "invited":
@@ -117,6 +114,27 @@ def authenticate(db: Session, login: str, password: str) -> Person:
 
 
 _DUMMY_HASH = _hasher.hash("timing-equaliser-not-a-real-password")
+
+
+def count_failure(person: Person) -> None:
+    """One failed sign-in towards the lockout: a wrong password, or a sign-in code
+    that died after five wrong tries (signin.py)."""
+    person.failed_attempts = (person.failed_attempts or 0) + 1
+    if person.failed_attempts >= settings.lockout_failures:
+        person.locked_until = utcnow() + timedelta(minutes=settings.lockout_minutes)
+        person.failed_attempts = 0
+
+
+def lock_message(person: Person) -> str | None:
+    """The sentence for a locked account, or None if it is not locked."""
+    now = utcnow()
+    locked = _aware(person.locked_until)
+    if not (locked and locked > now):
+        return None
+    minutes = max(1, int((locked - now).total_seconds() // 60) + 1)
+    return (f"This account is locked after too many wrong passwords. "
+            f"Try again in {minutes} minute{'s' if minutes != 1 else ''}, "
+            "or ask an administrator to unlock it.")
 
 
 def start_session(db: Session, person: Person, ip: str | None = None,

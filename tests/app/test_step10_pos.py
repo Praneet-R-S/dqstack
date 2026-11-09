@@ -136,3 +136,20 @@ def test_keys_belong_to_owners_and_admins_and_can_be_revoked(make_client):
     with dbmod.SessionLocal() as db:
         b = db.scalar(select(Bill))
         assert b.company_id == owner.me["company"]["id"] and b.source == "pos"
+
+
+def test_key_use_is_noted_without_holding_up_the_bill(client):
+    """last_used_at is written in its own short transaction, at most once a minute, so
+    requests on one key do not queue behind each other's row lock."""
+    from dqstack.app.models import ApiKey
+    s1, pid, auth = _setup(client)
+    with dbmod.SessionLocal() as db:
+        assert db.scalar(select(ApiKey.last_used_at)) is None
+    assert client.http.post("/api/pos/v1/messages", json={"messages": [_sale(1)]},
+                            headers=auth).status_code == 200
+    with dbmod.SessionLocal() as db:
+        first = db.scalar(select(ApiKey.last_used_at))
+    assert first is not None
+    client.http.post("/api/pos/v1/messages", json={"messages": [_sale(2)]}, headers=auth)
+    with dbmod.SessionLocal() as db:
+        assert db.scalar(select(ApiKey.last_used_at)) == first      # within the minute

@@ -101,12 +101,23 @@ class SettingsIn(BaseModel):
 def get_settings(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     p = db.get(Person, c.person.id)
     kinds = sorted(A.visible_kinds(c.role))
+    from .. import whatsapp
+    from ..sms import normalise
+    available = whatsapp.configured()
+    if not available:
+        note = ("WhatsApp alerts are not available on this server. They arrive in the app, "
+                "and by email if you choose.")
+    elif not normalise(p.phone):
+        note = ("Your account has no mobile number, so WhatsApp alerts cannot reach you. "
+                "Ask an administrator to add one.")
+    else:
+        note = f"Sent to {p.phone} on WhatsApp."
     return {"email": bool((p.notify or {}).get("email")),
             "whatsapp": bool((p.notify or {}).get("whatsapp")),
             "muted": (p.notify or {}).get("muted", []),
             "kinds": [{"kind": k, "label": A.LABELS[k]} for k in kinds],
-            "whatsapp_note": "WhatsApp alerts need the company's WhatsApp Business account to be "
-                             "connected. Until then they arrive in the app and by email."}
+            "whatsapp_available": available,
+            "whatsapp_note": note}
 
 
 @router.put("/alerts/settings")
@@ -134,6 +145,41 @@ def report_list(c: Ctx = Depends(ctx)):
     return [{"name": k, "title": v} for k, v in TITLES.items()]
 
 
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _period(db: Session, c: Ctx, store_id: str | None, start: date | None, end: date | None):
+    ids = [store_or_404(db, c, store_id).id] if store_id else c.visible_store_ids(db)
+    if end is None:
+        from ..sales import local_today, tz_of
+        end = local_today(tz_of(db, c.company_id))
+    start = start or end - timedelta(days=27)
+    if start > end or (end - start).days > 1100:
+        raise HTTPException(422, "Choose a period of up to three years, start before end.")
+    return ids, start, end
+
+
+def _attachment(data: bytes, media: str, filename: str) -> Response:
+    return Response(data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/reports/all.xlsx")
+def all_reports(c: Ctx = Depends(ctx), db: Session = Depends(get_db),
+                store_id: str | None = None, start: date | None = Query(None, alias="from"),
+                end: date | None = Query(None, alias="to")):
+    """Every report for the period in one Excel workbook, a sheet each."""
+    c.require("reports.view")
+    ids, start, end = _period(db, c, store_id, start, end)
+    reps = [R.REPORTS[k](db, c.company_id, ids, start, end) for k in TITLES]
+    period = f"{start:%d %b %Y} to {end:%d %b %Y}"
+    audit.log(db, c, "report.exported", "report", "all", after={"format": "xlsx",
+              "from": start.isoformat(), "to": end.isoformat(), "store_id": store_id})
+    db.commit()
+    return _attachment(R.to_xlsx_many(reps, period), XLSX,
+                       f"dqstack-reports-{start:%Y%m%d}-{end:%Y%m%d}.xlsx")
+
+
 @router.get("/reports/{name}")
 def report(name: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db),
            store_id: str | None = None, start: date | None = Query(None, alias="from"),
@@ -142,19 +188,20 @@ def report(name: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db),
     fn = R.REPORTS.get(name)
     if fn is None:
         raise HTTPException(404, "That report does not exist.")
-    ids = [store_or_404(db, c, store_id).id] if store_id else c.visible_store_ids(db)
-    end = end or date.today()
-    start = start or end - timedelta(days=27)
-    if start > end or (end - start).days > 1100:
-        raise HTTPException(422, "Choose a period of up to three years, start before end.")
+    if format not in ("json", "xlsx", "pdf", "csv"):
+        raise HTTPException(422, "Format must be xlsx, pdf or csv.")
+    ids, start, end = _period(db, c, store_id, start, end)
     rep = fn(db, c.company_id, ids, start, end)
     rep["from"], rep["to"] = start.isoformat(), end.isoformat()
     period = f"{start:%d %b %Y} to {end:%d %b %Y}"
+    if format == "json":
+        return rep
+    stem = f"{name}-{start:%Y%m%d}-{end:%Y%m%d}"
+    audit.log(db, c, "report.exported", "report", name, after={"format": format,
+              "from": start.isoformat(), "to": end.isoformat(), "store_id": store_id})
+    db.commit()
     if format == "xlsx":
-        return Response(R.to_xlsx(rep), media_type="application/vnd.openxmlformats-"
-                        "officedocument.spreadsheetml.sheet",
-                        headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
-    if format == "pdf":
-        return Response(R.to_pdf(rep, period), media_type="application/pdf",
-                        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
-    return rep
+        return _attachment(R.to_xlsx(rep), XLSX, stem + ".xlsx")
+    if format == "csv":
+        return _attachment(R.to_csv(rep), "text/csv; charset=utf-8", stem + ".csv")
+    return _attachment(R.to_pdf(rep, period), "application/pdf", stem + ".pdf")

@@ -143,13 +143,27 @@ def approvals(c: Ctx = Depends(ctx), db: Session = Depends(get_db), store_id: st
         CountLine.status.in_(("waiting", "conflict"))).order_by(CountLine.counted_at))
     names = {p.id: p.name for p in db.scalars(select(Person).where(
         Person.company_id == c.company_id))}
+    rows = list(rows)
+    # For two people's counts, every count of that product in the same count -- also one
+    # already posted -- so the manager sees both before picking (section 13).
+    others: dict[tuple[str, str], list[dict]] = {}
+    for l, s, p in rows:
+        key = (s.id, p.id)
+        if l.status != "conflict" or key in others:
+            continue
+        others[key] = [{"line_id": o.id, "counted_by": names.get(o.counted_by),
+                        "counted_milli": o.counted_milli, "counted_at": o.counted_at.isoformat(),
+                        "status": o.status} for o in db.scalars(select(CountLine).where(
+                            CountLine.session_id == s.id, CountLine.product_id == p.id,
+                            CountLine.status.in_(("posted", "confirmed", "waiting", "conflict")))
+                            .order_by(CountLine.counted_at))]
     return [{"line_id": l.id, "session_id": s.id, "store_id": s.store_id, "product_id": p.id,
              "sku": p.sku, "name": p.name, "unit": p.unit, "status": l.status,
              "counted_milli": l.counted_milli, "system_milli": l.system_milli,
              "difference_milli": l.difference_milli,
              "difference_value_paise": abs(l.difference_milli) * (l.unit_cost_paise or 0) // 1000,
              "counted_by": names.get(l.counted_by), "counted_at": l.counted_at.isoformat(),
-             "note": l.note} for l, s, p in rows]
+             "note": l.note, "all_counts": others.get((s.id, p.id), [])} for l, s, p in rows]
 
 
 @router.get("/counts/{session_id}")

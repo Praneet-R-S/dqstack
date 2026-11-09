@@ -13,6 +13,7 @@ sqlalchemy==2.0.34
 alembic==1.20.1
 psycopg[binary]==3.3.8
 argon2-cffi==21.3.0
+pyjwt[crypto]==2.13.0
 python-multipart==0.0.20
 openpyxl==3.1.5
 reportlab==5.0.0

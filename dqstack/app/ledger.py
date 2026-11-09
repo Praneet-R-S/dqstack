@@ -69,6 +69,17 @@ def _pg(db: Session) -> bool:
     return db.get_bind().dialect.name == "postgresql"
 
 
+def lock_rows(db: Session, company_id: str, store_id: str, product_ids) -> None:
+    """Take the stock-row locks a multi-line change will need, all at once and in one
+    fixed order (by product id). Two tills selling the same items listed in different
+    orders then queue behind each other instead of each holding a row the other wants
+    (a deadlock). A no-op on SQLite, which serialises writers anyway."""
+    if not _pg(db):
+        return
+    for pid in sorted({p for p in product_ids if p}):
+        _soh(db, company_id, store_id, pid)
+
+
 def _soh(db: Session, company_id: str, store_id: str, product_id: str) -> StockOnHand:
     q = select(StockOnHand).where(StockOnHand.store_id == store_id,
                                   StockOnHand.product_id == product_id)

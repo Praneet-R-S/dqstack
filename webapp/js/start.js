@@ -17,6 +17,14 @@
     { label: "Company", items: ["#/imports", "#/alerts", "#/settings", "#/activity"] }
   ];
   var PUBLIC = ["#/signin", "#/signup", "#/forgot", "#/reset/:token", "#/invite/:token"];
+  /* A cashier's app is the till (section 2: "bills customers on the Checkout screen"):
+     the menu holds only what a till operator uses, and Home opens Checkout. */
+  var TILL_GROUPS = [{ label: null, items: ["#/checkout", "#/shift", "#/bills", "#/alerts"] }];
+  var TILL_ROUTES = ["#/checkout", "#/shift", "#/bills", "#/bills/:id", "#/alerts", "#/alerts/settings",
+    "#/not-found", "#/no-access"];
+  function tillOnly() { return !!(DQ.me && DQ.me.person && DQ.me.person.role === "cashier"); }
+  DQ.tillOnly = tillOnly;
+  function groups() { return tillOnly() ? TILL_GROUPS : GROUPS; }
 
   /* ---------------------------------------------------------------- matching */
   function match(hash) {
@@ -60,14 +68,14 @@
     /* A sub-page (#/settings/stores, #/orders/:id) lights the menu item it sits under:
        the longest menu route that is the page's route or a prefix of it. */
     var active = null, cur = current && current.pattern;
-    GROUPS.forEach(function (g) {
+    groups().forEach(function (g) {
       g.items.forEach(function (p) {
         if (cur && (cur === p || cur.indexOf(p + "/") === 0) && (!active || p.length > active.length)) active = p;
       });
     });
     var nav = h("nav", { class: "sidebar", "aria-label": "Main" },
       h("a", { class: "brand", href: "#/home" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "DQ-Stack"),
-      GROUPS.map(function (g) {
+      groups().map(function (g) {
         var items = g.items.map(function (p) { return navItem(p, active); }).filter(Boolean);
         if (!items.length) return null;
         return h("div", { class: "nav-group" }, g.label ? h("p", { class: "nav-label" }, g.label) : null, items);
@@ -94,7 +102,7 @@
     var top = h("header", { class: "topbar" },
       h("button", { class: "menu-toggle", type: "button", "aria-label": "Menu", onclick: function () { document.body.classList.toggle("nav-open"); } }, "☰"),
       h("div", { class: "top-store" }, h("span", { class: "sr-only" }, "Store: "), storePick),
-      search,
+      tillOnly() ? null : search,
       h("span", { id: "save-status", class: "save-status", "aria-live": "polite" }),
       bell, h("div", { class: "account-wrap" }, menuBtn, menu));
     return { nav: nav, top: top };
@@ -125,6 +133,10 @@
     if (!DQ.me && !isPublic) { DQ.go("#/signin"); return; }
     if (!m) { m = match("#/not-found"); }
     if (m.route.can && !DQ.can(m.route.can)) { m = match("#/no-access"); }
+    if (!isPublic && tillOnly() && TILL_ROUTES.indexOf(m.route.pattern) < 0) {
+      if (m.route.pattern === "#/home") { DQ.go("#/checkout"); return; }
+      m = match("#/no-access");
+    }
     var my = ++token;
     DQ.clear(app);
     var main = h("main", { id: "main", class: "main", tabindex: "-1" });
@@ -150,11 +162,15 @@
     if (!isPublic) main.focus({ preventScroll: true });
   }
   DQ.render = render;
+  /* The sign-in screen says why the person is there when a session ended under them
+     (it expired after DQ_SESSION_HOURS, or they were signed out elsewhere). */
+  var signedOutNote = null;
   DQ.signedOut = function (message) {
     var was = !!DQ.me;
     DQ.me = null;
-    if (was) DQ.toast(message || "Please sign in again.", { kind: "attention" });
+    if (was) signedOutNote = "Your session has ended, so you were signed out. Sign in again to carry on.";
     if (location.hash.indexOf("#/signin") !== 0) location.hash = "#/signin";
+    else if (was) render();
   };
   function signOut() {
     DQ.post("/api/auth/logout").then(function () { DQ.me = null; location.hash = "#/signin"; }, function () { DQ.me = null; location.hash = "#/signin"; });
@@ -165,7 +181,7 @@
     main.appendChild(DQ.ui.empty({ title: "That page does not exist", text: "The address may be mistyped, or the page has moved.", action: { label: "Go to Home", href: "#/home" } }));
   } });
   DQ.route("#/no-access", { title: "Not available", render: function (main) {
-    main.appendChild(DQ.ui.empty({ title: "Your role does not include this screen", text: "Ask an Owner or Admin if you need it.", action: { label: "Go to Home", href: "#/home" } }));
+    main.appendChild(DQ.ui.empty({ title: "Your role does not include this screen", text: "Ask an Owner or Admin if you need it.", action: tillOnly() ? { label: "Go to Checkout", href: "#/checkout" } : { label: "Go to Home", href: "#/home" } }));
   } });
 
   /* ---------------------------------------------------------------- sign in and friends */
@@ -193,14 +209,83 @@
   }
   function afterSignIn(me) { DQ.me = me; location.hash = "#/home"; }
 
-  DQ.route("#/signin", { title: "Sign in", render: function (main) {
+  /* What the server offers besides a password: Google, Microsoft, reset by text.
+     Asked once per page load; a failure just means no extra buttons. */
+  var providersP = null;
+  function providers() {
+    if (!providersP) providersP = DQ.get("/api/auth/providers", { allow401: true }).then(null, function () { providersP = null; return {}; });
+    return providersP;
+  }
+  /* The callback sends people back to #/signin?sso=<reason> when it cannot sign them in. */
+  var SSO_MESSAGES = {
+    expired: "That sign-in took too long. Please try again.",
+    failed: "We could not confirm that sign-in. Try again, or use your password.",
+    cancelled: "Sign-in was cancelled.",
+    unverified: "Your Google email is not verified yet. Verify it with Google, or use your password.",
+    "no-email": "That account did not share an email address. Use your password instead.",
+    "no-account": "No DQ-Stack account uses that email. Ask your administrator to invite you with it, or use your password.",
+    disabled: "This account has been disabled. Ask your administrator.",
+    locked: "This account is locked after too many wrong passwords. Try again later, or ask an administrator to unlock it.",
+    "not-allowed": "Your company does not allow Google or Microsoft sign-in. Use your password.",
+    "ms-tenant": "That Microsoft account is not from your company's Microsoft organisation. Use your work account, or your password. An administrator sets the organisation in Settings, Company.",
+    paused: "This company's account is paused. Contact DQ-Stack support.",
+    off: "That sign-in option is not set up here."
+  };
+  function codeInput() {
+    return DQ.ui.input({ type: "text", class: "input code-input", inputmode: "numeric", autocomplete: "one-time-code", maxlength: 8, required: true, spellcheck: "false" });
+  }
+  function startAgain(label) {
+    return h("a", { href: "#/signin", onclick: function (e) { e.preventDefault(); DQ.go("#/signin"); } }, label || "Start again");
+  }
+
+  /* Step two of signing in, when the company asks for a code after the password. */
+  function codeStep(main, r) {
+    DQ.clear(main);
+    var ticket = r.ticket;
+    var code = codeInput();
+    var sent = h("p", { class: "notice", role: "status" }, r.message);
+    var resend = h("button", { class: "link-btn", type: "button" }, "Send a new code");
+    resend.addEventListener("click", function () {
+      resend.disabled = true;
+      DQ.post("/api/auth/login/code/resend", { ticket: ticket }, { quiet: true, allow401: true }).then(function (x) {
+        sent.textContent = x.message; code.value = ""; code.focus();
+        setTimeout(function () { resend.disabled = false; }, 30000);
+      }, function (e) { sent.textContent = e.message; resend.disabled = false; });
+    });
+    main.appendChild(authCard("Enter your code", null, form([sent, DQ.ui.field("6-digit code", code)], "Sign in", function () {
+      return DQ.post("/api/auth/login/code", { ticket: ticket, code: code.value.trim() }, { quiet: true, allow401: true }).then(afterSignIn);
+    }, h("p", { class: "auth-links" }, resend, " · ", startAgain()))));
+    code.focus();
+  }
+
+  DQ.route("#/signin", { title: "Sign in", render: function (main, params, query) {
     var login = DQ.ui.input({ type: "text", autocomplete: "username", required: true, inputmode: "email" });
     var pw = DQ.ui.input({ type: "password", autocomplete: "current-password", required: true });
-    main.appendChild(authCard("Sign in", null, form([
+    var note = null;
+    if (query && query.sso && SSO_MESSAGES[query.sso]) {
+      note = h("p", { class: "form-error", role: "alert" }, SSO_MESSAGES[query.sso]);
+      try { history.replaceState(null, "", "#/signin"); } catch (e) { /* old browser: harmless */ }
+    } else if (signedOutNote) {
+      note = h("p", { class: "notice", role: "status" }, signedOutNote);
+    }
+    signedOutNote = null;
+    var sso = h("div", { class: "sso", hidden: true });
+    main.appendChild(authCard("Sign in", null, h("div", null, note, form([
       DQ.ui.field("Email or phone", login), DQ.ui.field("Password", pw)
     ], "Sign in", function () {
-      return DQ.post("/api/auth/login", { login: login.value.trim(), password: pw.value }, { quiet: true, allow401: true }).then(afterSignIn);
-    }, h("p", { class: "auth-links" }, h("a", { href: "#/forgot" }, "Forgot your password?"), " · ", h("a", { href: "#/signup" }, "Start a new company")))));
+      return DQ.post("/api/auth/login", { login: login.value.trim(), password: pw.value }, { quiet: true, allow401: true }).then(function (r) {
+        if (r && r.two_step) codeStep(main, r); else afterSignIn(r);
+      });
+    }, h("p", { class: "auth-links" }, h("a", { href: "#/forgot" }, "Forgot your password?"), " · ", h("a", { href: "#/signup" }, "Start a new company"))), sso)));
+    providers().then(function (pv) {
+      var btns = [["google", "Sign in with Google"], ["microsoft", "Sign in with Microsoft"]].filter(function (x) { return pv[x[0]]; });
+      if (!btns.length) return;
+      sso.appendChild(h("p", { class: "sso-or" }, h("span", null, "or")));
+      btns.forEach(function (x) {
+        sso.appendChild(h("a", { class: "btn btn-ghost btn-block sso-btn", href: "/api/auth/oidc/" + x[0] + "/start", "data-provider": x[0] }, x[1]));
+      });
+      sso.hidden = false;
+    });
     login.focus();
   } });
 
@@ -218,13 +303,53 @@
     co.focus();
   } });
 
-  DQ.route("#/forgot", { title: "Forgot password", render: function (main) {
+  DQ.route("#/forgot", { title: "Forgot password", render: function (main, params, query) {
+    if (query && query.by === "phone") return forgotByPhone(main);
     var login = DQ.ui.input({ required: true, autocomplete: "username" });
     var done = h("p", { class: "notice", hidden: true });
+    var byPhone = h("span", { hidden: true }, " · ", h("a", { href: "#/forgot?by=phone" }, "Get a code by text message instead"));
     main.appendChild(authCard("Forgot your password?", "We email a link to choose a new one. An Admin can also send you one.", form([DQ.ui.field("Email or phone", login), done], "Send the link", function () {
       return DQ.post("/api/auth/password/forgot", { login: login.value.trim() }, { quiet: true }).then(function (r) { done.textContent = r.message; done.hidden = false; });
-    }, h("p", { class: "auth-links" }, h("a", { href: "#/signin" }, "Back to sign in")))));
+    }, h("p", { class: "auth-links" }, h("a", { href: "#/signin" }, "Back to sign in"), byPhone))));
+    providers().then(function (pv) { if (pv.phone_reset) byPhone.hidden = false; });
   } });
+
+  /* Reset by a code sent to the phone: number first, then the code and a new password. */
+  function forgotByPhone(main) {
+    var phone = DQ.ui.input({ type: "tel", required: true, autocomplete: "tel", inputmode: "tel" });
+    function send() {
+      return DQ.post("/api/auth/password/phone", { phone: phone.value.trim() }, { quiet: true });
+    }
+    main.appendChild(authCard("Reset by text message", "We send a 6-digit code to your phone. It works for 10 minutes.", form([
+      DQ.ui.field("Mobile number", phone, "The number on your DQ-Stack account, for example 98765 43210.")
+    ], "Send the code", function () {
+      return send().then(function (r) { codeAndPassword(r.message); });
+    }, h("p", { class: "auth-links" }, h("a", { href: "#/forgot" }, "Use email instead"), " · ", h("a", { href: "#/signin" }, "Back to sign in")))));
+    phone.focus();
+
+    function codeAndPassword(message) {
+      DQ.clear(main);
+      var code = codeInput();
+      var pw = DQ.ui.input({ type: "password", required: true, autocomplete: "new-password", minlength: 10 });
+      var sent = h("p", { class: "notice", role: "status" }, message);
+      var resend = h("button", { class: "link-btn", type: "button" }, "Send a new code");
+      resend.addEventListener("click", function () {
+        resend.disabled = true;
+        send().then(function (r) {
+          sent.textContent = r.message; code.value = ""; code.focus();
+          setTimeout(function () { resend.disabled = false; }, 30000);
+        }, function (e) { sent.textContent = e.message; resend.disabled = false; });
+      });
+      main.appendChild(authCard("Enter the code", null, form([
+        sent, DQ.ui.field("6-digit code", code), DQ.ui.field("New password", pw, "At least 10 characters.")
+      ], "Save the new password", function () {
+        return DQ.post("/api/auth/password/phone/reset", { phone: phone.value.trim(), code: code.value.trim(), password: pw.value }, { quiet: true }).then(function (r) {
+          DQ.toast(r.message); location.hash = "#/signin";
+        });
+      }, h("p", { class: "auth-links" }, resend, " · ", h("a", { href: "#/signin" }, "Back to sign in")))));
+      code.focus();
+    }
+  }
 
   DQ.route("#/reset/:token", { title: "Choose a new password", render: function (main, p) {
     var pw = DQ.ui.input({ type: "password", required: true, autocomplete: "new-password", minlength: 10 });

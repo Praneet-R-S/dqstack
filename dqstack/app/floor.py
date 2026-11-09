@@ -46,6 +46,24 @@ def on_hand_at(db: Session, store_id: str, product_id: str, at: datetime) -> int
     return int(v or 0)
 
 
+def moved_between(db: Session, store_id: str, product_id: str, t1: datetime,
+                  t2: datetime) -> int:
+    """Net stock change from t1 to t2 from anything but counts: sales, deliveries,
+    transfers, wastage. Negative when t2 is before t1."""
+    lo, hi, sign = (t1, t2, 1) if t1 <= t2 else (t2, t1, -1)
+    v = db.scalar(select(func.coalesce(func.sum(StockMovement.qty_milli), 0)).where(
+        StockMovement.store_id == store_id, StockMovement.product_id == product_id,
+        StockMovement.at > lo, StockMovement.at <= hi,
+        (StockMovement.source_type.is_(None)) | (StockMovement.source_type != "count")))
+    return sign * int(v or 0)
+
+
+def agrees(db: Session, store_id: str, a: CountLine, b_counted: int, b_at: datetime) -> bool:
+    """Whether count a, carried forward by what sold or arrived since, gives b's figure."""
+    return a.counted_milli + moved_between(db, store_id, a.product_id, _aware(a.counted_at),
+                                           b_at) == b_counted
+
+
 def _clamp_time(at: datetime | None, session: CountSession) -> datetime:
     """Trust the device's clock only within sensible bounds."""
     now = utcnow()
@@ -174,7 +192,10 @@ def record_count(db: Session, c, session: CountSession, product: Product, counte
     db.add(line)
     db.flush()
     # Two different people counting the same product in one count: keep both and let
-    # the manager pick or recount (section 13).
+    # the manager pick or recount (section 13). They disagree when one count, carried
+    # forward by what sold or arrived between the two, does not give the other -- judged
+    # count against count, not against the system figure, so a count that matches the
+    # system still flags a colleague's different count.
     others = list(db.scalars(select(CountLine).where(
         CountLine.session_id == session.id, CountLine.product_id == product.id,
         CountLine.id != line.id, CountLine.status.in_(("posted", "confirmed", "waiting",
@@ -184,7 +205,7 @@ def record_count(db: Session, c, session: CountSession, product: Product, counte
     for o in mine:
         if o.status in ("waiting", "conflict"):
             o.status = "superseded"           # the same person counted again; the later stands
-    if by_other and line.difference_milli != 0:
+    if any(not agrees(db, session.store_id, o, counted_milli, at) for o in by_other):
         line.status = "conflict"
         for o in by_other:
             if o.status == "waiting":
@@ -218,27 +239,37 @@ def decide_line(db: Session, c, line: CountLine, action: str, reason: str) -> Co
     line.reason = reason.strip()
     line.decided_by = c.person.id
     line.decided_at = utcnow()
+    pending = list(db.scalars(select(CountLine).where(
+        CountLine.session_id == line.session_id, CountLine.product_id == line.product_id,
+        CountLine.id != line.id, CountLine.status.in_(("waiting", "conflict")))))
     if action in ("approve", "pick"):
         if action == "approve" and line.status == "conflict":
             raise HTTPException(409, "Two people counted this product differently. Pick one "
                                      "count or ask for a recount.")
-        if action == "pick":
-            for o in db.scalars(select(CountLine).where(
-                    CountLine.session_id == line.session_id,
-                    CountLine.product_id == line.product_id, CountLine.id != line.id,
-                    CountLine.status == "conflict")):
-                o.status = "superseded"
-            # Re-judge against the stock at this line's counting time, which now includes
-            # anything the other count already posted.
-            line.system_milli = on_hand_at(db, session.store_id, line.product_id,
-                                           _aware(line.counted_at))
-            line.difference_milli = line.counted_milli - line.system_milli
+        # The chosen count stands; any other count of this product still waiting (a
+        # colleague's agreeing or disagreeing one) is set aside, so nothing posts twice.
+        for o in pending:
+            o.status = "superseded"
+            o.decided_by, o.decided_at = c.person.id, line.decided_at
+            o.reason = f"Set aside: another count of this product was {action}ed"[:300]
+        # Judge against the stock at this line's counting time as it is now, which
+        # includes anything posted since for that moment (another count, a late bill).
+        line.system_milli = on_hand_at(db, session.store_id, line.product_id,
+                                       _aware(line.counted_at))
+        line.difference_milli = line.counted_milli - line.system_milli
         _post_line(db, c, session, line, first=False)
         line.status = "posted" if line.difference_milli else "confirmed"
     elif action == "reject":
         line.status = "rejected"
+    elif action == "recount":
+        # Neither count is trusted: nothing posts, every waiting count of the product is
+        # rejected, and the product stays due for counting.
+        line.status = "rejected"
+        for o in pending:
+            o.status = "rejected"
+            o.decided_by, o.decided_at, o.reason = c.person.id, line.decided_at, line.reason
     else:
-        raise HTTPException(422, "Action must be approve, reject or pick.")
+        raise HTTPException(422, "Action must be approve, pick, reject or recount.")
     p = db.get(Product, line.product_id)
     audit.log(db, c, f"count.{action}", "count_line", line.id, after={
         "product": p.sku, "counted": fmt_qty(line.counted_milli, p.unit),
