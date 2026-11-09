@@ -3,3 +3,9 @@
 *.png   binary
 *.parquet binary
 *.arrow binary
+# Scripts that run inside Linux containers must keep LF line endings, even when the
+# repository is checked out on Windows (a CRLF shell script fails with "not found").
+*.sh text eol=lf
+Dockerfile text eol=lf
+deploy/Caddyfile text eol=lf
+docker-compose.yml text eol=lf
