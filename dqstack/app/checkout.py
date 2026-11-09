@@ -119,7 +119,8 @@ def _alert(db: Session, company_id: str, store_id: str | None, product_id: str |
 # ===================================================================== paying
 
 def _build_lines(db: Session, c, store: Store, lines: list[dict], on: date,
-                 manager: Person | None) -> tuple[list[BillLine], int, int, int]:
+                 manager: Person | None, trusted: bool = False
+                 ) -> tuple[list[BillLine], int, int, int]:
     built, total, tax, disc = [], 0, 0, 0
     for i, ln in enumerate(lines):
         qty = int(ln.get("qty_milli") or 0)
@@ -140,7 +141,7 @@ def _build_lines(db: Session, c, store: Store, lines: list[dict], on: date,
                     raise HTTPException(422, f"{p.name} has no selling price. Type the price.")
                 price = listed
             overridden = (listed is not None and price < listed) or discount > 0
-            if overridden:
+            if overridden and not trusted:
                 if not (c.can("sales.refund", store.id) or manager is not None):
                     raise HTTPException(403, f"A discount or lower price on {p.name} needs a "
                                              "manager's PIN.")
@@ -194,8 +195,10 @@ def _check_payments(payments: list[dict], total: int) -> tuple[list[BillPayment]
     return out, change
 
 
-def pay(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
-    """Complete a bill: the paid-bill rule. Returns (bill, duplicate)."""
+def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
+        ) -> tuple[Bill, bool]:
+    """Complete a bill: the paid-bill rule. Returns (bill, duplicate). `trusted` is
+    for an existing POS, whose own controls already approved its prices."""
     number = (body.get("bill_number") or "").strip()
     if not number:
         raise HTTPException(422, "The bill needs its number from the till.")
@@ -210,7 +213,7 @@ def pay(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
     manager = manager_for_pin(db, c.company_id, store.id, body.get("manager_pin"),
                               body.get("manager_id"))
     lines, total, tax, disc = _build_lines(db, c, store, body.get("lines") or [],
-                                           _business_day(store, tz, at), manager)
+                                           _business_day(store, tz, at), manager, trusted)
     if not lines:
         raise HTTPException(422, "The bill has no items.")
     payments, change = _check_payments(body.get("payments") or [], total)
@@ -221,7 +224,8 @@ def pay(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
         db.flush()
     bill.till = (body.get("till") or None)
     bill.device_id = (body.get("device_id") or None)
-    bill.cashier_id = c.person.id
+    bill.cashier_id = getattr(c.person, "id", None)
+    bill.source = "pos" if trusted else "checkout"
     bill.state, bill.paid_at = "paid", at
     bill.total_paise, bill.tax_paise, bill.discount_paise = total, tax, disc
     bill.change_paise = change
@@ -245,7 +249,8 @@ def pay(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
             continue
         res = ledger.post(db, company_id=c.company_id, store_id=store.id,
                           product_id=ln.product_id, qty_milli=-ln.qty_milli, type="sale",
-                          source_type="bill", source_id=bill.id, person_id=c.person.id,
+                          source_type="bill", source_id=bill.id,
+                          person_id=getattr(c.person, "id", None),
                           device=bill.device_id or c.device, at=at,
                           idempotency_key=f"bill:{bill.id}:{i}")
         if res.on_hand_milli < 0:
@@ -330,7 +335,9 @@ def void_by_number(db: Session, c, store: Store, number: str, reason: str, lines
 
 # ===================================================================== refunds
 
-def refund(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
+def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True
+           ) -> tuple[Bill, bool]:
+    """`require_pin` is off only for an existing POS, which approved the refund itself."""
     number = (body.get("refund_number") or "").strip()
     if not number:
         raise HTTPException(422, "The refund needs its number from the till.")
@@ -343,7 +350,7 @@ def refund(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
         raise HTTPException(422, "Give the reason for the refund.")
     manager = manager_for_pin(db, c.company_id, store.id, body.get("manager_pin"),
                               body.get("manager_id"))
-    if manager is None:
+    if manager is None and require_pin:
         raise HTTPException(403, "A refund needs a manager's PIN.")
     orig = db.scalar(select(Bill).where(Bill.company_id == c.company_id,
                                         Bill.store_id == store.id,
@@ -366,8 +373,9 @@ def refund(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
     tz = _tz(db, c.company_id)
     at = utcnow()
     bill = Bill(company_id=c.company_id, store_id=store.id, bill_number=number, state="refund",
-                cashier_id=c.person.id, refund_of=orig.id, refund_reason=reason[:200],
-                approved_by=manager.id, paid_at=at, business_day=_business_day(store, tz, at),
+                cashier_id=getattr(c.person, "id", None), refund_of=orig.id,
+                refund_reason=reason[:200], approved_by=manager.id if manager else None,
+                paid_at=at, source="checkout" if require_pin else "pos", business_day=_business_day(store, tz, at),
                 device_id=body.get("device_id"))
     total = 0
     lines = body.get("lines") or []
@@ -394,17 +402,20 @@ def refund(db: Session, c, store: Store, body: dict) -> tuple[Bill, bool]:
     for i, l in enumerate(bill.lines):
         ledger.post(db, company_id=c.company_id, store_id=store.id, product_id=l.product_id,
                     qty_milli=l.qty_milli, type="customer_return", reason=reason,
-                    source_type="refund", source_id=bill.id, person_id=c.person.id,
+                    source_type="refund", source_id=bill.id,
+                    person_id=getattr(c.person, "id", None),
                     idempotency_key=f"refund:{bill.id}:{i}")
         if not l.resaleable:
             # Damaged: it came back into the store, and it is written off at once.
             ledger.post(db, company_id=c.company_id, store_id=store.id, product_id=l.product_id,
                         qty_milli=-l.qty_milli, type="damage", reason=f"Returned damaged: {reason}",
-                        source_type="refund", source_id=bill.id, person_id=c.person.id,
+                        source_type="refund", source_id=bill.id,
+                        person_id=getattr(c.person, "id", None),
                         idempotency_key=f"refund:{bill.id}:{i}:damaged")
     audit.log(db, c, "bill.refunded", "bill", bill.id, after={
         "number": number, "original": orig.bill_number, "amount": rupees(total),
-        "reason": reason, "approved_by": manager.name}, store_id=store.id)
+        "reason": reason, "approved_by": manager.name if manager else "the POS"},
+        store_id=store.id)
     return bill, False
 
 
