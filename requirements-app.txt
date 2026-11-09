@@ -9,7 +9,6 @@ fastapi==0.140.13
 starlette==1.2.1
 pydantic==2.12.5
 uvicorn==0.37.0
-gunicorn==23.0.0
 sqlalchemy==2.0.34
 alembic==1.20.1
 psycopg[binary]==3.3.8

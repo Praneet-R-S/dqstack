@@ -1,7 +1,7 @@
 """The DQ-Stack application server.
 
     uvicorn dqstack.app.main:app                     # development
-    gunicorn -k uvicorn.workers.UvicornWorker ...    # production (see deploy/)
+    uvicorn ... --workers N                          # production (deploy/entrypoint.sh)
 
 Errors are answered in plain language and never with a stack trace (interface rule
 6). Every response carries security headers. The planner interface the forecasting
