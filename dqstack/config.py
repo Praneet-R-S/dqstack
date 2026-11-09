@@ -7,6 +7,7 @@ name; nothing downstream hardcodes a threshold.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,9 +16,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 RAW = DATA / "raw"
-INTERIM = DATA / "interim"
-PROCESSED = DATA / "processed"
-ARTIFACTS = ROOT / "artifacts"
+PROCESSED = Path(os.environ["DQ_PROCESSED_DIR"]) if os.environ.get("DQ_PROCESSED_DIR") \
+    else DATA / "processed"
+# The application server runs each company's training in its own process with its
+# own scratch folders, so one company's run never reads or overwrites another's
+# files. The demo pipeline uses the defaults.
+INTERIM = Path(os.environ["DQ_INTERIM_DIR"]) if os.environ.get("DQ_INTERIM_DIR") \
+    else DATA / "interim"
+ARTIFACTS = Path(os.environ["DQ_ARTIFACTS_DIR"]) if os.environ.get("DQ_ARTIFACTS_DIR") \
+    else ROOT / "artifacts"
 UI_DATA = ROOT / "ui" / "data"
 
 for _p in (RAW, INTERIM, PROCESSED, ARTIFACTS, UI_DATA):

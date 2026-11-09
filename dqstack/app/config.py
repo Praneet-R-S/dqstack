@@ -58,6 +58,11 @@ class Settings:
     # The company timezone default the specification fixes.
     default_timezone: str = "Asia/Kolkata"
     allowed_origins: tuple[str, ...] = field(default_factory=tuple)
+    # Forecast jobs: in-process in development and tests; in child processes with
+    # time limits (worker.py) in staging and production.
+    inline_jobs: bool = True
+    train_timeout_s: int = 4 * 3600
+    nightly_timeout_s: int = 1800
 
     @property
     def is_sqlite(self) -> bool:
@@ -85,6 +90,9 @@ def load() -> Settings:
         mail_from=_env("DQ_MAIL_FROM", Settings.mail_from) or Settings.mail_from,
         allowed_origins=tuple(o.strip() for o in (_env("DQ_ALLOWED_ORIGINS", "") or "").split(",")
                               if o.strip()),
+        inline_jobs=_bool("DQ_INLINE_JOBS", env in ("development", "test")),
+        train_timeout_s=int(_env("DQ_TRAIN_TIMEOUT_S", str(4 * 3600)) or 4 * 3600),
+        nightly_timeout_s=int(_env("DQ_NIGHTLY_TIMEOUT_S", "1800") or 1800),
     )
     if env == "production":
         problems = []

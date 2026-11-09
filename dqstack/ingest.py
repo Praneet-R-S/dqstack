@@ -26,6 +26,7 @@ from .config import ARTIFACTS, CFG, INTERIM, RAW
 from .schemas import (
     ALL_SCHEMAS,
     FeedCheck,
+    calendar_schema,
     FeedRun,
     QualityGateFailure,
     utc_stamp,
@@ -56,7 +57,15 @@ def _expected_rows(name: str, tables: dict[str, pd.DataFrame]) -> int | None:
     comes from the sales table rather than the calendar, because the calendar
     deliberately extends past the last sales date (the promotional plan and
     holiday calendar are known ahead of time).
+
+    A feed may instead declare its own size (`tables["_declared_rows"]`). The
+    application server does: its feed is built from a company's database, where
+    series start on different days and closed or empty-shelf days are left out on
+    purpose, so the rectangle is the wrong expectation. Every other check still runs.
     """
+    declared = tables.get("_declared_rows") or {}
+    if name in declared:
+        return int(declared[name])
     if name == "sales":
         n_series = len(tables["items"]) * len(tables["stores"])
         s = tables["sales"]
@@ -69,9 +78,10 @@ def _expected_rows(name: str, tables: dict[str, pd.DataFrame]) -> int | None:
 
 
 def _validate_table(
-    name: str, df: pd.DataFrame, tables: dict[str, pd.DataFrame], run_id: str
+    name: str, df: pd.DataFrame, tables: dict[str, pd.DataFrame], run_id: str,
+    schema=None,
 ) -> FeedRun:
-    schema = ALL_SCHEMAS[name]
+    schema = schema or ALL_SCHEMAS[name]
     # Fingerprinting indexes the declared columns, so a feed missing one would
     # raise a bare pandas KeyError before the quality gate could report it as a
     # blocking failure — the gate exists to turn bad feeds into a clear rejection,
@@ -211,20 +221,30 @@ def _reconcile_totals(
     return run
 
 
-def run(strict: bool | None = None) -> IngestResult:
+def run(strict: bool | None = None, tables: dict[str, pd.DataFrame] | None = None,
+        control: pd.DataFrame | None = None) -> IngestResult:
+    """Read and validate the five feeds. The demo reads them from data/raw; the
+    application server passes a company's tables built from its database instead
+    (dqstack/app/forecast/source.py), with no simulation truth columns."""
     strict = CFG.gate.blocking if strict is None else strict
     run_id = f"feed_{uuid.uuid4().hex[:10]}"
 
-    tables = {
-        name: pd.read_parquet(RAW / f"{name}.parquet")
-        for name in ("sales", "prices", "calendar", "items", "stores")
-    }
-    ctrl_path = RAW / "sales_control.parquet"
-    control = pd.read_parquet(ctrl_path) if ctrl_path.exists() else None
+    if tables is None:
+        tables = {
+            name: pd.read_parquet(RAW / f"{name}.parquet")
+            for name in ("sales", "prices", "calendar", "items", "stores")
+        }
+        ctrl_path = RAW / "sales_control.parquet"
+        control = pd.read_parquet(ctrl_path) if ctrl_path.exists() else None
+    else:
+        tables = {k: v.copy() for k, v in tables.items()}
     for name in ("sales", "calendar"):
         tables[name]["date"] = pd.to_datetime(tables[name]["date"])
 
-    feed_runs = [_validate_table(n, tables[n], tables, run_id) for n in ALL_SCHEMAS]
+    states = tuple(c.removeprefix("snap_") for c in tables["calendar"].columns
+                   if c.startswith("snap_"))
+    schemas = {**ALL_SCHEMAS, "calendar": calendar_schema(states)}
+    feed_runs = [_validate_table(n, tables[n], tables, run_id, schemas[n]) for n in schemas]
     feed_runs.append(_reconcile_totals(tables["sales"], control, run_id))
 
     (ARTIFACTS / "feed_runs.json").write_text(
@@ -247,8 +267,11 @@ def run(strict: bool | None = None) -> IngestResult:
 
     # ---------------------------------------------------------------- panel
     sales = tables["sales"]
-    truth = sales[["item_id", "store_id", "date", *TRUTH_COLUMNS]].copy()
-    hist = sales.drop(columns=list(TRUTH_COLUMNS))
+    # Simulation truth exists only for the generated demo data. A real company's
+    # feed has none: the pipeline then judges against observed sales.
+    present_truth = [c for c in TRUTH_COLUMNS if c in sales.columns]
+    truth = sales[["item_id", "store_id", "date", *present_truth]].copy()
+    hist = sales.drop(columns=present_truth)
 
     cal = tables["calendar"]
 

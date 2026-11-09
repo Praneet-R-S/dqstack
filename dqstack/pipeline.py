@@ -177,8 +177,15 @@ def bundle_at(P: Panel, O: int, tr: Trained, horizons: tuple[int, ...]) -> Bundl
 # ------------------------------------------------------------------ run
 
 def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
-        light: bool = False) -> dict:
+        light: bool = False, tables: dict | None = None,
+        splits: dict | None = None) -> dict:
     """Run every stage.
+
+    `tables` and `splits` are how the application server runs the same engine on one
+    company's data (dqstack/app/forecast): the five feeds come from its database
+    instead of data/raw, the origin blocks (make_splits arguments) shrink to the
+    history it has, and with no simulation truth the run is judged against observed
+    sales. Called with neither, this is the demo pipeline exactly.
 
     `light` trims the rolling backtest to four origins and skips the cost
     sensitivity sweep. Used by the ablation runner: an ablation arm is asking
@@ -193,7 +200,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     # ---------------------------------------------------------- stage 0
     section("STAGE 0 — ingest and validate")
     t0 = time.perf_counter()
-    ing = ingest.run()
+    ing = ingest.run(tables=tables)
     timings["stage0_ingest"] = time.perf_counter() - t0
     log(f"  panel {len(ing.panel):,} rows, {ing.panel['series_id'].nunique():,} series")
     for f in ing.feed_runs:
@@ -211,23 +218,41 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         log(f"    {k:<14s} {v:>5,}")
     log(f"  mean data-health score {diag['health_score'].mean():.3f}")
 
-    truth = pd.read_parquet(INTERIM / "truth.parquet")
+    # The same frame ingest wrote to interim/truth.parquet, taken from memory.
+    truth = ing.truth.copy()
     truth["series_id"] = truth["item_id"].astype(str) + "|" + truth["store_id"].astype(str)
-    cens = masks.merge(
-        truth[["series_id", "date", "was_censored", "was_carried"]],
-        on=["series_id", "date"], how="inner",
-    ).merge(hist_panel[["series_id", "date", "sales"]], on=["series_id", "date"], how="left")
-    cens_score = diagnose.score_censoring(cens, truth)
-    log(f"  censoring detection: precision {cens_score['precision']:.3f}, "
-        f"recall {cens_score['recall']:.3f} "
-        f"(recall on full-zero days {cens_score['recall_full_zero']:.3f})")
+    has_truth = {"latent_demand", "was_censored", "was_carried"} <= set(truth.columns)
+    if has_truth:
+        cens = masks.merge(
+            truth[["series_id", "date", "was_censored", "was_carried"]],
+            on=["series_id", "date"], how="inner",
+        ).merge(hist_panel[["series_id", "date", "sales"]], on=["series_id", "date"],
+                how="left")
+        cens_score = diagnose.score_censoring(cens, truth)
+        log(f"  censoring detection: precision {cens_score['precision']:.3f}, "
+            f"recall {cens_score['recall']:.3f} "
+            f"(recall on full-zero days {cens_score['recall_full_zero']:.3f})")
+    else:
+        cens_score = None
+        log("  censoring detection not scored: real data carries no simulation truth")
+
+    def demand_matrix() -> pd.DataFrame:
+        """Demand the simulator scores decisions against: the generator's latent
+        demand in the demo; observed sales for a real company, which understate
+        demand on days the shelf ran empty, so its economics are conservative."""
+        if has_truth:
+            return truth.pivot_table(index="series_id", columns="date",
+                                     values="latent_demand", aggfunc="first")
+        return hist_panel.assign(series_id=hist_panel["series_id"].astype(str)).pivot_table(
+            index="series_id", columns="date", values="sales", aggfunc="first")
 
     # ---------------------------------------------------------- stage 2
     section("STAGE 2 — featurize")
     t0 = time.perf_counter()
     P = build_panel(ing.panel, diag, masks, apply_mask=cfg.enable_censor_masking)
-    sp = make_splits(P, horizon=HORIZON, n_train_origins=12 if quick else 32,
-                     n_eval_origins=4 if light else 8)
+    sp = make_splits(P, horizon=HORIZON, **{
+        "n_train_origins": 12 if quick else 32, "n_eval_origins": 4 if light else 8,
+        **(splits or {})})
     # Blocks come pre-purged from make_splits, which asserts that no block's
     # target dates reach into the next one's.
     meta_origins, conf_origins = sp.meta, sp.conformal
@@ -409,8 +434,10 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     log(f"    convex stack weights   {l_st:.5f}")
     log(f"    -> using {'stack' if l_st <= l_ff else 'fforma'} weights")
 
+    weights_method = "select"
     if cfg.enable_combination:
-        W = W_stack if (cfg.combine.method == "stack" and l_st <= l_ff) else W_fforma
+        weights_method = "stack" if (cfg.combine.method == "stack" and l_st <= l_ff) else "fforma"
+        W = W_stack if weights_method == "stack" else W_fforma
     else:
         W = meta.select_weights(diag_aligned, losses)
         log("  ablation: selection instead of combination (one-hot argmin weights)")
@@ -594,8 +621,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     section(f"ROLLING BACKTEST — {len(sp.evals)} evaluation origins")
     t0 = time.perf_counter()
 
-    tmat_all = truth.pivot_table(index="series_id", columns="date",
-                                 values="latent_demand", aggfunc="first")                     .reindex(P.series["series_id"])
+    tmat_all = demand_matrix().reindex(P.series["series_id"])
 
     items_bt = ing.items.set_index("item_id")
     it_bt = P.series["item_id"].astype(str).to_numpy()
@@ -662,8 +688,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
 
     # True demand over the eval horizon — the simulator must see demand, not
     # censored sales, or lost sales become invisible.
-    tmat = truth.pivot_table(index="series_id", columns="date", values="latent_demand",
-                             aggfunc="first").reindex(P.series["series_id"])
+    tmat = demand_matrix().reindex(P.series["series_id"])
     demand_eval = tmat[[P.dates[Oe + h] for h in horizons]].to_numpy(dtype="float64")
     demand_eval = np.nan_to_num(demand_eval)
 
@@ -845,6 +870,8 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     state = {
         "P": P, "diag": diag, "masks": masks, "panel": ing.panel, "items": ing.items,
         "splits": sp, "trained": tr, "meta": meta, "weights": W, "reconciler": rc,
+        # How W was made, so a saved model can weight a new set of series (live.py).
+        "weights_method": weights_method, "stack_tbl": stack_tbl, "meta_extra": extra,
         "conformal": conformal, "metrics": metrics, "cost": cp,
         "eval": {"origin": Oe, "y": y_eval, "valid": valid_eval, "candidates": qs_e,
                  "combined": comb_e, "reconciled": recon_e, "calibrated": calib_e,

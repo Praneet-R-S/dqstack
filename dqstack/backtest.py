@@ -93,6 +93,10 @@ def evaluate_origin(
             "wspl": evaluate.wspl(y, q, denom, wts, valid),
             "mase": float(np.nanmean(evaluate.mase(y, med(q), denom_abs, valid))),
             "bias": evaluate.bias(y, med(q), valid),
+            # Plain-language figures for a client: total absolute error over total
+            # sales, and how often the outcome fell inside the stated 5-95% range.
+            "wape": _wape(y, med(q), valid),
+            "inside_range": _inside(y, q, valid),
         }
 
     rows = [row(n, qs[n]) for n in ensemble if n in qs]
@@ -220,9 +224,26 @@ def summarise_hierarchy(hier: pd.DataFrame) -> dict:
     }
 
 
+def _wape(y: np.ndarray, m: np.ndarray, valid: np.ndarray) -> float:
+    if not valid.any():
+        return float("nan")
+    actual = np.where(valid, y, 0.0)
+    total = float(actual.sum())
+    return float(np.abs(np.where(valid, y - m, 0.0)).sum() / total) if total > 0 else float("nan")
+
+
+def _inside(y: np.ndarray, q: np.ndarray, valid: np.ndarray) -> float:
+    lo, hi = QUANTILES.index(0.05), QUANTILES.index(0.95)
+    if not valid.any():
+        return float("nan")
+    ok = (q[..., lo] <= y) & (y <= q[..., hi])
+    return float(ok[valid].mean())
+
+
 def summarise(per_origin: pd.DataFrame, stages: pd.DataFrame) -> dict:
     """Aggregate the per-origin table, plus the comparisons that matter."""
-    num = ["wrmsse", "wspl", "mase", "bias", "realized_margin", "fill_rate", "lost_margin"]
+    num = ["wrmsse", "wspl", "mase", "bias", "wape", "inside_range", "realized_margin",
+           "fill_rate", "lost_margin"]
     have = [c for c in num if c in per_origin.columns]
     agg = (
         per_origin.groupby("method")[have]

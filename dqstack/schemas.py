@@ -128,22 +128,27 @@ PRICES = TableSchema(
     primary_key=("item_id", "store_id", "wm_yr_wk"),
 )
 
-CALENDAR = TableSchema(
-    name="calendar",
-    columns=(
-        Column("date", "date", unique=True),
-        Column("wm_yr_wk", "int"),
-        Column("wday", "int", ge=1, le=7),
-        Column("month", "int", ge=1, le=12),
-        Column("year", "int"),
-        Column("event_name", "str", nullable=True),
-        Column("event_type", "str", nullable=True),
-        Column("snap_CA", "int", ge=0, le=1),
-        Column("snap_TX", "int", ge=0, le=1),
-        Column("snap_WI", "int", ge=0, le=1),
-    ),
-    primary_key=("date",),
-)
+def calendar_schema(states: tuple[str, ...] = ("CA", "TX", "WI")) -> TableSchema:
+    """The calendar carries one 0/1 flag column per state (`snap_<state>`): benefit
+    days in the demo's three states, state festivals for an Indian company. The
+    default is the demo's schema exactly, so its fingerprint is unchanged."""
+    return TableSchema(
+        name="calendar",
+        columns=(
+            Column("date", "date", unique=True),
+            Column("wm_yr_wk", "int"),
+            Column("wday", "int", ge=1, le=7),
+            Column("month", "int", ge=1, le=12),
+            Column("year", "int"),
+            Column("event_name", "str", nullable=True),
+            Column("event_type", "str", nullable=True),
+            *(Column(f"snap_{s}", "int", ge=0, le=1) for s in states),
+        ),
+        primary_key=("date",),
+    )
+
+
+CALENDAR = calendar_schema()
 
 ITEMS = TableSchema(
     name="items",

@@ -592,28 +592,79 @@ class CountLine(IdMixin, Base):
 # =============================================================== forecasting
 
 class ForecastRun(IdMixin, CreatedMixin, Base):
+    """One run of the engine for one company. kind: train (onboarding or weekly
+    retrain, with its backtest) or nightly (forecast from the saved model). The
+    screens read the latest *succeeded* run, so a failed night leaves yesterday's
+    forecast in place, its age shown (section 13)."""
     __tablename__ = "forecast_runs"
+    __table_args__ = (Index("ix_forecast_run_company_created", "company_id", "created_at"),)
     company_id: Mapped[str] = company_fk()
     kind: Mapped[str] = mapped_column(String(12), default="nightly", nullable=False)
+    trigger: Mapped[str] = mapped_column(String(16), default="schedule", nullable=False)
+    tier: Mapped[str | None] = mapped_column(String(12))            # engine|starter
     data_cutoff: Mapped[date | None] = mapped_column(Date)
     model_version: Mapped[str | None] = mapped_column(String(64))
+    model_version_id: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     accuracy: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    error: Mapped[str | None] = mapped_column(Text)
+    message: Mapped[str | None] = mapped_column(Text)       # plain-language outcome
+    error: Mapped[str | None] = mapped_column(Text)         # technical detail, for support
 
 
 class ModelVersion(IdMixin, CreatedMixin, Base):
+    """A trained model. Becomes active only if it would have earned at least as much
+    in the backtest as the active one (the engine's promotion rule); the decision
+    and both figures are kept in `promotion`."""
     __tablename__ = "model_versions"
     __table_args__ = (UniqueConstraint("company_id", "version"),)
     company_id: Mapped[str] = company_fk()
     version: Mapped[str] = mapped_column(String(64), nullable=False)
+    tier: Mapped[str] = mapped_column(String(12), default="engine", nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="candidate", nullable=False)
+    data_cutoff: Mapped[date | None] = mapped_column(Date)
+    n_series: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    train_seconds: Mapped[float | None] = mapped_column()
     path: Mapped[str | None] = mapped_column(String(500))
     backtest_profit_paise: Mapped[int | None] = mapped_column(BigInteger)
     backtest: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    promotion: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     promoted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ModelArtifact(Base):
+    """The saved model itself (dqstack/live.py), compressed. Kept in the database so a
+    database backup is a complete backup and every server sees the same model."""
+    __tablename__ = "model_artifacts"
+    version_id: Mapped[str] = mapped_column(String(32), ForeignKey("model_versions.id",
+                                                                   ondelete="CASCADE"),
+                                            primary_key=True)
+    company_id: Mapped[str] = company_fk()
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class ForecastScore(IdMixin, Base):
+    """Monitoring (section 10): each night, the previous forecast's first day scored
+    against what sold, per store and category."""
+    __tablename__ = "forecast_scores"
+    __table_args__ = (UniqueConstraint("run_id", "store_id", "category"),
+                      Index("ix_forecast_score_company_day", "company_id", "day"))
+    company_id: Mapped[str] = company_fk()
+    run_id: Mapped[str] = mapped_column(String(32), ForeignKey("forecast_runs.id",
+                                                               ondelete="CASCADE"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    store_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    category: Mapped[str] = mapped_column(String(120), nullable=False)
+    n: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    forecast_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    abs_error_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    inside_range: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class Recommendation(IdMixin, Base):
@@ -628,7 +679,24 @@ class Recommendation(IdMixin, Base):
                                           nullable=False)
     product_id: Mapped[str] = mapped_column(String(32), ForeignKey("products.id"), index=True,
                                             nullable=False)
-    daily: Mapped[list] = mapped_column(JSON, default=list, nullable=False)   # [[q..]*28]
+    # Each of the next 28 days: [5%, 50%, 95%] in thousandths.
+    daily: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # Demand over the risk period at the engine's nine quantile levels, for the
+    # cost-of-being-wrong curve on the Today card.
+    risk_q: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    risk_days: Mapped[int] = mapped_column(Integer, default=9, nullable=False)
+    lead_time_days: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    supplier_id: Mapped[str | None] = mapped_column(String(32))
+    on_hand_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    on_order_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    stock_known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    suggested_milli: Mapped[int | None] = mapped_column(BigInteger)
+    underage_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    overage_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    planning_class: Mapped[str | None] = mapped_column(String(20))
+    history_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # No history of its own yet: an estimate from similar products (section 13).
+    estimate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     week1_mid_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     week1_lo_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     week1_hi_milli: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

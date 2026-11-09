@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 22:49:33.813911
+Create Date: 2026-11-08 23:20:41.549405
 """
 
 from __future__ import annotations
@@ -207,12 +207,17 @@ def upgrade() -> None:
     op.create_table('forecast_runs',
     sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('kind', sa.String(length=12), nullable=False),
+    sa.Column('trigger', sa.String(length=16), nullable=False),
+    sa.Column('tier', sa.String(length=12), nullable=True),
     sa.Column('data_cutoff', sa.Date(), nullable=True),
     sa.Column('model_version', sa.String(length=64), nullable=True),
+    sa.Column('model_version_id', sa.String(length=32), nullable=True),
     sa.Column('status', sa.String(length=16), nullable=False),
+    sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('timings', sa.JSON(), nullable=False),
     sa.Column('accuracy', sa.JSON(), nullable=False),
+    sa.Column('message', sa.Text(), nullable=True),
     sa.Column('error', sa.Text(), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -220,6 +225,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('forecast_runs', schema=None) as batch_op:
+        batch_op.create_index('ix_forecast_run_company_created', ['company_id', 'created_at'], unique=False)
         batch_op.create_index(batch_op.f('ix_forecast_runs_company_id'), ['company_id'], unique=False)
 
     op.create_table('import_jobs',
@@ -276,9 +282,15 @@ def upgrade() -> None:
     op.create_table('model_versions',
     sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('version', sa.String(length=64), nullable=False),
+    sa.Column('tier', sa.String(length=12), nullable=False),
+    sa.Column('status', sa.String(length=12), nullable=False),
+    sa.Column('data_cutoff', sa.Date(), nullable=True),
+    sa.Column('n_series', sa.Integer(), nullable=False),
+    sa.Column('train_seconds', sa.Float(), nullable=True),
     sa.Column('path', sa.String(length=500), nullable=True),
     sa.Column('backtest_profit_paise', sa.BigInteger(), nullable=True),
     sa.Column('backtest', sa.JSON(), nullable=False),
+    sa.Column('promotion', sa.JSON(), nullable=False),
     sa.Column('promoted', sa.Boolean(), nullable=False),
     sa.Column('promoted_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
@@ -547,6 +559,27 @@ def upgrade() -> None:
     with op.batch_alter_table('day_closes', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_day_closes_company_id'), ['company_id'], unique=False)
 
+    op.create_table('forecast_scores',
+    sa.Column('company_id', sa.String(length=32), nullable=False),
+    sa.Column('run_id', sa.String(length=32), nullable=False),
+    sa.Column('day', sa.Date(), nullable=False),
+    sa.Column('store_id', sa.String(length=32), nullable=False),
+    sa.Column('category', sa.String(length=120), nullable=False),
+    sa.Column('n', sa.Integer(), nullable=False),
+    sa.Column('actual_milli', sa.BigInteger(), nullable=False),
+    sa.Column('forecast_milli', sa.BigInteger(), nullable=False),
+    sa.Column('abs_error_milli', sa.BigInteger(), nullable=False),
+    sa.Column('inside_range', sa.Integer(), nullable=False),
+    sa.Column('id', sa.String(length=32), nullable=False),
+    sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['run_id'], ['forecast_runs.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('run_id', 'store_id', 'category')
+    )
+    with op.batch_alter_table('forecast_scores', schema=None) as batch_op:
+        batch_op.create_index('ix_forecast_score_company_day', ['company_id', 'day'], unique=False)
+        batch_op.create_index(batch_op.f('ix_forecast_scores_company_id'), ['company_id'], unique=False)
+
     op.create_table('import_changes',
     sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('job_id', sa.String(length=32), nullable=False),
@@ -576,6 +609,19 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('import_files', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_import_files_company_id'), ['company_id'], unique=False)
+
+    op.create_table('model_artifacts',
+    sa.Column('version_id', sa.String(length=32), nullable=False),
+    sa.Column('company_id', sa.String(length=32), nullable=False),
+    sa.Column('size', sa.Integer(), nullable=False),
+    sa.Column('sha256', sa.String(length=64), nullable=False),
+    sa.Column('content', sa.LargeBinary(), nullable=False),
+    sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['version_id'], ['model_versions.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('version_id')
+    )
+    with op.batch_alter_table('model_artifacts', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_model_artifacts_company_id'), ['company_id'], unique=False)
 
     op.create_table('password_resets',
     sa.Column('company_id', sa.String(length=32), nullable=True),
@@ -656,6 +702,19 @@ def upgrade() -> None:
     sa.Column('store_id', sa.String(length=32), nullable=False),
     sa.Column('product_id', sa.String(length=32), nullable=False),
     sa.Column('daily', sa.JSON(), nullable=False),
+    sa.Column('risk_q', sa.JSON(), nullable=False),
+    sa.Column('risk_days', sa.Integer(), nullable=False),
+    sa.Column('lead_time_days', sa.Integer(), nullable=False),
+    sa.Column('supplier_id', sa.String(length=32), nullable=True),
+    sa.Column('on_hand_milli', sa.BigInteger(), nullable=False),
+    sa.Column('on_order_milli', sa.BigInteger(), nullable=False),
+    sa.Column('stock_known', sa.Boolean(), nullable=False),
+    sa.Column('suggested_milli', sa.BigInteger(), nullable=True),
+    sa.Column('underage_paise', sa.BigInteger(), nullable=False),
+    sa.Column('overage_paise', sa.BigInteger(), nullable=False),
+    sa.Column('planning_class', sa.String(length=20), nullable=True),
+    sa.Column('history_days', sa.Integer(), nullable=False),
+    sa.Column('estimate', sa.Boolean(), nullable=False),
     sa.Column('week1_mid_milli', sa.BigInteger(), nullable=False),
     sa.Column('week1_lo_milli', sa.BigInteger(), nullable=False),
     sa.Column('week1_hi_milli', sa.BigInteger(), nullable=False),
@@ -1032,6 +1091,10 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_password_resets_company_id'))
 
     op.drop_table('password_resets')
+    with op.batch_alter_table('model_artifacts', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_model_artifacts_company_id'))
+
+    op.drop_table('model_artifacts')
     with op.batch_alter_table('import_files', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_import_files_company_id'))
 
@@ -1041,6 +1104,11 @@ def downgrade() -> None:
         batch_op.drop_index('ix_import_change_job_seq')
 
     op.drop_table('import_changes')
+    with op.batch_alter_table('forecast_scores', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_forecast_scores_company_id'))
+        batch_op.drop_index('ix_forecast_score_company_day')
+
+    op.drop_table('forecast_scores')
     with op.batch_alter_table('day_closes', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_day_closes_company_id'))
 
@@ -1115,6 +1183,7 @@ def downgrade() -> None:
     op.drop_table('import_jobs')
     with op.batch_alter_table('forecast_runs', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_forecast_runs_company_id'))
+        batch_op.drop_index('ix_forecast_run_company_created')
 
     op.drop_table('forecast_runs')
     with op.batch_alter_table('column_mappings', schema=None) as batch_op:
