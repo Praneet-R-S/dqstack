@@ -51,16 +51,24 @@
     if (!r || !r.nav) return null;
     if (r.can && !DQ.can(r.can)) return null;
     if (r.show && !r.show()) return null;
-    var active = current && current.pattern === pattern;
+    var active = current === pattern;
     return h("a", { class: "nav-item", href: pattern, "aria-current": active ? "page" : null },
       h("span", { class: "nav-dot", "aria-hidden": "true" }), r.nav,
       r.navBadge ? h("span", { class: "nav-badge", "data-nav-badge": pattern }) : null);
   }
   function frame(current) {
+    /* A sub-page (#/settings/stores, #/orders/:id) lights the menu item it sits under:
+       the longest menu route that is the page's route or a prefix of it. */
+    var active = null, cur = current && current.pattern;
+    GROUPS.forEach(function (g) {
+      g.items.forEach(function (p) {
+        if (cur && (cur === p || cur.indexOf(p + "/") === 0) && (!active || p.length > active.length)) active = p;
+      });
+    });
     var nav = h("nav", { class: "sidebar", "aria-label": "Main" },
       h("a", { class: "brand", href: "#/home" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "DQ-Stack"),
       GROUPS.map(function (g) {
-        var items = g.items.map(function (p) { return navItem(p, current); }).filter(Boolean);
+        var items = g.items.map(function (p) { return navItem(p, active); }).filter(Boolean);
         if (!items.length) return null;
         return h("div", { class: "nav-group" }, g.label ? h("p", { class: "nav-label" }, g.label) : null, items);
       }));

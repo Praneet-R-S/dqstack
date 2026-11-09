@@ -50,11 +50,14 @@ def stock_list(c: Ctx = Depends(ctx), db: Session = Depends(get_db),
     store = _store(db, c, store_id)
     if status and status not in S.STATUS_ORDER:
         raise HTTPException(422, f"Status must be one of: {', '.join(S.STATUS_ORDER)}.")
-    rows = S.stock_rows(db, c.company_id, store, category=category, supplier_id=supplier_id,
-                        status=status, q=q)
+    # Counts cover every status under the other filters, so the status chips keep their
+    # numbers when one of them is chosen.
+    rows = S.stock_rows(db, c.company_id, store, category=category, supplier_id=supplier_id, q=q)
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
+    if status:
+        rows = [r for r in rows if r["status"] == status]
     return {"store": {"id": store.id, "code": store.code, "name": store.name},
             "as_of": utcnow().isoformat(), "total": len(rows), "status_counts": counts,
             "rows": rows[offset:offset + limit]}

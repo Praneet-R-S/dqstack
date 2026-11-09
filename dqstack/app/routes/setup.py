@@ -49,7 +49,7 @@ STEPS: list[tuple[str, str, str, int | None, str, bool]] = [
      "#/stock/opening", False),
     ("sales_history", "Load sales history",
      "Daily units sold per store and product. At least 8 weeks to start; 12 months so "
-     "festivals are learned; 2 to 3 years is best.", 20, "#/imports/new/sales", False),
+     "festivals are learned; 2 to 3 years is best.", 20, "#/imports/new/sales_history", False),
     ("prices", "Prices and promotions",
      "Optional. Past prices improve accuracy, and planned promotions are forecast in "
      "advance.", 15, "#/imports/new/prices", True),
@@ -263,7 +263,7 @@ def readiness(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                                 "cost or GST rate", "route": "#/imports/new/products"})
     if not pairs_total:
         missing.append({"what": "No sales history: forecasts start in new store mode",
-                        "route": "#/imports/new/sales"})
+                        "route": "#/imports/new/sales_history"})
     if not _count(db, Supplier, cid):
         missing.append({"what": "No suppliers: company defaults (2 day lead time, weekly "
                                 "ordering) will be used", "route": "#/imports/new/suppliers"})

@@ -48,7 +48,7 @@ class Settings:
     cookie_secure: bool = False
     cookie_name: str = "dq_session"
     # Where the server is reachable, used in invitation and reset links.
-    public_url: str = "http://127.0.0.1:8000"
+    public_url: str = "http://127.0.0.1:8130"
     # Email. With no SMTP host, messages are written to the log instead of sent.
     smtp_host: str | None = None
     smtp_port: int = 587
@@ -82,7 +82,7 @@ def load() -> Settings:
         lockout_failures=int(_env("DQ_LOCKOUT_FAILURES", "5") or 5),
         lockout_minutes=int(_env("DQ_LOCKOUT_MINUTES", "15") or 15),
         cookie_secure=_bool("DQ_COOKIE_SECURE", secure_default),
-        public_url=(_env("DQ_PUBLIC_URL", "http://127.0.0.1:8000") or "").rstrip("/"),
+        public_url=(_env("DQ_PUBLIC_URL", "http://127.0.0.1:8130") or "").rstrip("/"),
         smtp_host=_env("DQ_SMTP_HOST"),
         smtp_port=int(_env("DQ_SMTP_PORT", "587") or 587),
         smtp_user=_env("DQ_SMTP_USER"),

@@ -109,11 +109,11 @@ def _tz(db: Session, company_id: str) -> ZoneInfo:
 
 
 def _alert(db: Session, company_id: str, store_id: str | None, product_id: str | None,
-           kind: str, severity: str, message: str, key: str) -> None:
+           kind: str, severity: str, message: str, key: str, link: str | None = None) -> None:
     if db.scalar(select(Alert.id).where(Alert.company_id == company_id, Alert.dedupe_key == key)):
         return
     db.add(Alert(company_id=company_id, store_id=store_id, product_id=product_id, kind=kind,
-                 severity=severity, message=message, dedupe_key=key))
+                 severity=severity, message=message, dedupe_key=key, link=link))
 
 
 # ===================================================================== paying
@@ -245,7 +245,8 @@ def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
             if ln.unmapped_barcode:
                 _alert(db, c.company_id, store.id, None, "unmapped_barcode", "attention",
                        f"Barcode {ln.unmapped_barcode} was sold as a misc item. Add it to a "
-                       "product so its stock is counted.", f"unmapped_barcode:{ln.unmapped_barcode}")
+                       "product so its stock is counted.", f"unmapped_barcode:{ln.unmapped_barcode}",
+                       link="#/stock?q=" + ln.unmapped_barcode)
             continue
         res = ledger.post(db, company_id=c.company_id, store_id=store.id,
                           product_id=ln.product_id, qty_milli=-ln.qty_milli, type="sale",

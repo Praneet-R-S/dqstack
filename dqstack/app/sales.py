@@ -215,10 +215,14 @@ def day_close_status(db: Session, c, store: Store, day: date) -> dict:
         except ImportError:
             z = None
     checks = []
+    # The words follow the day being closed: "today" only when it is today.
+    when = "today" if day == local_today(tz) else f"on {day:%d %b}"
+    whose = "Today's" if when == "today" else f"The {day:%d %b}"
     if store.mode == "standalone":
         checks.append({"key": "sales", "ok": sales_rows > 0,
-                       "text": "Today's sales are in" if sales_rows else
-                       "Upload today's sales file or type the totals on the Sales screen"})
+                       "text": f"{whose} sales are in" if sales_rows else
+                       f"Upload {whose[0].lower() + whose[1:]} sales file or type the totals on "
+                       "the Sales screen"})
     else:
         pending = z["devices_waiting"] if z else 0
         checks.append({"key": "tills", "ok": pending == 0,
@@ -228,8 +232,9 @@ def day_close_status(db: Session, c, store: Store, day: date) -> dict:
                    "text": "No bill is left open" if not open_bills else
                    f"{len(open_bills)} open bill(s) will be voided when you close"})
     checks.append({"key": "deliveries", "ok": True,
-                   "text": f"{deliveries} deliveries received today" if deliveries else
-                   "No deliveries received today. If one came, receive it first."})
+                   "text": (f"{deliveries} {'delivery' if deliveries == 1 else 'deliveries'} "
+                            f"received {when}") if deliveries else
+                   f"No deliveries received {when}. If one came, receive it first."})
     return {"store_id": store.id, "day": day.isoformat(), "mode": store.mode,
             "closed": closed is not None,
             "closed_automatically": bool(closed and closed.automatic),

@@ -342,7 +342,11 @@ def get_supplier(supplier_id: str, c: Ctx = Depends(ctx), db: Session = Depends(
     d = supplier_dict(s)
     d["product_list"] = [{"product_id": p.id, "sku": p.sku, "name": p.name,
                           "supplier_code": l.supplier_code, "cost_paise": l.cost_paise,
-                          "case_pack": l.case_pack or p.case_pack,
+                          # The supplier's own terms as stored (None = the product's own);
+                          # the effective case size is given separately.
+                          "case_pack": l.case_pack, "product_case_pack": p.case_pack,
+                          "effective_case_pack": l.case_pack or p.case_pack,
+                          "unit": p.unit or "each", "preferred": l.preferred,
                           "min_order_qty_milli": l.min_order_qty_milli}
                          for l, p in db.execute(select(SupplierProduct, Product).join(
                              Product, Product.id == SupplierProduct.product_id).where(

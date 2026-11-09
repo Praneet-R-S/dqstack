@@ -67,7 +67,10 @@ a { color: var(--ui-accent); }
 .store-switch { min-width: 180px; }
 .store-name { padding: 0 4px; }
 .search { flex: 1; max-width: 420px; }
-.save-status { margin-left: auto; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.save-status { margin-left: auto; font-size: 13px; color: var(--text-secondary); white-space: nowrap;
+  min-width: 0; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
+/* The hidden attribute wins over any display rule (.field, .row, .tile ...). */
+[hidden] { display: none !important; }
 .save-status[data-kind="ok"]::before { content: "● "; color: var(--state-ok); }
 .save-status[data-kind="busy"]::before { content: "● "; color: var(--series-forecast); }
 .save-status[data-kind="attention"] { color: var(--state-attention); }

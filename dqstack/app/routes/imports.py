@@ -89,7 +89,9 @@ def _job(db: Session, c: Ctx, job_id: str) -> ImportJob:
 
 @router.get("/{job_id}")
 def get_job(job_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
-    return job_dict(_job(db, c, job_id))
+    j = _job(db, c, job_id)
+    p = db.get(Person, j.person_id) if j.person_id else None
+    return job_dict(j, {p.id: p.name} if p else {})
 
 
 @router.post("", status_code=201)

@@ -78,6 +78,19 @@ def resolve(alert_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db))
     return {"ok": True}
 
 
+@router.post("/alerts/{alert_id}/reopen")
+def reopen(alert_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Undo for Done. A condition that has cleared will be resolved again by the next check."""
+    a = get_or_404(db, c, Alert, alert_id, what="That alert")
+    if a.kind not in A.visible_kinds(c.role):
+        raise HTTPException(404, "That alert was not found.")
+    if a.resolved_at is not None:
+        a.resolved_at = None
+        audit.log(db, c, "alert.reopened", "alert", a.id, store_id=a.store_id)
+        db.commit()
+    return {"ok": True}
+
+
 class SettingsIn(BaseModel):
     email: bool = False
     whatsapp: bool = False

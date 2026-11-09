@@ -345,7 +345,8 @@ def delivery_dict(db: Session, d: Delivery) -> dict:
             "invoice_number": d.invoice_number, "note": d.note,
             "created_at": d.created_at.isoformat() if d.created_at else None,
             "lines": [{"product_id": l.product_id, "sku": names[l.product_id].sku,
-                       "name": names[l.product_id].name, "received_milli": l.received_milli,
+                       "name": names[l.product_id].name, "unit": names[l.product_id].unit or "each",
+                       "received_milli": l.received_milli,
                        "damaged_milli": l.damaged_milli, "reject_reason": l.reject_reason,
                        "credit_status": l.credit_status, "unit_cost_paise": l.unit_cost_paise,
                        "batch": l.batch, "expiry": l.expiry.isoformat() if l.expiry else None}
@@ -441,7 +442,8 @@ def transfer_dict(db: Session, t: Transfer) -> dict:
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "received_at": t.received_at.isoformat() if t.received_at else None,
             "lines": [{"product_id": l.product_id, "sku": names[l.product_id].sku,
-                       "name": names[l.product_id].name, "sent_milli": l.sent_milli,
+                       "name": names[l.product_id].name, "unit": names[l.product_id].unit or "each",
+                       "sent_milli": l.sent_milli,
                        "received_milli": l.received_milli,
                        "lost_milli": (l.sent_milli - l.received_milli)
                        if l.received_milli is not None else 0} for l in t.lines]}

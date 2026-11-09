@@ -62,9 +62,21 @@ def bill_dict(b: Bill, db: Session | None = None) -> dict:
 
 @router.get("/scan")
 def scan(code: str = Query(min_length=1, max_length=64), c: Ctx = Depends(ctx),
-         db: Session = Depends(get_db)):
+         db: Session = Depends(get_db), store_id: str | None = None):
+    """With store_id, the answer also carries the product and today's price there, so a
+    till needs one call per scan."""
     c.require("data.read")
-    return K.scan(db, c.company_id, code)
+    store = store_or_404(db, c, store_id) if store_id else None
+    out = K.scan(db, c.company_id, code)
+    if store is not None and out.get("found"):
+        from ..models import Product
+        from ..sales import local_today, tz_of
+        p = db.get(Product, out["product_id"])
+        out.update({"sku": p.sku, "name": p.name, "unit": p.unit or "each",
+                    "gst_rate_bp": p.gst_rate_bp, "store_id": store.id,
+                    "price_paise": K.price_today(db, p, store.id,
+                                                 local_today(tz_of(db, c.company_id)))})
+    return out
 
 
 class LineIn(BaseModel):

@@ -67,10 +67,20 @@
     }
     return (neg ? "-" : "") + s;
   }
-  function istParts(iso) {
-    var d = new Date(iso);
-    var t = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
-    return t;
+  /* A timestamp without a zone is UTC: the server stores UTC, and SQLite returns it
+     without the offset. Reading it as local time would put every time 5.5 h off. */
+  function asDate(iso) {
+    var s = String(iso);
+    if (/T\d|\s\d{2}:\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/.test(s)) s = s.replace(" ", "T") + "Z";
+    return new Date(s);
+  }
+  var IST = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  /* The parts of a moment as seen in India, whatever zone the browser is in. */
+  function ist(iso) {
+    var p = {};
+    IST.formatToParts(asDate(iso)).forEach(function (x) { p[x.type] = x.value; });
+    return { date: p.year + "-" + p.month + "-" + p.day, time: p.hour + ":" + p.minute };
   }
   DQ.fmt = {
     num: function (n) { return n === null || n === undefined ? "—" : group(n); },
@@ -100,15 +110,11 @@
       return p[2] + " " + MONTHS[+p[1] - 1] + " " + p[0];
     },
     dayShort: function (iso) { if (!iso) return "—"; var p = iso.slice(0, 10).split("-"); return +p[2] + " " + MONTHS[+p[1] - 1]; },
-    time: function (iso) {                  // 14:32 (IST)
-      if (!iso) return "—";
-      var t = istParts(iso);
-      return ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2);
-    },
-    dateTime: function (iso) { return iso ? DQ.fmt.date(istParts(iso).toISOString()) + ", " + DQ.fmt.time(iso) + " IST" : "—"; },
+    time: function (iso) { return iso ? ist(iso).time : "—"; },          // 14:32 (IST)
+    dateTime: function (iso) { if (!iso) return "—"; var p = ist(iso); return DQ.fmt.date(p.date) + ", " + p.time + " IST"; },
     ago: function (iso) {
       if (!iso) return "never";
-      var m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+      var m = Math.round((Date.now() - asDate(iso).getTime()) / 60000);
       if (m < 1) return "just now";
       if (m < 60) return m + " min ago";
       if (m < 60 * 36) return Math.round(m / 60) + " h ago";
@@ -116,7 +122,7 @@
     },
     toMilli: function (text) { var v = parseFloat(String(text).replace(/,/g, "")); return isNaN(v) ? null : Math.round(v * 1000); },
     toPaise: function (text) { var v = parseFloat(String(text).replace(/[₹,\s]|Rs\.?/gi, "")); return isNaN(v) ? null : Math.round(v * 100); },
-    today: function () { return istParts(new Date().toISOString()).toISOString().slice(0, 10); }
+    today: function () { return ist(new Date().toISOString()).date; }
   };
 
   /* ---------------------------------------------------------------- save status */

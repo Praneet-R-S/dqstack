@@ -54,6 +54,7 @@ class Line:
     weekly_milli: int = 0                # forecast demand next 7 days (raise priority)
     reasons: list[str] = field(default_factory=list)
     recommendation_id: str | None = None
+    unit: str = "each"
 
     @property
     def value_paise(self) -> int:
@@ -156,7 +157,7 @@ def suggestions(db: Session, company_id: str, run_id: str, store_id: str,
             product_id=p.id, sku=p.sku, name=p.name, unit_cost_paise=cost, case_milli=case,
             target_milli=target, on_hand_milli=r.on_hand_milli, on_order_milli=r.on_order_milli,
             need_milli=need, qty_milli=qty, weekly_milli=r.week1_mid_milli, reasons=reasons,
-            recommendation_id=r.id))
+            recommendation_id=r.id, unit=p.unit or "each"))
     out = []
     for sid, lines in groups.items():
         sup = suppliers.get(sid) if sid else None
@@ -175,7 +176,7 @@ def suggestions(db: Session, company_id: str, run_id: str, store_id: str,
             "value_before_minimum_paise": before,
             "total_paise": sum(l.value_paise for l in lines),
             "raised": raised, "alternative": alt,
-            "lines": [{"product_id": l.product_id, "sku": l.sku, "name": l.name,
+            "lines": [{"product_id": l.product_id, "sku": l.sku, "name": l.name, "unit": l.unit,
                        "target_milli": l.target_milli, "on_hand_milli": l.on_hand_milli,
                        "on_order_milli": l.on_order_milli, "need_milli": l.need_milli,
                        "qty_milli": l.qty_milli, "case_milli": l.case_milli,

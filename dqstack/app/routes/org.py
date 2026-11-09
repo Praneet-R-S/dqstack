@@ -455,6 +455,26 @@ class GrantIn(BaseModel):
     hours: int = Field(default=24, ge=1, le=168)
 
 
+@router.get("/company/support-grants")
+def list_support(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Every grant this company has made, newest first, with whether it is open now."""
+    if c.role != "owner":
+        raise HTTPException(403, "Only an Owner can see support access.")
+    names = {p.id: p.name for p in db.scalars(select(Person).where(
+        Person.company_id == c.company_id))}
+    now = utcnow()
+    out = []
+    for g in db.scalars(select(SupportGrant).where(SupportGrant.company_id == c.company_id)
+                        .order_by(SupportGrant.created_at.desc()).limit(100)):
+        exp = g.expires_at if g.expires_at.tzinfo else g.expires_at.replace(tzinfo=now.tzinfo)
+        out.append({"id": g.id, "reason": g.reason, "granted_by": names.get(g.granted_by),
+                    "created_at": g.created_at.isoformat() if g.created_at else None,
+                    "expires_at": g.expires_at.isoformat(),
+                    "revoked_at": g.revoked_at.isoformat() if g.revoked_at else None,
+                    "active": g.revoked_at is None and exp > now})
+    return out
+
+
 @router.post("/company/support-grants", status_code=201)
 def grant_support(body: GrantIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     """The client, not the vendor, opens the door, for a limited time, on the record."""
