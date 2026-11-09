@@ -158,6 +158,197 @@ def list_orders(c: Ctx = Depends(ctx), db: Session = Depends(get_db),
         q.order_by(PurchaseOrder.created_at.desc()).limit(limit))]
 
 
+@router.get("/suggestions")
+def suggestions(store_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """The Orders screen: suggested lines grouped by supplier, with each supplier's
+    total against its minimum (section 12)."""
+    from .. import ordering
+    from ..forecast import jobs
+    store = store_or_404(db, c, store_id)
+    c.require("data.read", store.id)
+    cur = jobs.current_run(db, c.company_id)
+    if cur is None:
+        return {"run": None, "groups": [], "skipped": [], "stock_unknown": [],
+                "message": "Order suggestions appear after the first forecast."}
+    out = ordering.suggestions(db, c.company_id, cur.id, store.id)
+    out["run"] = {"id": cur.id, "data_cutoff": cur.data_cutoff.isoformat()
+                  if cur.data_cutoff else None}
+    if not out["groups"] and out["stock_unknown"]:
+        out["message"] = (f"{len(out['stock_unknown'])} products have no known stock, so no "
+                          "order is suggested for them. Count them or set opening stock.")
+    return out
+
+
+class FromSuggestionsIn(BaseModel):
+    store_id: str
+    supplier_ids: list[str | None] | None = None
+
+
+@router.post("/from-suggestions", status_code=201)
+def from_suggestions(body: FromSuggestionsIn, c: Ctx = Depends(ctx),
+                     db: Session = Depends(get_db)):
+    """Turn suggested lines into draft orders, one per supplier. A draft already made
+    from suggestions for that supplier is refreshed rather than duplicated."""
+    from .. import ordering
+    from ..forecast import jobs
+    store = store_or_404(db, c, body.store_id)
+    c.require("orders.create", store.id)
+    cur = jobs.current_run(db, c.company_id)
+    if cur is None:
+        raise HTTPException(409, "There is no forecast yet, so nothing to suggest.")
+    groups = ordering.suggestions(db, c.company_id, cur.id, store.id)["groups"]
+    if body.supplier_ids is not None:
+        groups = [g for g in groups if g["supplier_id"] in body.supplier_ids]
+    made = []
+    for g in groups:
+        lines = [LineIn(product_id=l["product_id"], qty_milli=l["qty_milli"],
+                        unit_cost_paise=l["unit_cost_paise"],
+                        reason="; ".join(l["reasons"])[:300] or None) for l in g["lines"]]
+        note = g["raised"] or None
+        existing = db.scalar(select(PurchaseOrder).where(
+            PurchaseOrder.company_id == c.company_id, PurchaseOrder.store_id == store.id,
+            PurchaseOrder.status == "draft", PurchaseOrder.origin == "suggested",
+            PurchaseOrder.supplier_id.is_(None) if g["supplier_id"] is None
+            else PurchaseOrder.supplier_id == g["supplier_id"]))
+        if existing is not None:
+            existing.lines = _lines(db, c, lines, existing.supplier_id)
+            existing.notes = note
+            po = existing
+        else:
+            po = create_order(db, c, OrderIn(store_id=store.id, supplier_id=g["supplier_id"],
+                                             lines=lines, origin="suggested", notes=note))
+        db.flush()
+        made.append(po)
+    db.commit()
+    return [order_dict(db, po) for po in made]
+
+
+@router.get("/{order_id}/pdf")
+def order_pdf(order_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    po = get_or_404(db, c, PurchaseOrder, order_id, what="That order")
+    from fastapi.responses import Response
+    return Response(render_pdf(db, po), media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{po.number}.pdf"'})
+
+
+def render_pdf(db: Session, po: PurchaseOrder) -> bytes:
+    """A purchase order a supplier can act on. Amounts in rupees, excluding GST."""
+    import io
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    from ..formats import day, group_indian
+    from ..models import Company, SupplierProduct
+    d = order_dict(db, po)
+    co = db.get(Company, po.company_id)
+    store = db.get(Store, po.store_id)
+    sup = db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    codes = {l.product_id: l.supplier_code for l in db.scalars(select(SupplierProduct).where(
+        SupplierProduct.supplier_id == po.supplier_id))} if po.supplier_id else {}
+
+    def rs(paise: int) -> str:
+        whole, frac = divmod(abs(int(paise)), 100)
+        return f"Rs. {group_indian(whole)}.{frac:02d}"
+
+    st = getSampleStyleSheet()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm,
+                            topMargin=16 * mm, bottomMargin=16 * mm,
+                            title=f"Purchase order {po.number}")
+    head = [Paragraph(f"<b>Purchase order {po.number}</b>", st["Title"]),
+            Paragraph(f"{co.name}" + (f" &middot; GSTIN {co.gstin}" if co.gstin else ""), st["Normal"]),
+            Paragraph(f"Deliver to: {store.name}" + (f", {store.address}" if store.address else ""),
+                      st["Normal"]),
+            Paragraph(f"Supplier: {sup.name if sup else 'Not set'}"
+                      + (f" &middot; GSTIN {sup.gstin}" if sup and sup.gstin else ""), st["Normal"]),
+            Paragraph(f"Date: {day(po.approved_at or po.created_at)}"
+                      + (f" &middot; Expected: {day(po.expected_date)}" if po.expected_date else ""),
+                      st["Normal"]),
+            Spacer(1, 6 * mm)]
+    rows = [["SKU", "Your code", "Product", "Quantity", "Cases", "Unit cost", "Value"]]
+    for l in d["lines"]:
+        cases = l["qty_milli"] // max(l["case_pack"], 1) // 1000 if l["case_pack"] else ""
+        rows.append([l["sku"], codes.get(l["product_id"]) or "", Paragraph(l["name"], st["Normal"]),
+                     f"{l['qty_milli'] / 1000:g}", str(cases),
+                     rs(l["unit_cost_paise"] or 0), rs(l["value_paise"])])
+    rows.append(["", "", "", "", "", "Total", rs(d["total_paise"])])
+    t = Table(rows, colWidths=[24 * mm, 22 * mm, 54 * mm, 18 * mm, 14 * mm, 24 * mm, 26 * mm],
+              repeatRows=1)
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDE9FE")),
+        ("FONTNAME", (-2, -1), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#6D28D9")),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+    tail = [Spacer(1, 6 * mm),
+            Paragraph("Amounts exclude GST. Please quote this order number on your invoice.",
+                      st["Normal"])]
+    if po.notes:
+        tail.append(Paragraph(f"Note: {po.notes}", st["Normal"]))
+    doc.build(head + [t] + tail)
+    return buf.getvalue()
+
+
+class SendIn(BaseModel):
+    channel: str                     # email | whatsapp
+    to: str | None = Field(default=None, max_length=254)
+
+
+@router.post("/{order_id}/send")
+def send_order(order_id: str, body: SendIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """By email with the PDF attached, or as a WhatsApp message the purchaser sends
+    from their own phone (a link that opens WhatsApp with the order filled in; a
+    WhatsApp Business API account can replace this later)."""
+    from urllib.parse import quote
+
+    from ..formats import rupees
+    from ..mailer import MailError, send
+    po = get_or_404(db, c, PurchaseOrder, order_id, what="That order")
+    c.require("orders.create", po.store_id)
+    if po.status not in ("approved", "sent"):
+        raise HTTPException(409, "Approve the order before sending it." if po.status == "draft"
+                            else f"This order is {po.status.replace('_', ' ')}.")
+    sup = db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    d = order_dict(db, po)
+    summary = (f"Purchase order {po.number} from {d['store']}: "
+               + "; ".join(f"{l['name']} x {l['qty_milli'] / 1000:g}" for l in d["lines"][:30])
+               + f". Total {rupees(d['total_paise'], decimals=False)} excluding GST.")
+    out: dict = {}
+    if body.channel == "email":
+        to = (body.to or (sup.email if sup else None) or "").strip()
+        if not to:
+            raise HTTPException(422, "This supplier has no email address. Add one, or send by "
+                                     "WhatsApp.")
+        try:
+            send(to, f"Purchase order {po.number}", summary + "\n\nThe order is attached as a PDF.",
+                 attachments=[(f"{po.number}.pdf", render_pdf(db, po), "application/pdf")])
+        except MailError as e:
+            raise HTTPException(502, str(e)) from None
+        out = {"sent_to": to}
+    elif body.channel == "whatsapp":
+        digits = "".join(ch for ch in (body.to or (sup.phone if sup else "") or "") if ch.isdigit())
+        if len(digits) == 10:
+            digits = "91" + digits
+        if len(digits) < 11:
+            raise HTTPException(422, "This supplier has no phone number. Add one, or send by email.")
+        out = {"whatsapp_link": f"https://wa.me/{digits}?text={quote(summary)}"}
+    else:
+        raise HTTPException(422, "Channel must be email or whatsapp.")
+    if po.status == "approved":
+        po.status = "sent"
+        po.sent_at = utcnow()
+    audit.log(db, c, "order.sent", "purchase_order", po.id, after={"channel": body.channel,
+                                                                  **out}, store_id=po.store_id)
+    db.commit()
+    return {**order_dict(db, po), **out}
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     po = get_or_404(db, c, PurchaseOrder, order_id, what="That order")
