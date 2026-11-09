@@ -178,6 +178,13 @@ def engine_summary(state: dict) -> dict:
            "naive_wape": _clean(naive.get("wape_mean"))}
     if out["wape"] is not None and out["naive_wape"]:
         out["better_than_naive_pct"] = round(100 * (1 - out["wape"] / out["naive_wape"]), 1)
+    # The profit comparison of section 14: stock targets from each product's own costs
+    # against one blanket 95% service level, on the same evaluation weeks.
+    econ = {e["method"]: e for e in state["metrics"].get("economics", [])}
+    mine, blanket = econ.get(bt.SYSTEM), econ.get("full, blanket 95% service")
+    if mine and blanket:
+        out["profit_vs_blanket"] = {"targets": _clean(mine.get("realized_margin")),
+                                    "blanket_95": _clean(blanket.get("realized_margin"))}
     return out
 
 

@@ -124,6 +124,15 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
         companies = list(db.scalars(select(Company).where(Company.status == "active",
                                                           Company.is_demo.is_(False))))
         todo = [(co.id, item) for co in companies for item in due(db, co, now)]
+        from . import alerts
+        for co in companies:
+            try:
+                alerts.evaluate(db, co.id, now)
+                alerts.deliver(db, co.id)
+                db.commit()
+            except Exception:  # noqa: BLE001 -- one company's alerts never stop the rest
+                db.rollback()
+                log.exception("alerts for %s failed", co.id)
     for company_id, (kind, trigger, run_id) in todo:
         status = run_job(kind, company_id, trigger, run_id)
         ran.append((company_id, kind, status))

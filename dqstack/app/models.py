@@ -90,6 +90,9 @@ class Person(IdMixin, CreatedMixin, Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_sign_in: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Alert channels this person chose (section 14): {"email": bool, "whatsapp": bool,
+    # "muted": [kinds]}. In-app is always on.
+    notify: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     # Read-only view; assignments are written as PersonStore rows by
     # `assign_stores()`, so each row carries its company like every other table.
     stores: Mapped[list["Store"]] = relationship(secondary="person_stores", lazy="selectin",
@@ -824,6 +827,7 @@ class Alert(IdMixin, CreatedMixin, Base):
     dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    link: Mapped[str | None] = mapped_column(String(200))     # where to act on it
 
 
 class PosMessage(IdMixin, CreatedMixin, Base):

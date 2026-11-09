@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-09 17:25:42.749407
+Create Date: 2026-11-09 17:35:20.782393
 """
 
 from __future__ import annotations
@@ -129,6 +129,7 @@ def upgrade() -> None:
     sa.Column('dedupe_key', sa.String(length=200), nullable=False),
     sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('notified_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('link', sa.String(length=200), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
@@ -316,6 +317,7 @@ def upgrade() -> None:
     sa.Column('locked_until', sa.DateTime(timezone=True), nullable=True),
     sa.Column('last_sign_in', sa.DateTime(timezone=True), nullable=True),
     sa.Column('is_platform_admin', sa.Boolean(), nullable=False),
+    sa.Column('notify', sa.JSON(), nullable=False),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),

@@ -245,7 +245,7 @@ def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
             if ln.unmapped_barcode:
                 _alert(db, c.company_id, store.id, None, "unmapped_barcode", "attention",
                        f"Barcode {ln.unmapped_barcode} was sold as a misc item. Add it to a "
-                       "product so its stock is counted.", f"barcode:{ln.unmapped_barcode}")
+                       "product so its stock is counted.", f"unmapped_barcode:{ln.unmapped_barcode}")
             continue
         res = ledger.post(db, company_id=c.company_id, store_id=store.id,
                           product_id=ln.product_id, qty_milli=-ln.qty_milli, type="sale",
@@ -257,7 +257,7 @@ def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
             p = db.get(Product, ln.product_id)
             _alert(db, c.company_id, store.id, p.id, "negative_stock", "risk",
                    f"{p.name} was sold with none on the books in {store.name}. Count it.",
-                   f"negative:{store.id}:{p.id}:{bill.business_day.isoformat()}")
+                   f"negative_stock:{store.id}:{p.id}:{bill.business_day.isoformat()}")
     audit.log(db, c, "bill.paid", "bill", bill.id, after={
         "number": number, "total": rupees(total), "lines": len(bill.lines),
         "offline": bill.made_offline, "methods": sorted({p.method for p in bill.payments}),

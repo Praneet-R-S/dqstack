@@ -29,6 +29,8 @@ DEFAULTS: dict = {
     "overstock_cover_days": 60,
     "expiry_warning_days": 3,
     "dead_stock_days": 60,
+    # Count losses in one store in one week above this value raise an alert.
+    "shrinkage_alert_paise": 500_000,
     # Day close: closes automatically at this local time if nobody does it.
     "auto_close_time": "23:59",
 }
