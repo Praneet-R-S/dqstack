@@ -17,6 +17,25 @@ One command runs all seven stages, writes the decision ledger and every results
 table to `artifacts/`, and emits the UI data bundle. Then open
 [ui/index.html](ui/index.html) directly in a browser — no server needed.
 
+## The store application
+
+The same engine also runs inside a multi-company store-operations app for Indian
+retailers: stores, people and roles, imports, a stock ledger, counting, receiving,
+transfers, wastage, sales files, Checkout, a POS connector, the nightly forecast from
+each company's own data, Today's review, suggested orders, purchase orders, alerts and
+reports. Built to the product specification's twelve steps; see CONTEXT.md C17 for
+what each step proves and what is not done yet.
+
+```bash
+pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
+python -m dqstack.app.manage seed-demo --email you@example.com   # a demo company
+python -m dqstack.app                                            # http://127.0.0.1:8130
+```
+
+`/app` is the store app, `/` the public site, `/planner` this planner, `/platform` the
+vendor's portal, `/api/docs` the API. Deploying: [deploy/README.md](deploy/README.md).
+Security status: [docs/SECURITY.md](docs/SECURITY.md). Tests: `python -m pytest`.
+
 ---
 
 ## The flow
