@@ -34,3 +34,6 @@ data/uploads/
 .env
 .env.*
 !.env.example
+
+# Local demo login written by seed-demo for this machine
+data/demo-login.txt

@@ -114,6 +114,36 @@ def cmd_create_platform_admin(args) -> int:
     return 0
 
 
+def cmd_seed_demo(args) -> int:
+    """A demonstration company with synthetic data and a first forecast."""
+    from .db import SessionLocal
+    from .demo import seed
+    from .forecast import jobs
+    password = os.environ.get("DQ_DEMO_PASSWORD")
+    if not password:
+        if not sys.stdin.isatty():
+            print("Set DQ_DEMO_PASSWORD or run this in a terminal.", file=sys.stderr)
+            return 2
+        password = getpass.getpass("Password for every demo account: ")
+    from .security import password_problem
+    if (problem := password_problem(password)):
+        print(problem, file=sys.stderr)
+        return 2
+    with SessionLocal() as db:
+        try:
+            co = seed(db, args.email, password, days=args.days)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+        db.commit()
+        print(f"Made {co.name}. Training the first forecast (a few minutes)...")
+        run = jobs.train(db, co.id, trigger="onboarding")
+        print(f"Training {run.status}: {run.message}")
+    print(f"Sign in at /app/ as {args.email} (Owner). The team: meera@, arjun@, puja@, "
+          "kabir@ and chirag@demo.dqstack.local, same password. Manager PIN 2580.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m dqstack.app.manage")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -123,6 +153,9 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser("create-platform-admin", help="create the vendor's support account")
     a.add_argument("--email", required=True)
     a.add_argument("--name", required=True)
+    d = sub.add_parser("seed-demo", help="make a demonstration company with a first forecast")
+    d.add_argument("--email", required=True)
+    d.add_argument("--days", type=int, default=330)
     args = p.parse_args(argv)
     try:
         from . import config  # noqa: F401  -- production refuses unsafe settings here
@@ -130,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         print(e, file=sys.stderr)
         return 1
     return {"check": cmd_check, "migrate": cmd_migrate, "secret": cmd_secret,
-            "create-platform-admin": cmd_create_platform_admin}[args.cmd](args)
+            "create-platform-admin": cmd_create_platform_admin,
+            "seed-demo": cmd_seed_demo}[args.cmd](args)
 
 
 if __name__ == "__main__":
