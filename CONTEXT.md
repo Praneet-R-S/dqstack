@@ -1368,9 +1368,98 @@ Everything committed, suite green at **147 tests**, working tree clean.
 4. Still unbuilt from v2's own list: density modes, card transitions on J/K, notes,
    history timeline, first-run walkthrough, command-palette actions, mobile approvals.
 
-### D. Correctly out of scope
-Five portals, multi-tenancy, approval workflows, connectors, agentic layer. Frame as
-features public data cannot exercise.
+### C17. The store-operations application — the product specification, steps 1 to 11 DONE
+
+The user supplied `DQ-Stack-Product-Specification.pdf` (27 pages, Nov 2026): a
+multi-company Indian store-operations SaaS with this engine at its centre, built in 12
+steps each with a "done when" test. Built here, step by step, each step's test passing
+on SQLite and PostgreSQL 16 before the next began. The demo pipeline and planner above
+are unchanged when called as before (233 engine and site tests still pass).
+
+**Where things are.** `dqstack/app/` is the server (FastAPI + SQLAlchemy 2, Alembic,
+argon2). `webapp/` is the store app at `/app` (vanilla JS: `core.js` helpers, `start.js`
+frame and router, `screens-a/b/c.js`). `site/` is the public site at `/`. The planner
+stays at `/planner`. `deploy/`, `Dockerfile`, `docker-compose.yml` deploy it.
+`docs/SECURITY.md` is the section 15 status. Tests: `tests/app/test_step{1..11}_*.py`,
+`test_platform.py`, `test_site_serving.py`; `tests/test_site.py` for the site.
+
+| Step | Done when | Proof |
+|---|---|---|
+| 1 Foundations | a user of one company cannot read another by changing ids | test_step1 (+ triggers on SQLite and PostgreSQL) |
+| 2 Company, stores, people | sign up, 3 stores, invite a manager who signs in | test_step2 |
+| 3 Imports | 5,000 rows with 20 bad import 4,980; re-upload changes nothing; undo removes | test_step3 |
+| 4 Ledger | on hand = sum of 10,000 random movements | test_step4 (+ 6 concurrent tills on PostgreSQL) |
+| 5 Floor work | offline count syncs once; large difference waits; partial delivery leaves order open | test_step5 (scenarios 10, 11) |
+| 6 Sales in | a day's file moves stock and the daily table; a late file replaces the day | test_step6 |
+| 7 Engine on real data | first forecast and backtest unattended; nightly in minutes; failure keeps yesterday's | test_step7 (real engine: 140 s train, 5.5 s nightly) |
+| 8 Orders | Rs 5,000 minimum and 12-unit cases correct by hand (scenario 12) | test_step8 |
+| 9 Checkout | scenarios 3 to 8 | test_step9 |
+| 10 POS API | 1,000 sales sent twice reduce stock once | test_step10 |
+| 11 Alerts and reports | each alert once in a scripted day; reports match hand figures | test_step11 |
+| 12 Hardening and pilot | load test, accessibility, security review, restore drill, 4-week pilot | partly: see below |
+
+**How the engine serves a company (step 7).** `forecast/source.py` builds the engine's
+five feeds from the database; `pipeline.run(tables=..., splits=...)` trains with origin
+blocks sized to the history; `dqstack/live.py` saves the model (gzip pickle in
+`model_artifacts`) and forecasts from it nightly without retraining (reproduces
+training's live forecast exactly). Tiers by history (`jobs.plan`): >= 667 days demo
+settings; >= 358 scaled blocks; >= 302 minimal blocks; >= 56 an early forecast from the
+statistical candidates; less, none. The thresholds come from make_splits' arithmetic
+plus NHITS needing input_size + horizon before the last training origin; a test checks
+every tier against make_splits itself. Promotion: a new model replaces the active one
+only if `live.recent_scores` (same recent weeks, observed sales) gives it at least as
+much simulated margin. Stock targets use each product's own supplier lead time and
+order frequency (`live.targets`, grouped by risk period) — which resolves C14 item 1
+without touching `decide.py`.
+
+**Step 12, honestly.** Done: `scripts/loadtest.py` (checked at small scale), the
+section 15 status in `docs/SECURITY.md`, the restore drill written in
+`deploy/README.md`, platform portal, export and deletion. Not done: the 200-till load
+test on staging PostgreSQL; a WCAG audit with assistive technology; point-in-time
+recovery (nightly dumps only — needs managed PostgreSQL or WAL-G); OTP and Google or
+Microsoft sign-in; WhatsApp Business API (WhatsApp is by link); the 2-store pilot;
+legal review of the privacy and terms drafts; a chartered accountant's check before
+Checkout is used as a GST invoice system. Training a very large company in parallel by
+category is not built.
+
+**Running it.** `python -m dqstack.app` (development, migrates SQLite first);
+`python -m dqstack.app.manage seed-demo --email ...` makes a demo company with a trained
+forecast (login written to the git-ignored `data/demo-login.txt` on this machine);
+`python -m dqstack.app.worker` runs the schedule. Production: `deploy/README.md`.
+
+### Traps added by C17
+
+- **The baseline migration is regenerated, not appended to,** until the first deploy
+  (`scratchpad/regen_baseline.py` keeps the frozen guard block). The drift test fails if
+  the models and migration disagree. After the first real deploy, add revisions instead.
+- **`diagnose.run` writes `data/processed/` on every call.** Any engine call for a
+  company must run inside `forecast.jobs.scratch()` (in-process) or with
+  `DQ_ARTIFACTS_DIR`, `DQ_INTERIM_DIR`, `DQ_PROCESSED_DIR` set (subprocess), or it
+  overwrites the demo's files. It happened once; they were regenerated from the panel.
+- **SQLite ignores VARCHAR lengths; PostgreSQL does not.** A 65-character id in a
+  64-character column passed every SQLite test. Run `DQ_APP_TESTS_ON_POSTGRES=1`.
+- **The session does not autoflush.** A query right after a change does not see it:
+  flush first (`floor.maybe_close`, ledger idempotency keys both bit).
+- **Opening stock is a baseline, not a count.** `baseline_at` anchors which sales move
+  stock; `last_counted_at` drives the cycle-count schedule. Conflating them made
+  products never due for counting.
+- **Tests that set stock "now" depend on the time of day**: after a store's 22:00 close,
+  today's sales are rightly absorbed by a figure set later. Date opening stock back.
+- **Heredocs through the tool transport eat backslashes**: `\n` inside an f-string and
+  a trailing `\` line continuation both broke files. Use the Edit tool for those.
+- **FastAPI 0.118 cannot run on Starlette 1.x; 0.142+ needs opentelemetry-api >= 1.44**,
+  which conflicts with crewai in the base environment. 0.140.13 is the pin.
+- **Starlette matches routes in order**: `/orders/suggestions` must be declared before
+  `/orders/{order_id}`.
+- **Alert dedupe keys must be one format** (`kind:...`) wherever an alert is raised, or
+  the scheduler raises the same condition twice.
+- **The app's database role must not own the tables**, or it could disable the
+  append-only triggers. `deploy/postgres-init.sh` sets that up.
+
+### D. Correctly out of scope (for the planner)
+Multi-tenancy, approval workflows and connectors now exist in the store application
+(C17). For the planner itself: the agentic layer, and features public data cannot
+exercise.
 
 ### E. Writing
 Untouched. The spec's own closing warning: the common failure is building impressively
