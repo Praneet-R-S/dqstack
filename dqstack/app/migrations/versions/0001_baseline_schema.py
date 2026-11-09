@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-08 23:20:41.549405
+Create Date: 2026-11-09 17:25:42.749407
 """
 
 from __future__ import annotations
@@ -473,6 +473,11 @@ def upgrade() -> None:
     sa.Column('voided_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('void_reason', sa.String(length=200), nullable=True),
     sa.Column('refund_of', sa.String(length=32), nullable=True),
+    sa.Column('refund_reason', sa.String(length=200), nullable=True),
+    sa.Column('approved_by', sa.String(length=32), nullable=True),
+    sa.Column('device_id', sa.String(length=64), nullable=True),
+    sa.Column('made_offline', sa.Boolean(), nullable=False),
+    sa.Column('change_paise', sa.BigInteger(), nullable=False),
     sa.Column('source', sa.String(length=16), nullable=False),
     sa.Column('business_day', sa.Date(), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
@@ -807,6 +812,22 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_supplier_products_product_id'), ['product_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_supplier_products_supplier_id'), ['supplier_id'], unique=False)
 
+    op.create_table('till_devices',
+    sa.Column('company_id', sa.String(length=32), nullable=False),
+    sa.Column('store_id', sa.String(length=32), nullable=False),
+    sa.Column('device_id', sa.String(length=64), nullable=False),
+    sa.Column('name', sa.String(length=64), nullable=True),
+    sa.Column('pending', sa.Integer(), nullable=False),
+    sa.Column('last_seen', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('id', sa.String(length=32), nullable=False),
+    sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['store_id'], ['stores.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('company_id', 'device_id')
+    )
+    with op.batch_alter_table('till_devices', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_till_devices_company_id'), ['company_id'], unique=False)
+
     op.create_table('transfers',
     sa.Column('company_id', sa.String(length=32), nullable=False),
     sa.Column('from_store_id', sa.String(length=32), nullable=False),
@@ -840,6 +861,8 @@ def upgrade() -> None:
     sa.Column('discount_paise', sa.BigInteger(), nullable=False),
     sa.Column('tax_paise', sa.BigInteger(), nullable=False),
     sa.Column('resaleable', sa.Boolean(), nullable=True),
+    sa.Column('original_price_paise', sa.BigInteger(), nullable=True),
+    sa.Column('override_reason', sa.String(length=200), nullable=True),
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.ForeignKeyConstraint(['bill_id'], ['bills.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['company_id'], ['companies.id'], ondelete='CASCADE'),
@@ -1048,6 +1071,10 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_transfers_company_id'))
 
     op.drop_table('transfers')
+    with op.batch_alter_table('till_devices', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_till_devices_company_id'))
+
+    op.drop_table('till_devices')
     with op.batch_alter_table('supplier_products', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_supplier_products_supplier_id'))
         batch_op.drop_index(batch_op.f('ix_supplier_products_product_id'))

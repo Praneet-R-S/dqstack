@@ -265,6 +265,9 @@ def close_day(db: Session, c, store: Store, day: date, *, cash_counted_paise: in
     if store_was_closed:
         db.add(CalendarEvent(company_id=c.company_id, name=f"{store.name} closed", day=day,
                              kind="closure", store_ids=[store.id], source="company"))
+    if store.mode == "connected":
+        from .checkout import daily_from_bills
+        daily_from_bills(db, c.company_id, store, day)
     mark_out_of_stock(db, c.company_id, store, day)
     dc = DayClose(company_id=c.company_id, store_id=store.id, day=day, closed_by=c.person.id,
                   automatic=False, cash_counted_paise=cash_counted_paise,

@@ -354,6 +354,7 @@ def nightly(db: Session, company_id: str, trigger: str = "schedule",
             run.finished_at = utcnow()
             db.commit()
             return run
+        _bills_to_daily(db, company_id)
         data = source.load(db, company_id)
         cfg = company_cfg(db, company_id)
         with scratch():
@@ -379,6 +380,20 @@ def nightly(db: Session, company_id: str, trigger: str = "schedule",
         db.rollback()
         _fail(db, run, e, "nightly")
     return run
+
+
+def _bills_to_daily(db: Session, company_id: str, days: int = 3) -> None:
+    """Connected stores' paid bills into the daily sales table (section 9, step 3a).
+    The last few days are rebuilt so bills that arrived late from an offline till
+    are included."""
+    from ..checkout import daily_from_bills
+    from ..sales import local_today, tz_of
+    today = local_today(tz_of(db, company_id))
+    for st in db.scalars(select(Store).where(Store.company_id == company_id,
+                                             Store.mode == "connected", Store.active.is_(True))):
+        for k in range(days):
+            daily_from_bills(db, company_id, st, today - timedelta(days=k))
+    db.flush()
 
 
 def write_recommendations(db: Session, company_id: str, run: ForecastRun,

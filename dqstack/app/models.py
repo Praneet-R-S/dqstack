@@ -370,6 +370,11 @@ class Bill(IdMixin, CreatedMixin, Base):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     void_reason: Mapped[str | None] = mapped_column(String(200))
     refund_of: Mapped[str | None] = mapped_column(String(32))
+    refund_reason: Mapped[str | None] = mapped_column(String(200))
+    approved_by: Mapped[str | None] = mapped_column(String(32))   # manager PIN holder
+    device_id: Mapped[str | None] = mapped_column(String(64))
+    made_offline: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    change_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     source: Mapped[str] = mapped_column(String(16), default="checkout", nullable=False)
     business_day: Mapped[date | None] = mapped_column(Date, index=True)
     lines: Mapped[list["BillLine"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
@@ -390,6 +395,9 @@ class BillLine(IdMixin, Base):
     discount_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     tax_paise: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     resaleable: Mapped[bool | None] = mapped_column(Boolean)   # for refund lines
+    # Price overrides and discounts need permission and are logged (section 7 rule 10).
+    original_price_paise: Mapped[int | None] = mapped_column(BigInteger)
+    override_reason: Mapped[str | None] = mapped_column(String(200))
 
 
 class BillPayment(IdMixin, Base):
@@ -401,6 +409,19 @@ class BillPayment(IdMixin, Base):
     amount_paise: Mapped[int] = mapped_column(BigInteger, nullable=False)
     tendered_paise: Mapped[int | None] = mapped_column(BigInteger)
     reference: Mapped[str | None] = mapped_column(String(64))
+
+
+class TillDevice(IdMixin, Base):
+    """A till or phone running Checkout. It reports how many bills it is holding
+    while offline, so Day close can wait for them (section 7 rule 9)."""
+    __tablename__ = "till_devices"
+    __table_args__ = (UniqueConstraint("company_id", "device_id"),)
+    company_id: Mapped[str] = company_fk()
+    store_id: Mapped[str] = mapped_column(String(32), ForeignKey("stores.id"), nullable=False)
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(64))
+    pending: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DailySales(IdMixin, Base):
