@@ -122,6 +122,10 @@ def create_app() -> FastAPI:
     if UI.exists():
         app.mount("/planner", StaticFiles(directory=UI, html=True), name="planner")
     if APP_UI.exists():
+        @app.get("/platform", include_in_schema=False)
+        def platform_portal():
+            return RedirectResponse("/app/platform.html")
+
         app.mount("/app", StaticFiles(directory=APP_UI, html=True), name="app")
     if SITE.exists():
         app.mount("/site-assets", StaticFiles(directory=SITE / "assets"), name="site-assets") \

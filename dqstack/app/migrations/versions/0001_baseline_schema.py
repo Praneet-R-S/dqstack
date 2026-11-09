@@ -6,7 +6,7 @@ the guards ships as a new revision.
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-09 17:35:20.782393
+Create Date: 2026-11-09 17:53:51.241285
 """
 
 from __future__ import annotations
@@ -111,6 +111,12 @@ def upgrade() -> None:
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('platform_status',
+    sa.Column('key', sa.String(length=64), nullable=False),
+    sa.Column('value', sa.JSON(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint('key')
     )
     op.create_table('purge_permits',
     sa.Column('company_id', sa.String(length=32), nullable=False),
@@ -1240,6 +1246,7 @@ def downgrade() -> None:
 
     op.drop_table('alerts')
     op.drop_table('purge_permits')
+    op.drop_table('platform_status')
     op.drop_table('companies')
     with op.batch_alter_table('activity_log', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_activity_log_store_id'))

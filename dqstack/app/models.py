@@ -856,6 +856,16 @@ class Attachment(IdMixin, CreatedMixin, Base):
     person_id: Mapped[str | None] = mapped_column(String(32))
 
 
+class PlatformStatus(Base):
+    """Small facts about the running system, for the platform's health page: the
+    worker's last pass, the last backup check. Not company data."""
+    __tablename__ = "platform_status"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 nullable=False)
+
+
 class PurgePermit(Base):
     """The only way a departing company's ledger and log rows can be deleted.
 

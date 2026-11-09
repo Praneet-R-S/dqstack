@@ -17,7 +17,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from . import permissions
-from .models import AuthSession, Person, Store
+from .models import Company, AuthSession, Person, Store
 
 
 @dataclass
@@ -52,11 +52,34 @@ def _refusal(action: str) -> str:
 def build_ctx(db: Session, person: Person, sess: AuthSession | None,
               ip: str | None = None, device: str | None = None) -> Ctx:
     if person.company_id is None:
+        if person.is_platform_admin and sess is not None and sess.company_id:
+            return _support_ctx(db, person, sess, ip, device)
         raise HTTPException(status_code=403, detail="Platform accounts do not belong to a company.")
+    company = db.get(Company, person.company_id)
+    if company is not None and company.status == "suspended":
+        raise HTTPException(status_code=403, detail="This company's account is paused. "
+                                                    "Contact DQ-Stack support.")
     all_stores = permissions.sees_all_stores(person.role)
     store_ids = {s.id for s in person.stores if s.company_id == person.company_id}
     return Ctx(person=person, session=sess, company_id=person.company_id, role=person.role,
                store_ids=store_ids, all_stores=all_stores, ip=ip, device=device)
+
+
+def _support_ctx(db: Session, person: Person, sess, ip, device) -> Ctx:
+    """The vendor inside a client's company: only while the client's Owner grants it,
+    and read-only (the Viewer role, across every store). Section 2: the platform admin
+    "cannot read a client's data unless the client grants temporary support access"."""
+    from .db import utcnow
+    from .models import SupportGrant
+    from .security import _aware
+    grant = db.scalar(select(SupportGrant).where(
+        SupportGrant.company_id == sess.company_id, SupportGrant.revoked_at.is_(None))
+        .order_by(SupportGrant.expires_at.desc()).limit(1))
+    if grant is None or _aware(grant.expires_at) <= utcnow():
+        raise HTTPException(status_code=403, detail="Support access to this company has ended.")
+    ids = set(db.scalars(select(Store.id).where(Store.company_id == sess.company_id)))
+    return Ctx(person=person, session=sess, company_id=sess.company_id, role="viewer",
+               store_ids=ids, all_stores=True, ip=ip, device=f"support:{device or ''}"[:255])
 
 
 def scoped(ctx: Ctx, model, *, store_attr: str | None = "store_id") -> Select:

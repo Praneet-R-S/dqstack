@@ -119,6 +119,8 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
     now = now or utcnow()
     ran = []
     with SessionLocal() as db:
+        _heartbeat(db, now)
+        _purge_due(db, now)
         sales_mod.auto_close(db, now)
         db.commit()
         companies = list(db.scalars(select(Company).where(Company.status == "active",
@@ -139,6 +141,28 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
         if kind == "train" and trigger != "manual":
             break                  # one training per pass keeps the nights predictable
     return ran
+
+
+def _heartbeat(db: Session, now: datetime) -> None:
+    from .models import PlatformStatus
+    row = db.get(PlatformStatus, "worker")
+    if row is None:
+        row = PlatformStatus(key="worker", value={})
+        db.add(row)
+    row.updated_at = now
+    row.value = {"pid": os.getpid()}
+    db.commit()
+
+
+def _purge_due(db: Session, now: datetime) -> None:
+    """Companies that asked to be deleted, once the confirmed period has passed."""
+    from .routes.platform import purge_company
+    for co in db.scalars(select(Company).where(Company.status == "closing")).all():
+        due = (co.setup or {}).get("deletion_due")
+        if due and datetime.fromisoformat(due) <= now:
+            counts = purge_company(db, co.id)
+            db.commit()
+            log.info("deleted company %s after its confirmed period: %s", co.id, counts)
 
 
 def _lock() -> bool:
