@@ -52,8 +52,16 @@ def evaluate_origin(
     horizons: tuple[int, ...],
     ensemble: list[str],
     cfg=CFG,
+    conformal_orders=None,
 ) -> tuple[list[dict], pd.DataFrame, dict, pd.DataFrame]:
-    """Metrics for every candidate and for the assembled system at one origin."""
+    """Metrics for every candidate and for the assembled system at one origin.
+
+    `conformal` calibrates the reconciled forecast; `conformal_orders`, the forecast
+    orders read (defaults to `conformal`). The coverage table has a `path` column,
+    "reconciled" and "orders", one set of rows each.
+    """
+    if conformal_orders is None:
+        conformal_orders = conformal
     from .pipeline import candidate_quantiles
 
     y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
@@ -73,7 +81,7 @@ def evaluate_origin(
     cal = conformal.apply(rec, pc2, hg2) if cfg.enable_calibration else rec
     # What the system actually issues for ordering. See ReconcileConfig.for_decisions.
     decide_src = cal if cfg.reconcile.for_decisions else (
-        conformal.apply(cq, pc2, hg2) if cfg.enable_calibration else cq
+        conformal_orders.apply(cq, pc2, hg2) if cfg.enable_calibration else cq
     )
 
     # Weights and scalers are recomputed per origin: an M5 dollar-volume weight is
@@ -127,7 +135,12 @@ def evaluate_origin(
     cov = conformal.coverage_table(
         y.ravel(), rec.reshape(-1, len(QUANTILES)),
         cal.reshape(-1, len(QUANTILES)), valid=valid.ravel()
-    )
+    ).assign(path="reconciled")
+    cov_orders = conformal_orders.coverage_table(
+        y.ravel(), (rec if cfg.reconcile.for_decisions else cq).reshape(-1, len(QUANTILES)),
+        decide_src.reshape(-1, len(QUANTILES)), valid=valid.ravel()
+    ).assign(path="orders")
+    cov = pd.concat([cov, cov_orders], ignore_index=True)
     cov["origin"] = str(P.dates[O].date())
 
     # Accuracy at every aggregation level, for the forecast before and after

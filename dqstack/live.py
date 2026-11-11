@@ -16,9 +16,12 @@ come from the saved combination rule applied to today's diagnostics, so new
 products are forecast too -- by the cold-start candidates the ensemble already
 contains.
 
-For histories too short to train on (8 weeks to about 6 months), `starter` uses
+For histories too short to train on (2 weeks to about 10 months), `starter` uses
 only the engine's statistical candidates, which need no training, lifted to a
 distribution by a Negative Binomial. It is labelled as an early forecast.
+
+A model trained in shards (dqstack/app/forecast/shards.py) is used through the same
+`forecast_panel`, which hands it the panel to forecast shard by shard.
 
 Saved models are pickles. Load only what this system wrote itself (the model
 store in the company's own database); never a file from anywhere else.
@@ -42,13 +45,19 @@ from .features import Panel, build_panel, horizon_group_of
 from .models import statistical
 from .models.dist import nb_quantiles, sanitize
 
-KEEP = ("trained", "meta", "conformal", "weights_method", "stack_tbl", "meta_extra")
+KEEP = ("trained", "meta", "conformal", "conformal_orders", "weights_method", "stack_tbl",
+        "meta_extra")
+# Kept when the state has them: the single best method and its own calibrator, which
+# let the app issue that method instead of the blend (`issued_as`).
+OPTIONAL = ("best_single", "conformal_single")
+ISSUES = ("blend", "single")
 
 
 def saved_model(state: dict, cfg=CFG) -> bytes:
     """What the nightly run needs, compressed: the trained candidates (without the
-    ablation arm), the combination rule, the conformal offsets and the config."""
+    ablation arm), the combination rule, the conformal calibrators and the config."""
     keep = {k: state[k] for k in KEEP}
+    keep.update({k: state[k] for k in OPTIONAL if state.get(k) is not None})
     keep["trained"] = replace(state["trained"], gbm_nomask=None, P_nomask=None)
     keep["series"] = state["P"].series["series_id"].astype(str).tolist()
     keep["cfg"] = cfg
@@ -61,6 +70,47 @@ def saved_model(state: dict, cfg=CFG) -> bytes:
 def load_model(blob: bytes) -> dict:
     with gzip.GzipFile(fileobj=io.BytesIO(blob)) as f:
         return pickle.load(f)  # noqa: S301 -- only blobs this system wrote (see module doc)
+
+
+def orders_calibrator(model: dict):
+    """Stage 6 for the forecast orders read, fitted on that forecast. A model saved
+    before it had its own has only the calibrator fitted on the reconciled forecast,
+    and keeps using it until it is retrained."""
+    cal = model.get("conformal_orders")
+    return model["conformal"] if cal is None else cal
+
+
+def issued_as(model, issue: str):
+    """The same trained model, issuing `issue`:
+
+    * "blend": Stage 4's combination of every method (what a model issues by default);
+    * "single": the one method with the lowest loss on the meta origins, corrected by
+      the calibrator fitted on that method's own forecasts.
+
+    The app's training scores both on the same recent weeks and issues whichever
+    would have earned more (spec, Stage 4: "allow issuing the single best model when
+    it earns more"). The choice is recorded with the model version, not in the saved
+    bytes, so one saved model serves both. A model saved before it kept its single
+    best method can only issue the blend. The early forecast ("starter") is returned
+    as it is."""
+    if issue not in ISSUES:
+        raise ValueError(f"unknown issue {issue!r}")
+    if isinstance(model, str):
+        return model
+    if hasattr(model, "issued_as"):            # trained in shards
+        return model.issued_as(issue)
+    out = dict(model)
+    out["issue"] = issue
+    return out
+
+
+def can_issue_single(model) -> bool:
+    """Whether this model kept a single best method to issue on its own."""
+    if isinstance(model, str):
+        return False
+    if hasattr(model, "can_issue_single"):
+        return model.can_issue_single()
+    return bool(model.get("best_single")) and model.get("conformal_single") is not None
 
 
 @dataclass
@@ -123,12 +173,21 @@ def recent_scores(models: dict[str, dict | str], tables: dict, cfg=CFG, n_origin
     fell inside the 5-95% range, and fill rate. Comparing two models' own backtests
     would compare different weeks; this compares like with like. A model is a saved
     model, or the string "starter" for the early forecast."""
+    return finish_scores(score_sums(models, tables, cfg, n_origins))
+
+
+def score_sums(models: dict[str, dict | str], tables: dict, cfg=CFG, n_origins: int = 4
+               ) -> dict[str, dict]:
+    """The sums behind `recent_scores`, per model, with each origin's figures kept
+    apart, so that scores made on separate parts of a company's series (the shards of
+    app/forecast/shards.py) add up to the score of the whole."""
     P, diag, _ = _prepare(tables, cfg)
     cp = cost_params(P, tables["items"], cfg)
     live_o = P.n_history - 1
     origins = [o for o in (live_o - HORIZON - 7 * k for k in range(n_origins)) if o > 28]
-    sums = {name: {"margin": 0.0, "abs_err": 0.0, "actual": 0.0, "inside": 0.0, "cells": 0.0,
-                   "fill": 0.0} for name in models}
+    sums = {name: {"dates": [], "margin": [], "fill": [], "sales": [], "demand": [],
+                   "abs_err": 0.0, "actual": 0.0, "inside": 0.0, "cells": 0.0}
+            for name in models}
     sids = P.series["series_id"].astype(str).to_numpy()
     lo, hi = QUANTILES.index(0.05), QUANTILES.index(0.95)
     for O in origins:
@@ -137,31 +196,68 @@ def recent_scores(models: dict[str, dict | str], tables: dict, cfg=CFG, n_origin
         valid = np.isfinite(actual)
         demand = np.nan_to_num(np.stack([P.y_raw[:, O + h] for h in H], axis=1).astype("float64"))
         dates = pd.DatetimeIndex([P.dates[O + h] for h in H])
+        shared: dict = {}       # one trained model issued two ways forecasts its methods once
         for name, model in models.items():
             q = starter_panel(P, O) if model == "starter" else \
-                forecast_panel(model, P, diag, O, cfg)
+                forecast_panel(model, P, diag, O, cfg, shared)
             res, _ = dec.decide(q, demand, cp, sids, dates, cfg)
             s = sums[name]
-            s["margin"] += float(res.totals["realized_margin"])
-            s["fill"] += float(res.totals.get("fill_rate", 0.0))
+            s["dates"].append(str(P.dates[O].date()))
+            s["margin"].append(float(res.totals["realized_margin"]))
+            s["fill"].append(float(res.totals.get("fill_rate", 0.0)))
+            s["sales"].append(float(res.totals.get("sales", 0.0)))
+            s["demand"].append(float(res.totals.get("demand", 0.0)))
             s["abs_err"] += float(np.abs(np.where(valid, actual - q[..., Q50_INDEX], 0.0)).sum())
             s["actual"] += float(np.where(valid, actual, 0.0).sum())
             s["inside"] += float(((q[..., lo] <= actual) & (actual <= q[..., hi]))[valid].sum())
             s["cells"] += float(valid.sum())
-    n = max(len(origins), 1)
-    return {name: {"margin": s["margin"] / n, "fill_rate": s["fill"] / n,
-                   "wape": s["abs_err"] / s["actual"] if s["actual"] else float("nan"),
-                   "inside_range": s["inside"] / s["cells"] if s["cells"] else float("nan"),
-                   "origins": len(origins)} for name, s in sums.items()}
+    return sums
 
 
-def forecast_panel(model: dict, P: Panel, diag: pd.DataFrame, O: int, cfg) -> np.ndarray:
-    """The calibrated, unreconciled distribution at origin O: what orders read."""
+def finish_scores(sums: dict[str, dict]) -> dict[str, dict[str, float]]:
+    """`score_sums` (or several added together) as the scores `recent_scores` gives:
+    margin and fill rate averaged over the origins."""
+    out = {}
+    for name, s in sums.items():
+        n = max(len(s["dates"]), 1)
+        margin = fill = 0.0
+        for m, f in zip(s["margin"], s["fill"]):
+            margin += m
+            fill += f
+        out[name] = {"margin": margin / n, "fill_rate": fill / n,
+                     "wape": s["abs_err"] / s["actual"] if s["actual"] else float("nan"),
+                     "inside_range": s["inside"] / s["cells"] if s["cells"] else float("nan"),
+                     "origins": len(s["dates"])}
+    return out
+
+
+def forecast_panel(model: dict, P: Panel, diag: pd.DataFrame, O: int, cfg,
+                   shared: dict | None = None) -> np.ndarray:
+    """The calibrated, unreconciled distribution at origin O: what orders read. That
+    is the blend, or the single best method alone when the model issues it
+    (`issued_as`). `shared`, when given, keeps each trained model's method forecasts
+    for this panel and origin, so the same model issued both ways forecasts once."""
+    if hasattr(model, "panel_quantiles"):      # trained in shards: app/forecast/shards.py
+        return model.panel_quantiles(P, diag, O, cfg)
     from .pipeline import candidate_quantiles
     horizons = tuple(range(1, HORIZON + 1))
     tr, meta = model["trained"], model["meta"]
-    _, qs = candidate_quantiles(P, O, horizons, tr)
+    key = (id(tr), O)
+    if shared is not None and key in shared:
+        qs = shared[key]
+    else:
+        _, qs = candidate_quantiles(P, O, horizons, tr)
+        if shared is not None:
+            shared[key] = qs
     pc = P.series["planning_class"].astype(str).to_numpy(dtype="U20")
+    hg = np.array([horizon_group_of(h) for h in horizons], dtype="U12")
+    pc2 = np.repeat(pc[:, None], len(horizons), axis=1)
+    hg2 = np.broadcast_to(hg, pc2.shape)
+    single = model.get("best_single") if model.get("issue") == "single" else None
+    if single is not None and single in qs and model.get("conformal_single") is not None:
+        if cfg.enable_calibration:
+            return model["conformal_single"].apply(qs[single], pc2, hg2)
+        return qs[single]
     if model["weights_method"] == "stack":
         W = comb.weights_from_strata(pc, model["stack_tbl"], len(meta.candidates))
     else:
@@ -173,16 +269,13 @@ def forecast_panel(model: dict, P: Panel, diag: pd.DataFrame, O: int, cfg) -> np
                 series_id=lambda x: x["series_id"].astype(str)), on="series_id", how="left")
         W = meta.weights(d, cfg)        # "select" (an ablation) also falls back here
     combined = comb.combine_quantiles(qs, W, meta.candidates)
-    hg = np.array([horizon_group_of(h) for h in horizons], dtype="U12")
-    pc2 = np.repeat(pc[:, None], len(horizons), axis=1)
-    hg2 = np.broadcast_to(hg, pc2.shape)
     if cfg.enable_calibration:
-        return model["conformal"].apply(combined, pc2, hg2)
+        return orders_calibrator(model).apply(combined, pc2, hg2)
     return combined
 
 
 def starter(tables: dict, cfg=CFG, dispersion: float = 4.0) -> LiveResult:
-    """An early forecast for 8 weeks to ~6 months of history: the statistical
+    """An early forecast for 2 weeks to ~10 months of history: the statistical
     candidates (seasonal naive, ETS, Croston-SBA, TSB, ADIDA) averaged, with a
     Negative Binomial range. No training, so nothing to save."""
     P, diag, feed_runs = _prepare(tables, cfg)

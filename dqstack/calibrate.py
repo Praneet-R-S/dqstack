@@ -19,9 +19,30 @@ This is the split-conformal construction applied per level (the CQR variant when
 the base quantiles come from a quantile regressor, as they do here). It gives
 finite-sample coverage guarantees under exchangeability.
 
+That is the rule for the median and above. Below the median the adjustment is a
+*factor*, not an offset, and its target is the strict side of the count CDF:
+
+    c_tau = the k-th smallest  y / q_tau  on the calibration set,  k = floor(tau (n+1))
+    q_cal = c_tau * q_tau            so that  P(y < q_cal) <= tau
+
+The bound holds by the same conformal rank argument, and the factor fixes the two
+ways an additive floor failed out of sample on count data:
+
+  * scale. One additive offset per stratum is wrong for every series that is not
+    the stratum's typical size, so it stopped holding as soon as an origin's mix
+    or level moved. A factor follows each series' own level.
+  * zeros. Where most outcomes are zero, the honest 5% and 10% levels *are* zero
+    (P(y = 0) is above them). The factor finds that (c = 0). The offset instead
+    left a positive floor under series that sell nothing most days, and when
+    reconciliation shifted those distributions upward at a new origin, that floor
+    sat above the zeros.
+
 Stratified by planning class and horizon group, because a single global adjustment
 would over-widen smooth series and under-widen lumpy ones — they have genuinely
-different conditional spread and pooling them averages away the difference.
+different conditional spread and pooling them averages away the difference. Below
+the median, a stratum too thin to fit falls back to a factor fitted among series
+of similar predicted median rather than one pooled factor, because the pool is
+dominated by zero-heavy series and its factor is usually zero.
 
 Caveat stated rather than buried: exchangeability is violated under regime change,
 which is exactly when correct intervals matter most. Mitigated with a rolling
@@ -41,6 +62,44 @@ from .models.dist import sanitize
 
 GLOBAL = "__global__"
 
+# Bins of the predicted median for the lower-tail fallback of thin strata.
+LEVEL_BINS = 4
+
+
+def _median_index(quantiles) -> int:
+    return int(np.argmin(np.abs(np.asarray(quantiles) - 0.5)))
+
+
+def _strict_scale(y: np.ndarray, q: np.ndarray, tau: float) -> float | None:
+    """Largest factor c with P(y < c q) <= tau, by the conformal rank.
+
+    Scores are y / q; a row with q <= 0 can never fall strictly below c q (demand is
+    not negative), so its score is infinite. With k = floor(tau (n+1)), taking the
+    k-th smallest score gives at most k - 1 calibration rows strictly below, and for
+    an exchangeable new row P(y < c q) <= k / (n+1) <= tau. None when the rank is
+    not defined (too few rows, or fewer than k finite scores).
+    """
+    q = np.maximum(np.asarray(q, dtype="float64"), 0.0)
+    n = len(y)
+    k = int(np.floor(tau * (n + 1)))
+    if k < 1:
+        return None
+    pos = q > 0
+    s = np.full(n, np.inf)
+    s[pos] = y[pos] / q[pos]
+    c = float(np.partition(s, k - 1)[k - 1])
+    return max(c, 0.0) if np.isfinite(c) else None
+
+
+def _tie_aware_gap(y: np.ndarray, q: np.ndarray, tau: float) -> float:
+    """Distance of tau outside [P(y < q), P(y <= q)]; zero when calibrated for counts."""
+    return max(0.0, float((y < q).mean()) - tau, tau - float((y <= q).mean()))
+
+
+def _pinball(y: np.ndarray, q: np.ndarray, tau: float) -> float:
+    d = y - q
+    return float(np.mean(np.maximum(tau * d, (tau - 1.0) * d)))
+
 
 @dataclass
 class ConformalCalibrator:
@@ -48,9 +107,15 @@ class ConformalCalibrator:
     n_by_stratum: dict[str, int] = field(default_factory=dict)
     adjusted: dict[str, list[bool]] = field(default_factory=dict)
     quantiles: tuple[float, ...] = QUANTILES
+    # Below the median: one factor per level and stratum (1.0 = untouched), and the
+    # fallback for thin strata by bin of the predicted median. Calibrators pickled
+    # before these existed have none and keep their additive lower offsets.
+    scales: dict[str, np.ndarray] = field(default_factory=dict)
+    level_edges: np.ndarray | None = None
+    level_scales: dict[int, np.ndarray] = field(default_factory=dict)
 
     # ---------------------------------------------------------------------
-    # Two rules that separate this from a naive per-level shift, both of them
+    # Three rules that separate this from a naive per-level shift, all of them
     # learned from watching the naive version degrade the system.
     #
     # 1. The median is never shifted. CQR conformalises interval *bounds*; it
@@ -67,7 +132,19 @@ class ConformalCalibrator:
     #    coverage gap actually shrinks on data the offset never saw. This matters
     #    most in the lower tail, where zero-inflation makes the nominal target
     #    unreachable too — there the honest action is to decline to adjust, and
-    #    the guard discovers that from the data rather than being told.
+    #    the guard discovers that from the data rather than being told. (Rule 3
+    #    measures the lower tail on the strict side, where the target is reachable.)
+    #
+    # 3. Below the median the target is P(y < q) <= tau, by a factor (see the
+    #    module docstring). The additive offset met that bound on the calibration
+    #    set (0.050 / 0.100 / 0.251 at 5/10/25%) and went over it at the origins
+    #    that followed (10% of outcomes below the stated 5% floor at the full run's
+    #    eval origin, up to 23% in the quick run's backtest), because one offset
+    #    per stratum cannot follow a series whose level, or whose shift by
+    #    reconciliation, differs from the calibration window's. Its guard asks the
+    #    tie-aware question: does the factor bring tau inside [P(y < q), P(y <= q)]
+    #    on the held-out half, and, where both already bracket it, does it lower
+    #    the pinball loss.
     # ---------------------------------------------------------------------
 
     # -------------------------------------------------------------- fit
@@ -104,6 +181,9 @@ class ConformalCalibrator:
         self.offsets[GLOBAL], self.adjusted[GLOBAL] = self._fit_offsets(
             y[half], q[half], y[~half], q[~half]
         )
+        self.scales[GLOBAL] = self._fit_scales(
+            y[half], q[half], y[~half], q[~half], self.adjusted[GLOBAL]
+        )
         self.n_by_stratum[GLOBAL] = int(len(y))
 
         strata = np.char.add(np.char.add(pc.astype("U20"), "|"), hg.astype("U12"))
@@ -117,7 +197,30 @@ class ConformalCalibrator:
             self.offsets[str(s)], self.adjusted[str(s)] = self._fit_offsets(
                 y[hm], q[hm], y[cm], q[cm]
             )
+            self.scales[str(s)] = self._fit_scales(
+                y[hm], q[hm], y[cm], q[cm], self.adjusted[str(s)]
+            )
             self.n_by_stratum[str(s)] = n
+
+        # The lower-tail fallback for thin strata, by bin of the predicted median.
+        # The pooled factor is set by the zero-heavy series that dominate it (zero
+        # at the 5% and 10% levels on the demo data), which would put the floor of
+        # every series in a thin stratum at zero, a new product selling dozens a
+        # day included.
+        med = q[:, _median_index(self.quantiles)]
+        self.level_edges = np.unique(
+            np.quantile(med, np.linspace(0.0, 1.0, LEVEL_BINS + 1)[1:-1])
+        ) if len(med) else None
+        self.level_scales = {}
+        if self.level_edges is not None:
+            b = np.searchsorted(self.level_edges, med, side="right")
+            for j in np.unique(b):
+                m = b == j
+                if int(m.sum()) < cfg.calibrate.min_stratum:
+                    continue      # the pooled factor applies to this bin
+                self.level_scales[int(j)] = self._fit_scales(
+                    y[half & m], q[half & m], y[~half & m], q[~half & m]
+                )
         return self
 
     def _fit_offsets(
@@ -135,9 +238,12 @@ class ConformalCalibrator:
         if len(y_fit) < 30 or len(y_chk) < 30:
             return deltas, kept
 
+        m = _median_index(self.quantiles)
         for k, tau in enumerate(self.quantiles):
             if abs(tau - 0.5) < 1e-9:
                 continue                      # the point forecast is never shifted
+            if k < m:
+                continue                      # below the median: a factor, _fit_scales
             d = float(np.quantile(y_fit - q_fit[:, k], tau))
             gap_without = abs(float((y_chk <= q_chk[:, k]).mean()) - tau)
             gap_with = abs(float((y_chk <= q_chk[:, k] + d).mean()) - tau)
@@ -146,20 +252,57 @@ class ConformalCalibrator:
                 kept[k] = True
         return deltas, kept
 
+    def _fit_scales(
+        self, y_fit: np.ndarray, q_fit: np.ndarray, y_chk: np.ndarray, q_chk: np.ndarray,
+        kept: list[bool] | None = None,
+    ) -> np.ndarray:
+        """Per-level factor below the median, validated out of sample.
+
+        Estimated on one half by the strict conformal rank, kept only if on the
+        other half it brings the level closer to calibrated in the count sense (tau
+        inside [P(y < q), P(y <= q)]) or, where both bracket tau, lowers the pinball
+        loss. `kept`, when given, records which levels kept their factor.
+        """
+        K = len(self.quantiles)
+        scales = np.ones(K, dtype="float64")
+        if len(y_fit) < 30 or len(y_chk) < 30:
+            return scales
+
+        for k in range(_median_index(self.quantiles)):
+            tau = float(self.quantiles[k])
+            c = _strict_scale(y_fit, q_fit[:, k], tau)
+            if c is None:
+                continue
+            base = np.maximum(q_chk[:, k], 0.0)
+            gap_without = _tie_aware_gap(y_chk, base, tau)
+            gap_with = _tie_aware_gap(y_chk, c * base, tau)
+            sharper = (gap_with <= gap_without + 1e-9
+                       and _pinball(y_chk, c * base, tau) < _pinball(y_chk, base, tau) - 1e-12)
+            if gap_with < gap_without - 1e-9 or sharper:
+                scales[k] = c
+                if kept is not None:
+                    kept[k] = True
+        return scales
+
     def adjustment_report(self) -> pd.DataFrame:
         """Which levels were adjusted, and which the guard declined to touch."""
         rows = []
+        scaled = bool(getattr(self, "scales", None))
+        m = _median_index(self.quantiles)
         for k, tau in enumerate(self.quantiles):
             g = self.adjusted.get(GLOBAL, [False] * len(self.quantiles))
             n_strata = sum(1 for s, a in self.adjusted.items() if s != GLOBAL and a[k])
+            factor = scaled and k < m
             rows.append(
                 {
                     "nominal": tau,
                     "global_offset": float(self.offsets[GLOBAL][k]),
+                    "global_scale": float(self.scales[GLOBAL][k]) if factor else 1.0,
                     "global_adjusted": bool(g[k]),
                     "strata_adjusted": n_strata,
                     "reason": (
                         "point forecast, never shifted" if abs(tau - 0.5) < 1e-9
+                        else "scaled: strict floor P(y < q) <= tau" if factor and g[k]
                         else "adjusted" if g[k]
                         else "declined: no out-of-sample gain"
                     ),
@@ -183,7 +326,32 @@ class ConformalCalibrator:
         for s in np.unique(strata):
             if s in self.offsets:
                 adj[strata == s] = self.offsets[s]
-        return self._monotone_about_median(flat + adj).reshape(shape)
+        out = flat + adj
+        if getattr(self, "scales", None):
+            # Below the median the stored offsets are zero and the factor applies.
+            # A calibrator pickled before factors existed has none, and keeps the
+            # additive lower offsets it was fitted with.
+            m = _median_index(self.quantiles)
+            out[:, :m] = flat[:, :m] * self._lower_factors(flat, strata)[:, :m]
+        return self._monotone_about_median(out).reshape(shape)
+
+    def _lower_factors(self, flat: np.ndarray, strata: np.ndarray) -> np.ndarray:
+        """(N, Q) factor per row: its stratum's, else its median bin's, else pooled."""
+        fac = np.repeat(self.scales[GLOBAL][None, :], len(flat), axis=0)
+        own = np.zeros(len(flat), dtype=bool)
+        for s in np.unique(strata):
+            if s in self.scales:
+                hit = strata == s
+                fac[hit] = self.scales[s]
+                own |= hit
+        edges = getattr(self, "level_edges", None)
+        bins = getattr(self, "level_scales", None) or {}
+        if edges is not None and bins and not own.all():
+            thin = np.flatnonzero(~own)
+            b = np.searchsorted(edges, flat[thin, _median_index(self.quantiles)], side="right")
+            for j, sc in bins.items():
+                fac[thin[b == j]] = sc
+        return fac
 
     def _monotone_about_median(self, a: np.ndarray) -> np.ndarray:
         """Restore monotonicity without displacing the median.

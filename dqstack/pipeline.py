@@ -424,14 +424,19 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         return tot / max(n, 1)
 
     l_ff, l_st = _meta_loss(W_fforma), _meta_loss(W_stack)
-    best_single = min(
-        (float(np.nanmean(comb.pinball(
-            np.stack([P.y[:, O + h] for h in horizons], axis=1), q_by_origin[O][c])))
-         for c in meta.candidates for O in [meta_origins[0]]),
-    )
+    # The single best method on the same origins and the same objective. Training
+    # keeps it, with a calibrator fitted on its own forecasts (Stage 6), so the app
+    # can issue it instead of the blend when it would have earned more on the same
+    # recent weeks (app/forecast/jobs.train scores both, like any new model).
+    single_loss = {
+        c: float(comb.pinball(y_meta[valid_meta], q_meta[c][valid_meta]).mean())
+        for c in meta.candidates
+    }
+    best_single = min(single_loss, key=single_loss.get)
     log(f"  combined pinball on the meta origins (the weights' own objective):")
     log(f"    FFORMA proxy weights   {l_ff:.5f}")
     log(f"    convex stack weights   {l_st:.5f}")
+    log(f"    best single method     {single_loss[best_single]:.5f}  ({best_single})")
     log(f"    -> using {'stack' if l_st <= l_ff else 'fforma'} weights")
 
     weights_method = "select"
@@ -486,11 +491,23 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     # ---------------------------------------------------------- stage 6
     section("STAGE 6 — calibrate (split conformal / CQR)")
     t0 = time.perf_counter()
-    cy, cq_list, cpc, chg = [], [], [], []
+    # Orders read the unreconciled forecast (ReconcileConfig.for_decisions), so that
+    # forecast gets a calibrator fitted on itself. One calibrator fitted on the
+    # reconciled forecast and applied to both corrected the orders' forecast for
+    # reconciliation's errors, which it does not have: its floor came out far too
+    # low (about 1% of outcomes below a stated 5%), its upper levels moved by
+    # offsets learned on another distribution, and its WSPL was no better than
+    # leaving that forecast uncalibrated (worse at 4 of 4 quick-run backtest
+    # origins, better at 5 of 8 in the full run, by 0.1%).
+    own_orders_cal = cfg.enable_reconciliation and not cfg.reconcile.for_decisions
+    cy, cq_list, cq_orders, cq_single, cpc, chg = [], [], [], [], [], []
     for O in conf_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
         _, qs = candidate_quantiles(vintages["conformal"], O, horizons, tr)
+        cq_single.append(qs[best_single].reshape(-1, len(QUANTILES)))
         cqq = comb.combine_quantiles(qs, W, meta.candidates)
+        if own_orders_cal:
+            cq_orders.append(cqq.reshape(-1, len(QUANTILES)))
         if cfg.enable_reconciliation:
             cqq = rc.reconcile_quantiles(cqq, rc.base_forecasts(P.y, O, horizons))
         cy.append(y.ravel())
@@ -504,12 +521,24 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     conformal = cal_mod.ConformalCalibrator().fit(
         cy_a, cq_a, cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg
     )
+    conformal_orders = cal_mod.ConformalCalibrator().fit(
+        cy_a, np.concatenate(cq_orders), cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg
+    ) if own_orders_cal else conformal
+    # The single best method's own calibrator, for when the app issues it alone.
+    conformal_single = cal_mod.ConformalCalibrator().fit(
+        cy_a, np.concatenate(cq_single), cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg
+    )
     timings["stage6_calibrate"] = time.perf_counter() - t0
     log(f"  strata fitted {len(conformal.offsets) - 1} + global "
         f"({len(cy_a):,} calibration points)")
-    adj = conformal.adjustment_report()
-    log("  per-level adjustment (offsets validated on a held-out half):")
-    log("    " + adj.round(3).to_string(index=False).replace("\n", "\n    "))
+    for name, cal in (("reconciled forecast (totals)", conformal),
+                      ("forecast issued for orders", conformal_orders),
+                      (f"single best method alone ({best_single})", conformal_single)):
+        if name.startswith("forecast issued") and cal is conformal:
+            continue              # orders read the forecast `conformal` was fitted on
+        adj = cal.adjustment_report()
+        log(f"  {name}: per-level adjustment (validated on a held-out half):")
+        log("    " + adj.round(3).to_string(index=False).replace("\n", "\n    "))
 
     # ---------------------------------------------------------- eval origin
     section("EVALUATION — eval origin, actuals known")
@@ -532,7 +561,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     # a leaf-level decision, so it reads the unreconciled distribution. See
     # ReconcileConfig.for_decisions for the measurements behind this.
     decide_src = calib_e if cfg.reconcile.for_decisions else (
-        conformal.apply(comb_e, pc_2d, hg_2d) if cfg.enable_calibration else comb_e
+        conformal_orders.apply(comb_e, pc_2d, hg_2d) if cfg.enable_calibration else comb_e
     )
     log(f"  decision path reads the "
         f"{'reconciled' if cfg.reconcile.for_decisions else 'unreconciled'} distribution")
@@ -567,6 +596,14 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     )
     log("\n  coverage, nominal vs empirical, before and after conformal:")
     log("    " + cov_before.round(4).to_string(index=False).replace("\n", "\n    "))
+    # The same table for the forecast orders read, against its own calibrator.
+    cov_orders = conformal_orders.coverage_table(
+        y_eval.ravel(),
+        (recon_e if cfg.reconcile.for_decisions else comb_e).reshape(-1, len(QUANTILES)),
+        decide_src.reshape(-1, len(QUANTILES)), valid=valid_eval.ravel()
+    )
+    log("\n  coverage of the forecast issued for orders, before and after conformal:")
+    log("    " + cov_orders.round(4).to_string(index=False).replace("\n", "\n    "))
 
     per_class_fva = evaluate.fva_by_class(
         y_eval, med(calib_e), pts_e["seasonal_naive"], pc, denom, wts, valid_eval
@@ -647,6 +684,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         rows, cov, stage, hier = bt.evaluate_origin(
             O, P, P_o, tr, W, meta, rc, conformal, cp_bt,
             tmat_all, hist_panel, horizons, ENSEMBLE, cfg,
+            conformal_orders=conformal_orders,
         )
         bt_rows.extend(rows)
         bt_cov.append(cov)
@@ -668,8 +706,11 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     bt.report_hierarchy(bt_summary["hierarchy"], log=log)
     bt.persist(per_origin, bt_summary)
     hier_all.to_csv(ARTIFACTS / "backtest_hierarchical.csv", index=False)
-    pd.concat(bt_cov, ignore_index=True).to_csv(
-        ARTIFACTS / "backtest_coverage.csv", index=False)
+    bt_cov_all = pd.concat(bt_cov, ignore_index=True)
+    for path, name in (("reconciled", "backtest_coverage.csv"),
+                       ("orders", "backtest_coverage_orders.csv")):
+        bt_cov_all[bt_cov_all["path"] == path].drop(columns="path").to_csv(
+            ARTIFACTS / name, index=False)
     timings["backtest"] = time.perf_counter() - t0
 
     # ---------------------------------------------------------- stage 7
@@ -788,7 +829,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     calib_l = conformal.apply(recon_l, pc_2d, hg_2d) if cfg.enable_calibration else recon_l
 
     decide_l = calib_l if cfg.reconcile.for_decisions else (
-        conformal.apply(comb_l, pc_2d, hg_2d) if cfg.enable_calibration else comb_l
+        conformal_orders.apply(comb_l, pc_2d, hg_2d) if cfg.enable_calibration else comb_l
     )
     risk = cfg.decision.review_period + cfg.decision.lead_time
     frac_l = dec.critical_fractile(cp, risk, cfg)
@@ -821,6 +862,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     fva.to_csv(ARTIFACTS / "fva_ladder.csv", index=False)
     per_class_fva.to_csv(ARTIFACTS / "fva_by_class.csv", index=False)
     cov_before.to_csv(ARTIFACTS / "coverage_table.csv", index=False)
+    cov_orders.to_csv(ARTIFACTS / "coverage_table_orders.csv", index=False)
     econ_df.to_csv(ARTIFACTS / "economics.csv", index=False)
     wrep.to_csv(ARTIFACTS / "ensemble_weights_by_class.csv")
 
@@ -842,10 +884,15 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         "fva_ladder": fva.to_dict("records"),
         "fva_by_class": per_class_fva.to_dict("records"),
         "coverage": cov_before.to_dict("records"),
+        "coverage_orders": cov_orders.to_dict("records"),
         "economics": econ_df.to_dict("records"),
         "accuracy_vs_economics": {k: v for k, v in inv.items() if k != "table"},
         "ensemble_weights_by_class": wrep.to_dict("index"),
         "mean_effective_candidates": eff,
+        # Stage 4's two contenders on the meta origins' pinball loss. Which one is
+        # issued is decided by margin on recent weeks, in the app's training job.
+        "single_best": {"method": best_single, "meta_pinball": single_loss[best_single],
+                        "blend_meta_pinball": {"stack": l_st, "fforma": l_ff}.get(weights_method)},
         "plausibility_clamp_hits": dict(CLAMP_HITS),
         "mint_shrinkage": rc.shrinkage,
         "mint_projection_error": rc.projection_error,
@@ -872,11 +919,20 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         "splits": sp, "trained": tr, "meta": meta, "weights": W, "reconciler": rc,
         # How W was made, so a saved model can weight a new set of series (live.py).
         "weights_method": weights_method, "stack_tbl": stack_tbl, "meta_extra": extra,
-        "conformal": conformal, "metrics": metrics, "cost": cp,
+        # Stage 6 twice: `conformal` for the reconciled forecast (the totals views),
+        # `conformal_orders` for the forecast orders read (the same object when
+        # orders read the reconciled one).
+        "conformal": conformal, "conformal_orders": conformal_orders,
+        # The single best method and its own calibrator: what the app issues instead
+        # of the blend when that would have earned more (live.issued_as).
+        "best_single": best_single, "conformal_single": conformal_single,
+        "metrics": metrics, "cost": cp,
         "eval": {"origin": Oe, "y": y_eval, "valid": valid_eval, "candidates": qs_e,
                  "combined": comb_e, "reconciled": recon_e, "calibrated": calib_e,
+                 "issued": decide_src,
                  "fractile": frac_full, "sim": res_full, "leaderboard": leaderboard},
         "live": {"origin": Ol, "candidates": qs_l, "calibrated": calib_l,
+                 "issued": decide_l,
                  "fractile": frac_l, "temporal": temporal, "points": pts_l},
         "truth": truth,
     }

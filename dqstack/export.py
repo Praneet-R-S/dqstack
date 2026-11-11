@@ -104,6 +104,8 @@ def prior_forecast(state: dict, lag: int = 7) -> tuple[np.ndarray, list[str]]:
     pc2 = np.repeat(pc[:, None], len(horizons), axis=1)
     hg2 = np.broadcast_to(hg, (len(pc), len(horizons)))
     if CFG.enable_calibration:
+        # The reconciled view, like the fan it is compared with; the forecast orders
+        # read has its own calibrator (state["conformal_orders"]).
         cq = state["conformal"].apply(cq, pc2, hg2)
 
     med = cq[..., Q50_INDEX]
@@ -426,6 +428,8 @@ def export_bundle(state: dict, out_dir: Path = UI_DATA, explain_top: int = 160) 
             "fvaLadder": metrics["fva_ladder"],
             "fvaByClass": metrics["fva_by_class"],
             "coverage": metrics["coverage"],
+            # The same table for the forecast orders read, calibrated on itself.
+            "coverageOrders": metrics.get("coverage_orders", []),
             "economics": metrics["economics"],
             "accuracyVsEconomics": metrics["accuracy_vs_economics"],
             "weightsByClass": metrics["ensemble_weights_by_class"],
