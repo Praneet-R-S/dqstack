@@ -12,3 +12,5 @@ docker-compose.yml text eol=lf
 # The database image's build files and the CI drill files run inside Linux as well.
 deploy/postgres/* text eol=lf
 deploy/ci/* text eol=lf
+# So do the SFTP file drop's sshd_config and start script.
+deploy/sftp/* text eol=lf

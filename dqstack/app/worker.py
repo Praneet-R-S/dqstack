@@ -5,9 +5,15 @@ Every minute, in each company's own time zone:
   * close any store day nobody closed, flagged "closed automatically";
   * the nightly forecast, from 01:00 (section 9, "overnight refresh 01:00 to 03:00");
   * the weekly retrain, Sunday night from 02:00;
-  * onboarding training as soon as there are 8 weeks of sales;
+  * onboarding training as soon as there are 2 weeks of sales (jobs.MIN_DAYS): an
+    estimate at first, full forecasting from 8 weeks (jobs.OWN_DAYS);
   * an early retrain when monitoring has asked for one;
-  * any run an Owner or Admin queued by hand.
+  * any run an Owner or Admin queued by hand;
+  * alerts, and the Owner's weekly summary (Monday from 07:00) and monthly report (the
+    1st from 07:00), summaries.py.
+
+The SFTP nightly file drop (filedrop.py) is looked at every half-minute in a thread of
+its own, so a long training run does not hold up a store's files.
 
 A failed night is not retried the same night: the next night's run tries again and,
 meanwhile, yesterday's forecast stays on screen with its age (section 13). Jobs run
@@ -118,6 +124,11 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
     """One pass over every company. Returns what ran: (company, kind, status)."""
     now = now or utcnow()
     ran = []
+    from . import alerts, filedrop, summaries
+    try:
+        filedrop.pickup()          # also every half-minute in its own thread (main)
+    except Exception:  # noqa: BLE001 -- the file drop never stops the schedule
+        log.exception("SFTP file drop failed")
     with SessionLocal() as db:
         _heartbeat(db, now)
         _purge_due(db, now)
@@ -126,7 +137,6 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
         companies = list(db.scalars(select(Company).where(Company.status == "active",
                                                           Company.is_demo.is_(False))))
         todo = [(co.id, item) for co in companies for item in due(db, co, now)]
-        from . import alerts
         for co in companies:
             try:
                 alerts.evaluate(db, co.id, now)
@@ -135,6 +145,12 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
             except Exception:  # noqa: BLE001 -- one company's alerts never stop the rest
                 db.rollback()
                 log.exception("alerts for %s failed", co.id)
+            try:
+                for key in summaries.run(db, co.id, now):
+                    log.info("%s %s sent", co.id, key)
+            except Exception:  # noqa: BLE001 -- nor do its summaries
+                db.rollback()
+                log.exception("owner summaries for %s failed", co.id)
     for company_id, (kind, trigger, run_id) in todo:
         status = run_job(kind, company_id, trigger, run_id)
         ran.append((company_id, kind, status))
@@ -186,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
     while not _lock():
         log.info("another worker holds the scheduler lock; waiting")
         time.sleep(args.every)
+    if not args.once:
+        from . import filedrop
+        filedrop.start()           # the SFTP drop, when DQ_SFTP_ROOT is set
     while True:
         try:
             for company, kind, status in tick():

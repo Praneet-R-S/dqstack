@@ -128,7 +128,7 @@ def test_every_report_downloads_as_excel_pdf_and_csv(make_client):
     from openpyxl import load_workbook
     owner, cashier, s1, pid = _till(make_client)
     names = [r["name"] for r in owner.get("/api/reports").json()]
-    assert len(names) == 12
+    assert len(names) == 14
     for name in names:
         base = f"/api/reports/{name}?store_id={s1['id']}"
         x = owner.get(base + "&format=xlsx")
@@ -142,8 +142,8 @@ def test_every_report_downloads_as_excel_pdf_and_csv(make_client):
     allx = owner.get(f"/api/reports/all.xlsx?store_id={s1['id']}")
     assert allx.status_code == 200
     wb = load_workbook(io.BytesIO(allx.content))
-    assert wb.sheetnames[0] == "Contents" and len(wb.sheetnames) == 13
-    assert len(set(n.lower() for n in wb.sheetnames)) == 13
+    assert wb.sheetnames[0] == "Contents" and len(wb.sheetnames) == 15
+    assert len(set(n.lower() for n in wb.sheetnames)) == 15
     # Downloads are on the record; a cashier cannot download reports at all.
     acts = owner.get("/api/activity?limit=200").json()
     rows = acts.get("rows", acts) if isinstance(acts, dict) else acts

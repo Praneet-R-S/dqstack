@@ -49,6 +49,11 @@ KINDS: dict[str, tuple[tuple[str, ...], str, str]] = {
     "forecast_nightly_failed": (("admin", "owner"), "risk", "#/model"),
     "forecast_train_failed": (("admin", "owner"), "risk", "#/model"),
     "accuracy_drop": (("admin", "owner"), "attention", "#/model"),
+    # A nightly file from the SFTP drop that was not (fully) recorded (filedrop.py).
+    "file_drop_failed": (("admin",), "risk", "#/settings/integrations"),
+    # The Owner's summaries (summaries.py): Owners, and Admins who tick them.
+    "owner_summary": (("owner",), "info", "#/reports"),
+    "owner_monthly": (("owner",), "info", "#/reports"),
 }
 LABELS = {
     "out_of_stock": "Out of stock", "low_stock": "Below target, nothing ordered",
@@ -59,7 +64,13 @@ LABELS = {
     "sales_missing": "Sales not uploaded", "unmapped_barcode": "Barcode to add",
     "forecast_nightly_failed": "Forecast did not run", "forecast_train_failed": "Training failed",
     "accuracy_drop": "Forecast accuracy dropped",
+    "file_drop_failed": "Nightly file not recorded",
+    "owner_summary": "Weekly owner summary", "owner_monthly": "Monthly owner report",
 }
+# Sent by summaries.py with their own text and workbook, never by deliver(); an Admin
+# receives them only after ticking them under My alert settings.
+SUMMARY_KINDS = ("owner_summary", "owner_monthly")
+OPT_IN = SUMMARY_KINDS
 
 
 class _Raiser:
@@ -220,7 +231,8 @@ def deliver(db: Session, company_id: str) -> int:
     by_whatsapp: dict[str, tuple[Person, list[Alert]]] = {}
     for a in db.scalars(select(Alert).where(Alert.company_id == company_id,
                                             Alert.notified_at.is_(None),
-                                            Alert.resolved_at.is_(None))):
+                                            Alert.resolved_at.is_(None),
+                                            Alert.kind.not_in(SUMMARY_KINDS))):
         for p in recipients(db, a):
             prefs = p.notify or {}
             if a.kind in prefs.get("muted", []):

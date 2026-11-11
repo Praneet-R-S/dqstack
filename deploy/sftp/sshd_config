@@ -1,0 +1,27 @@
+# DQ-Stack's SFTP file drop (docker-compose.yml, service sftp; deploy/README.md section 13).
+# Key-based login only. Every account is locked into its own folder (/home/<folder>,
+# owned by root) and can do nothing but SFTP; it starts in upload/.
+
+HostKey /etc/ssh/hostkeys/ssh_host_ed25519_key
+UseDNS no
+
+PermitRootLogin no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+AuthenticationMethods publickey
+MaxAuthTries 3
+LoginGraceTime 30
+
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+PermitTunnel no
+PermitTTY no
+
+Subsystem sftp internal-sftp
+ForceCommand internal-sftp -d /upload
+ChrootDirectory %h

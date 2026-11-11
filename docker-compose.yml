@@ -14,7 +14,7 @@ x-app: &app
   image: dqstack:latest
   restart: unless-stopped
   env_file: .env
-  environment:
+  environment: &app-env
     DQ_ENV: production
     DQ_INLINE_JOBS: "false"
     DATABASE_URL: postgresql+psycopg://dqstack_app:${DQ_APP_PASSWORD}@db:5432/${POSTGRES_DB}
@@ -111,6 +111,32 @@ services:
   worker:
     <<: *app
     command: ["worker"]
+    # The SFTP file drop's folders (filedrop.py): the worker records each file and
+    # moves it to processed/ or failed/. Harmless when the sftp service is not used.
+    environment:
+      <<: *app-env
+      DQ_SFTP_ROOT: /srv/sftp
+    volumes:
+      - sftp-drop:/srv/sftp
+
+  # Optional: the nightly file drop by SFTP, for billing systems that cannot call the
+  # POS API (deploy/README.md section 13). Off unless asked for:
+  #   docker compose --profile sftp up -d
+  # atmoz/sftp pinned to one build by digest (linux/amd64). Key-based login only
+  # (deploy/sftp/sshd_config); each folder is its own chrooted account that sees only
+  # its own upload folder. Folders are added with `manage sftp-add-folder`, which writes
+  # the accounts list into the shared volume; recreate this service after adding one.
+  sftp:
+    image: atmoz/sftp:alpine@sha256:c5fb9e4beb8b7054a4c0b65c5e11df47cc20da95ad6002e88aecff62bab06372
+    profiles: ["sftp"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/dq-sftp-start"]
+    ports: ["${DQ_SFTP_PORT:-2222}:22"]
+    volumes:
+      - sftp-drop:/home
+      - sftp-hostkeys:/etc/ssh/hostkeys
+      - ./deploy/sftp/sshd_config:/etc/ssh/sshd_config:ro
+      - ./deploy/sftp/start.sh:/usr/local/bin/dq-sftp-start:ro
 
   caddy:
     image: caddy:2-alpine
@@ -182,3 +208,7 @@ volumes:
   caddy-data:
   caddy-config:
   backups:
+  # The SFTP drop: one folder per billing system, and the server's host keys (kept, so
+  # clients do not see a new host key after an upgrade).
+  sftp-drop:
+  sftp-hostkeys:

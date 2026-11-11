@@ -8,30 +8,37 @@ rows; the exports show units and rupees.
     sales_by_category     revenue and units per category
     best_worst            best and worst sellers by revenue
     stock_value           value at cost by store and category
+    stock_turn            stock turn and days of cover over the period, by store and category
     slow_dead_stock       stock with no sale in 60 days (dead) or over 90 days of cover (slow)
     shrinkage             count losses and gains, at cost
-    wastage               write-offs by reason, at cost (expiry losses are the "expired" rows)
+    wastage               write-offs by reason, at cost, with expiry losses in their own column
+    count_compliance      cycle counts done against those due, by store and ABC class
     forecast_accuracy     last night's forecasts scored against sales, by day and category
-    supplier_performance  fill rate, on-time delivery, damaged share, unplanned orders
+    supplier_performance  order performance: fill rate, on-time delivery, damaged share,
+                          orders made by hand, emergency orders
     lost_sales            units the forecast says were wanted on out-of-stock days, at margin
     profit_comparison     stock targets from each product's costs vs one 95% service level
     accounting            sales, GST and purchases by day, for the accountant
+
+Periods are days in the company's time zone; a moment is compared in UTC, the way
+every time is stored.
 """
 
 from __future__ import annotations
 
 import io
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from . import rules as rules_mod
 from . import stock as stock_mod
-from .models import (Bill, Company, DailySales, Delivery, DeliveryLine, ForecastScore, Product,
-                     PurchaseOrder, PurchaseOrderLine, StockMovement, StockOnHand, Store,
-                     Supplier)
+from .models import (Bill, Company, CountLine, CountSession, DailySales, Delivery, DeliveryLine,
+                     ForecastScore, Product, PurchaseOrder, PurchaseOrderLine, StockMovement,
+                     StockOnHand, Store, Supplier)
+from .security import _aware
 
 # column: (key, label, kind) with kind in text | qty | money | pct | num | date
 Report = dict
@@ -45,6 +52,21 @@ def _out(title: str, columns: list, rows: list, totals: dict | None = None,
 
 def _stores(db: Session, store_ids: list[str]) -> dict[str, Store]:
     return {s.id: s for s in db.scalars(select(Store).where(Store.id.in_(store_ids)))}
+
+
+def _bounds(db: Session, cid: str, start: date, end: date):
+    """The company's time zone, and the period's first and after-last moments in UTC.
+    Times are stored in UTC; SQLite drops a time's offset, so a bound in local time
+    would be compared 5 hours 30 minutes out."""
+    from .sales import tz_of
+    tz = tz_of(db, cid)
+    lo = datetime.combine(start, time(0, 0), tzinfo=tz).astimezone(timezone.utc)
+    hi = datetime.combine(end + timedelta(days=1), time(0, 0), tzinfo=tz).astimezone(timezone.utc)
+    return tz, lo, hi
+
+
+def _ratio(a: int | float, b: int | float, places: int = 4) -> float | None:
+    return round(a / b, places) if b else None
 
 
 def sales(db, cid, store_ids, start, end) -> Report:
@@ -126,6 +148,105 @@ def stock_value(db, cid, store_ids, start, end) -> Report:
                 {"value_paise": v["total_paise"]}, notes)
 
 
+def stock_turn(db, cid, store_ids, start, end) -> Report:
+    """Stock turn and days of cover over the period, by store and category.
+
+    Stock at the start and at the end of the period is rebuilt from the ledger (on hand
+    now, less everything that moved since) and valued at each product's current average
+    cost, as Stock value is; negative stock counts as none. Cost of goods sold is what
+    sales took out, at the cost each sale was booked at, less customer returns.
+
+        stock turn     = cost of goods sold / ((stock at cost, start + end) / 2)
+        turns a year   = stock turn x 365 / days in the period
+        days of cover  = stock at cost, end / (cost of goods sold / days in the period)
+
+    Days of cover is "on hand / average daily sales" counted in rupees at cost rather than
+    units, so that a category of kilos and pieces adds up; for one product at one cost the
+    two are the same. A separate report from Stock value, which is a snapshot of now: these
+    figures belong to a period."""
+    _, lo, hi = _bounds(db, cid, start, end)
+    st = _stores(db, store_ids)
+    days = (end - start).days + 1
+    prods = {p.id: p for p in db.scalars(select(Product).where(Product.company_id == cid))}
+    soh = {(r.store_id, r.product_id): r for r in db.scalars(select(StockOnHand).where(
+        StockOnHand.company_id == cid, StockOnHand.store_id.in_(store_ids)))}
+    in_stores = (StockMovement.company_id == cid, StockMovement.store_id.in_(store_ids))
+    by_pair = (StockMovement.store_id, StockMovement.product_id)
+
+    def moved_since(t: datetime) -> dict:
+        return {(s, p): int(q or 0) for s, p, q in db.execute(
+            select(*by_pair, func.sum(StockMovement.qty_milli))
+            .where(*in_stores, StockMovement.at >= t).group_by(*by_pair))}
+    after_start, after_end = moved_since(lo), moved_since(hi)
+    sold: dict = {}
+    for s, p, q, at_cost, uncosted in db.execute(
+            select(*by_pair, func.sum(StockMovement.qty_milli),
+                   func.sum(StockMovement.qty_milli * func.coalesce(StockMovement.unit_cost_paise, 0)),
+                   func.sum(case((StockMovement.unit_cost_paise.is_(None), StockMovement.qty_milli),
+                                 else_=0)))
+            .where(*in_stores, StockMovement.type.in_(("sale", "customer_return")),
+                   StockMovement.at >= lo, StockMovement.at < hi).group_by(*by_pair)):
+        sold[(s, p)] = (-int(q or 0), -int(at_cost or 0), -int(uncosted or 0))
+    # store, category -> on hand at end, value at start, value at end, units sold, cost of sales
+    agg: dict = defaultdict(lambda: [0, 0, 0, 0, 0])
+    no_cost = 0
+    for key in set(soh) | set(sold) | set(after_start):
+        sid, pid = key
+        p = prods.get(pid)
+        if p is None or sid not in st:
+            continue
+        row = soh.get(key)
+        now_milli = row.on_hand_milli if row else 0
+        cost = row.avg_cost_paise if row and row.avg_cost_paise is not None else p.cost_paise
+        opening = max(now_milli - after_start.get(key, 0), 0)
+        closing = max(now_milli - after_end.get(key, 0), 0)
+        units, at_cost, uncosted = sold.get(key, (0, 0, 0))
+        if cost is None and (opening or closing):
+            no_cost += 1
+        a = agg[(st[sid].name, p.category or "Uncategorised")]
+        a[0] += closing
+        a[1] += opening * (cost or 0) // 1000
+        a[2] += closing * (cost or 0) // 1000
+        a[3] += units
+        a[4] += (at_cost + uncosted * (cost or 0)) // 1000
+
+    def figures(v_start: int, v_end: int, cogs: int) -> dict:
+        avg = (v_start + v_end) / 2
+        turn = cogs / avg if avg > 0 else None
+        return {"turn": round(turn, 2) if turn is not None else None,
+                "turn_year": round(turn * 365 / days, 1) if turn is not None else None,
+                "days_of_cover": round(v_end * days / cogs, 1) if cogs > 0 else None}
+    rows = []
+    for (s, c), (oh, v0, v1, u, cogs) in sorted(agg.items()):
+        if not (oh or v0 or v1 or u or cogs):
+            continue
+        rows.append({"store": s, "category": c, "on_hand_milli": oh, "start_value_paise": v0,
+                     "end_value_paise": v1, "sold_milli": u, "cogs_paise": cogs,
+                     **figures(v0, v1, cogs)})
+    t0 = sum(r["start_value_paise"] for r in rows)
+    t1 = sum(r["end_value_paise"] for r in rows)
+    tc = sum(r["cogs_paise"] for r in rows)
+    notes = [f"Stock turn: cost of goods sold over the {days} days divided by the average of "
+             "the stock at cost at the start and the end. Turns a year scales it to 365 days.",
+             "Days of cover: stock at cost at the end divided by the cost of goods sold per "
+             "day over the period, so how long the stock lasts at the period's rate of sale. "
+             "Blank when nothing sold.",
+             "Stock at the start and end is rebuilt from the stock movements and valued at "
+             "today's average cost; stock below zero counts as none."]
+    if no_cost:
+        notes.append(f"{no_cost} products have no cost and are not valued.")
+    return _out("Stock turn and days of cover", [
+        ("store", "Store", "text"), ("category", "Category", "text"),
+        ("on_hand_milli", "On hand at end", "qty"),
+        ("start_value_paise", "Stock at cost, start", "money"),
+        ("end_value_paise", "Stock at cost, end", "money"),
+        ("sold_milli", "Units sold", "qty"), ("cogs_paise", "Cost of goods sold", "money"),
+        ("turn", "Stock turn", "num"), ("turn_year", "Turns a year", "num"),
+        ("days_of_cover", "Days of cover", "num")], rows,
+        {"start_value_paise": t0, "end_value_paise": t1, "cogs_paise": tc,
+         "sold_milli": sum(r["sold_milli"] for r in rows), **figures(t0, t1, tc)}, notes)
+
+
 def slow_dead_stock(db, cid, store_ids, start, end) -> Report:
     r = rules_mod.effective(db.get(Company, cid).rules)
     dead_days = int(r["dead_stock_days"])
@@ -159,11 +280,7 @@ def slow_dead_stock(db, cid, store_ids, start, end) -> Report:
 
 
 def _movements(db, cid, store_ids, start, end, types):
-    from .sales import tz_of
-    from datetime import datetime, time
-    tz = tz_of(db, cid)
-    lo = datetime.combine(start, time(0, 0), tzinfo=tz)
-    hi = datetime.combine(end + timedelta(days=1), time(0, 0), tzinfo=tz)
+    _, lo, hi = _bounds(db, cid, start, end)
     return db.execute(select(StockMovement, Product).join(
         Product, Product.id == StockMovement.product_id).where(
         StockMovement.company_id == cid, StockMovement.store_id.in_(store_ids),
@@ -205,15 +322,93 @@ def wastage(db, cid, store_ids, start, end) -> Report:
         v = agg[(st[m.store_id].name, reason)]
         v[0] += -m.qty_milli
         v[1] += -m.qty_milli * (m.unit_cost_paise or 0) // 1000
-    rows = [{"store": s, "reason": r, "units_milli": u, "value_paise": v}
+    rows = [{"store": s, "reason": r, "units_milli": u, "value_paise": v,
+             "expiry_paise": v if r == "expired" else 0}
             for (s, r), (u, v) in sorted(agg.items())]
     return _out("Wastage, damage and expiry", [("store", "Store", "text"),
                                                ("reason", "Reason", "text"),
                                                ("units_milli", "Units", "qty"),
-                                               ("value_paise", "At cost", "money")], rows,
+                                               ("value_paise", "At cost", "money"),
+                                               ("expiry_paise", "Of which expired", "money")],
+                rows,
                 {"value_paise": sum(r["value_paise"] for r in rows),
-                 "expiry_paise": sum(r["value_paise"] for r in rows if r["reason"] == "expired")},
-                ["Expiry losses are the rows with the reason expired."])
+                 "expiry_paise": sum(r["expiry_paise"] for r in rows)},
+                ["Expiry losses are the stock written off with the reason expired. Stock "
+                 "refused at delivery because it had expired is not a loss: the supplier "
+                 "credits it (Order performance counts it as damaged)."])
+
+
+# A count, for compliance: any count line except one sent back for a recount (rejected)
+# or replaced by a second person's count of the same product (superseded). Lines still
+# waiting for a manager were counted all the same.
+COUNTED = ("posted", "confirmed", "waiting", "conflict")
+
+
+def count_schedule(db, cid, store_ids, start, end) -> dict:
+    """Cycle counts due and done in the period, per store and ABC class.
+
+    For each product the Stock take list would show (every product not discontinued):
+    its first due date is its last count before the period plus its class's interval
+    (A 7, B 28, C 91 days by default; business rules), or the period's first day if it
+    was never counted, and never earlier than the first day. Counts due: one on that
+    date and one every interval after it, up to the period's last day. Counts done: the
+    counts made in the period (one per count session), at most the number due -- an
+    early count still counts, extra counts do not. Returns {(store_id, class): {...}}."""
+    from .floor import abc_classes
+    tz, lo, hi = _bounds(db, cid, start, end)
+    intervals = rules_mod.effective(db.get(Company, cid).rules)["count_interval_days"]
+    products = list(db.scalars(select(Product).where(Product.company_id == cid,
+                                                     Product.status != "discontinued")))
+    base = (select(CountSession.store_id, CountLine.product_id).select_from(CountLine)
+            .join(CountSession, CountSession.id == CountLine.session_id)
+            .where(CountLine.company_id == cid, CountSession.store_id.in_(store_ids),
+                   CountLine.status.in_(COUNTED)))
+    last = {(s, p): _aware(t) for s, p, t in db.execute(
+        base.add_columns(func.max(CountLine.counted_at)).where(CountLine.counted_at < lo)
+        .group_by(CountSession.store_id, CountLine.product_id))}
+    made = {(s, p): int(n) for s, p, n in db.execute(
+        base.add_columns(func.count(func.distinct(CountLine.session_id)))
+        .where(CountLine.counted_at >= lo, CountLine.counted_at < hi)
+        .group_by(CountSession.store_id, CountLine.product_id))}
+    out: dict = {}
+    for sid in store_ids:
+        computed = abc_classes(db, cid, sid)
+        for p in products:
+            cls = p.abc_class or computed.get(p.id, "C")
+            interval = max(int(intervals.get(cls, 91)), 1)
+            before = last.get((sid, p.id))
+            first = before.astimezone(tz).date() + timedelta(days=interval) if before else start
+            first = max(first, start)
+            due = 1 + (end - first).days // interval if first <= end else 0
+            n = made.get((sid, p.id), 0)
+            v = out.setdefault((sid, cls), {"products": 0, "due": 0, "done": 0, "made": 0})
+            v["products"] += 1
+            v["due"] += due
+            v["done"] += min(n, due)
+            v["made"] += n
+    return out
+
+
+def count_compliance(db, cid, store_ids, start, end) -> Report:
+    st = _stores(db, store_ids)
+    sched = count_schedule(db, cid, store_ids, start, end)
+    rows = [{"store": st[sid].name, "abc_class": cls, "products": v["products"],
+             "counts_due": v["due"], "counts_done": v["done"],
+             "compliance": _ratio(v["done"], v["due"]), "counts_made": v["made"]}
+            for (sid, cls), v in sorted(sched.items(), key=lambda kv: (st[kv[0][0]].name, kv[0][1]))]
+    due = sum(r["counts_due"] for r in rows)
+    done = sum(r["counts_done"] for r in rows)
+    return _out("Cycle count compliance", [
+        ("store", "Store", "text"), ("abc_class", "Class", "text"),
+        ("products", "Products", "num"), ("counts_due", "Counts due", "num"),
+        ("counts_done", "Counts done", "num"), ("compliance", "Done", "pct"),
+        ("counts_made", "Counts made", "num")], rows,
+        {"counts_due": due, "counts_done": done, "compliance": _ratio(done, due),
+         "counts_made": sum(r["counts_made"] for r in rows)},
+        ["Counts due: each product's count date from its last count and its class's "
+         "interval (business rules), then one every interval to the end of the period; a "
+         "product never counted is due from the first day. Counts done: counts made in the "
+         "period, up to the number due. A count sent back for a recount does not count."])
 
 
 def forecast_accuracy(db, cid, store_ids, start, end) -> Report:
@@ -244,40 +439,103 @@ def forecast_accuracy(db, cid, store_ids, start, end) -> Report:
         ["Error is total absolute error over total sales; the range is 5% to 95%."])
 
 
+def accuracy_by_store(db, cid, store_ids, start, end) -> dict:
+    """{store_id or None for all: {"actual_milli", "forecast_milli", "error", "bias"}}
+    over the period, with the same definitions as Forecast accuracy: error is total
+    absolute error over total sales (WAPE), bias is (forecast - sales) / sales."""
+    sums: dict = defaultdict(lambda: [0, 0, 0])
+    for sid, a, f, e in db.execute(
+            select(ForecastScore.store_id, func.sum(ForecastScore.actual_milli),
+                   func.sum(ForecastScore.forecast_milli), func.sum(ForecastScore.abs_error_milli))
+            .where(ForecastScore.company_id == cid, ForecastScore.store_id.in_(store_ids),
+                   ForecastScore.day >= start, ForecastScore.day <= end)
+            .group_by(ForecastScore.store_id)):
+        for k in (sid, None):
+            sums[k][0] += int(a or 0)
+            sums[k][1] += int(f or 0)
+            sums[k][2] += int(e or 0)
+    return {k: {"actual_milli": a, "forecast_milli": f, "error": _ratio(e, a),
+                "bias": _ratio(f - a, a)} for k, (a, f, e) in sums.items()}
+
+
+def emergency_reason(po: PurchaseOrder, supplier: Supplier | None, tz) -> str | None:
+    """Why an approved order was an emergency order, or None.
+
+    An emergency order is outside the supplier's normal rhythm: approved on a day of the
+    week that is not one of the supplier's order days (when the supplier has order days),
+    or asking for delivery sooner than the supplier's lead time (expected date minus the
+    day it was approved, in days, less than the lead time). Who made the order does not
+    matter: a suggested order approved off-cycle is an emergency too, and an order made
+    by hand on an order day with the usual lead time is not. An order without a supplier
+    has no rhythm to break and is never counted."""
+    if supplier is None or po.approved_at is None:
+        return None
+    approved = _aware(po.approved_at).astimezone(tz).date()
+    if supplier.order_days and approved.weekday() not in supplier.order_days:
+        return "approved on a day the supplier does not take orders"
+    if po.expected_date is not None and \
+            (po.expected_date - approved).days < int(supplier.lead_time_days or 0):
+        return "wanted sooner than the supplier's lead time"
+    return None
+
+
 def supplier_performance(db, cid, store_ids, start, end) -> Report:
-    sups = {s.id: s.name for s in db.scalars(select(Supplier).where(Supplier.company_id == cid))}
+    """Order performance, by supplier, for orders approved in the period."""
+    from .db import utcnow
+    tz, lo, hi = _bounds(db, cid, start, end)
+    today = utcnow().astimezone(tz).date()
+    sups = {s.id: s for s in db.scalars(select(Supplier).where(Supplier.company_id == cid))}
     agg: dict = defaultdict(lambda: {"orders": 0, "ordered": 0, "received": 0, "damaged": 0,
-                                     "on_time": 0, "with_date": 0, "unplanned": 0})
+                                     "on_time": 0, "with_date": 0, "unplanned": 0,
+                                     "emergency": 0})
+    when = func.coalesce(PurchaseOrder.approved_at, PurchaseOrder.created_at)
     for po in db.scalars(select(PurchaseOrder).where(
             PurchaseOrder.company_id == cid, PurchaseOrder.store_id.in_(store_ids),
-            PurchaseOrder.status.in_(("partly_received", "received")),
-            func.date(PurchaseOrder.created_at) >= start,
-            func.date(PurchaseOrder.created_at) <= end)):
-        a = agg[sups.get(po.supplier_id, "No supplier")]
+            PurchaseOrder.status.not_in(("draft", "cancelled")), when >= lo, when < hi)):
+        sup = sups.get(po.supplier_id)
+        a = agg[sup.name if sup else "No supplier"]
         a["orders"] += 1
         a["unplanned"] += int(po.origin != "suggested")
-        a["ordered"] += sum(l.qty_milli for l in po.lines)
-        a["received"] += sum(min(l.received_milli, l.qty_milli) for l in po.lines)
+        a["emergency"] += int(emergency_reason(po, sup, tz) is not None)
         deliveries = list(db.scalars(select(Delivery).where(Delivery.po_id == po.id)
                                      .order_by(Delivery.created_at)))
+        if po.status in ("partly_received", "received"):
+            a["ordered"] += sum(l.qty_milli for l in po.lines)
+            a["received"] += sum(min(l.received_milli, l.qty_milli) for l in po.lines)
         a["damaged"] += sum(dl.damaged_milli for d in deliveries for dl in d.lines)
         if po.expected_date and deliveries:
+            first = _aware(deliveries[0].created_at).astimezone(tz).date()
             a["with_date"] += 1
-            a["on_time"] += int(deliveries[0].created_at.date() <= po.expected_date)
-    rows = [{"supplier": k, "orders": v["orders"],
-             "fill_rate": round(v["received"] / v["ordered"], 4) if v["ordered"] else None,
-             "on_time": round(v["on_time"] / v["with_date"], 4) if v["with_date"] else None,
-             "damaged_share": round(v["damaged"] / (v["received"] + v["damaged"]), 4)
-             if v["received"] + v["damaged"] else None,
-             "unplanned_orders": v["unplanned"]} for k, v in sorted(agg.items())]
-    return _out("Supplier performance", [("supplier", "Supplier", "text"),
-                                         ("orders", "Orders", "num"),
-                                         ("fill_rate", "Fill rate", "pct"),
-                                         ("on_time", "On time", "pct"),
-                                         ("damaged_share", "Damaged", "pct"),
-                                         ("unplanned_orders", "Unplanned orders", "num")], rows,
-                notes=["Fill rate: good units received over units ordered, on orders that "
-                       "have arrived. Unplanned: orders made by hand, not from suggestions."])
+            a["on_time"] += int(first <= po.expected_date)
+        elif po.expected_date and po.expected_date < today:
+            a["with_date"] += 1                     # past its date and nothing has come: late
+
+    def figures(v: dict) -> dict:
+        return {"orders": v["orders"], "fill_rate": _ratio(v["received"], v["ordered"]),
+                "on_time": _ratio(v["on_time"], v["with_date"]),
+                "damaged_share": _ratio(v["damaged"], v["received"] + v["damaged"]),
+                "unplanned_orders": v["unplanned"], "emergency_orders": v["emergency"]}
+    rows = [{"supplier": k, **figures(v)} for k, v in sorted(agg.items())]
+    total = {k: sum(v[k] for v in agg.values()) for k in
+             ("orders", "ordered", "received", "damaged", "on_time", "with_date", "unplanned",
+              "emergency")}
+    return _out("Order performance by supplier", [
+        ("supplier", "Supplier", "text"), ("orders", "Orders", "num"),
+        ("fill_rate", "Fill rate", "pct"), ("on_time", "On time", "pct"),
+        ("damaged_share", "Damaged", "pct"), ("unplanned_orders", "Made by hand", "num"),
+        ("emergency_orders", "Emergency orders", "num")], rows, figures(total),
+        ["Orders: approved in the period and not cancelled.",
+         "Fill rate: good units received over units ordered, on orders that have arrived "
+         "(in full or in part).",
+         "On time: the first delivery came on or before the expected date. Orders with an "
+         "expected date that has passed with nothing delivered count as late; orders with "
+         "no expected date are not judged.",
+         "Damaged: units refused at delivery (damaged, wrong, expired) over all units that "
+         "arrived.",
+         "Made by hand: orders not made from the forecast's suggestions.",
+         "Emergency orders: approved on a day that is not one of the supplier's order "
+         "days, or with an expected date sooner after approval than the supplier's lead "
+         "time. Orders without a supplier are never counted as emergencies."])
 
 
 def lost_sales(db, cid, store_ids, start, end) -> Report:
@@ -363,8 +621,9 @@ def accounting(db, cid, store_ids, start, end) -> Report:
 
 
 REPORTS = {"sales": sales, "sales_by_category": sales_by_category, "best_worst": best_worst,
-           "stock_value": stock_value, "slow_dead_stock": slow_dead_stock,
-           "shrinkage": shrinkage, "wastage": wastage, "forecast_accuracy": forecast_accuracy,
+           "stock_value": stock_value, "stock_turn": stock_turn,
+           "slow_dead_stock": slow_dead_stock, "shrinkage": shrinkage, "wastage": wastage,
+           "count_compliance": count_compliance, "forecast_accuracy": forecast_accuracy,
            "supplier_performance": supplier_performance, "lost_sales": lost_sales,
            "profit_comparison": profit_comparison, "accounting": accounting}
 

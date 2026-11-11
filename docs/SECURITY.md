@@ -34,6 +34,13 @@ an automated test in `tests/app/` proves it, on SQLite and on PostgreSQL 16 in C
   `.xls` files are refused. Photos are limited to 2 MB and image types.
 * API keys are shown once and stored as a hash; they can be limited to one store and
   revoked.
+* The nightly SFTP file drop (optional `sftp` compose profile) accepts key logins only,
+  chrooted to one upload folder per company. A folder is no authority on its own: an
+  operator maps it to an API key (`manage sftp-add-folder`), the mapping lives outside
+  every account's chroot, and each pass re-checks that the key exists, belongs to that
+  company, is not revoked and the company is active. Processed and failed files move to
+  worker-owned folders the client cannot write, symbolic links are never followed, and a
+  file without store and bill number columns is refused, as it is by the API.
 * Saved forecasting models are Python pickles. They are only ever loaded from the
   company's own database, written by the scheduler; never from an upload.
 * Secrets come only from the environment. `.env` is ignored by git; `.env.example`

@@ -114,10 +114,21 @@ def get_settings(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
         note = f"Sent to {p.phone} on WhatsApp."
     return {"email": bool((p.notify or {}).get("email")),
             "whatsapp": bool((p.notify or {}).get("whatsapp")),
-            "muted": (p.notify or {}).get("muted", []),
+            "muted": _muted(p),
             "kinds": [{"kind": k, "label": A.LABELS[k]} for k in kinds],
             "whatsapp_available": available,
             "whatsapp_note": note}
+
+
+def _muted(p: Person) -> list[str]:
+    """What this person does not receive. The Owner's summaries reach an Admin only once
+    they tick them, so for an Admin they count as muted until then (the settings screen
+    shows a ticked box for anything not muted)."""
+    n = p.notify or {}
+    muted = list(n.get("muted", []))
+    if p.role == "admin":
+        muted += [k for k in A.OPT_IN if k not in n.get("opted_in", []) and k not in muted]
+    return muted
 
 
 @router.put("/alerts/settings")
@@ -126,16 +137,23 @@ def put_settings(body: SettingsIn, c: Ctx = Depends(ctx), db: Session = Depends(
     bad = [k for k in body.muted if k not in A.KINDS]
     if bad:
         raise HTTPException(422, f"'{bad[0]}' is not a kind of alert.")
-    p.notify = body.model_dump()
+    data = body.model_dump()
+    if p.role == "admin":
+        data["opted_in"] = [k for k in A.OPT_IN if k not in body.muted]
+        data["muted"] = [k for k in body.muted if k not in A.OPT_IN]
+    p.notify = data
     db.commit()
     return get_settings(c, db)
 
 
 TITLES = {"sales": "Sales by day and store", "sales_by_category": "Sales by category",
           "best_worst": "Best and worst sellers", "stock_value": "Stock value at cost",
+          "stock_turn": "Stock turn and days of cover",
           "slow_dead_stock": "Slow and dead stock", "shrinkage": "Shrinkage",
-          "wastage": "Wastage, damage and expiry", "forecast_accuracy": "Forecast accuracy",
-          "supplier_performance": "Supplier performance", "lost_sales": "Lost sales estimate",
+          "wastage": "Wastage, damage and expiry", "count_compliance": "Cycle count compliance",
+          "forecast_accuracy": "Forecast accuracy",
+          "supplier_performance": "Order performance by supplier",
+          "lost_sales": "Lost sales estimate",
           "profit_comparison": "Profit comparison", "accounting": "Accounting export"}
 
 

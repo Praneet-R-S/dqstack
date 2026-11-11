@@ -153,3 +153,14 @@ def test_key_use_is_noted_without_holding_up_the_bill(client):
     client.http.post("/api/pos/v1/messages", json={"messages": [_sale(2)]}, headers=auth)
     with dbmod.SessionLocal() as db:
         assert db.scalar(select(ApiKey.last_used_at)) == first      # within the minute
+
+
+def test_a_file_without_store_or_bill_columns_is_refused(client):
+    """Without them every row of a store would merge into one nameless bill."""
+    s1, pid, auth = _setup(client)
+    before = _hand(s1["id"], pid["RICE"])
+    bad = "type,sku,qty,price\nsale,RICE,1,450\nsale,RICE,2,450\n"
+    r = client.http.post("/api/pos/v1/files", headers=auth,
+                         files={"file": ("day.csv", bad.encode(), "text/csv")})
+    assert r.status_code == 422 and "bill_number" in r.text
+    assert _hand(s1["id"], pid["RICE"]) == before

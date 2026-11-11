@@ -359,3 +359,82 @@ the `email` claim or, failing that, `preferred_username`; with a multi-tenant
 setting any Microsoft organisation can present any address there, so for a client
 on Microsoft 365 prefer setting `DQ_MICROSOFT_TENANT` to that client's tenant id.
 Restart after changing these (`docker compose up -d`).
+
+## 13. The nightly file drop by SFTP (optional)
+
+Section 14 of the specification asks for "a nightly file drop (SFTP or email-in) for
+systems that cannot call an API". SFTP is built; email-in is not. A billing system
+uploads the same CSV that `POST /api/pos/v1/files` takes, one row per bill line:
+
+    type,store_code,bill_number,occurred_at,sku,qty,price,discount,payment_method,original_bill_number
+
+Each folder acts as one API key: that key's company, and that key's store if the key
+is limited to one. The folder's name grants nothing. The worker looks every 30
+seconds and records each finished file through the same code as the API: the same
+parsing, the same repeat protection (a bill already recorded is recognised by type,
+store and bill number, whichever way it came), and the same activity-log entries for
+each bill, plus one entry for the file. Then it moves the file aside:
+
+| Folder (as the billing system sees it) | What is there |
+|---|---|
+| `/upload/` | where files go; a name ending `.part`, `.tmp` or `.filepart`, or starting with `.`, is left alone until renamed |
+| `/processing/` | a file being recorded (seconds) |
+| `/processed/` | files whose bills were all recorded (now or before), each with a `.report.txt` |
+| `/failed/` | files with anything not recorded, each with a `.errors.txt` saying which bills and why |
+
+The billing system can write only in `/upload/`; the other three are the worker's and
+read-only to it. That is why each SFTP account has a user id of its own
+(`DQ_SFTP_UID`, 10002) in the worker's group (10001), never the worker's id: a
+client able to write where the worker writes could swap a folder for a link into
+another company's folder. Files must be uploaded readable by others (mode 644, what
+SFTP clients do by default); one readable by its owner only goes to `/failed/` with
+that reason.
+
+A failed file raises a "Nightly file not recorded" alert for the company's Owners and
+Admins (in the app, and by email or WhatsApp for those who chose them). The bills
+that could be recorded were recorded; correct the file and upload all of it again,
+and only the missing bills are added. A file is read only once nobody has written to
+it for 60 seconds (`DQ_SFTP_SETTLE_SECONDS`), so upload under a temporary name and
+rename, or simply upload: either works.
+
+**Turn it on.** The `sftp` service is an optional profile in `docker-compose.yml`:
+`atmoz/sftp`, pinned by digest to one build. atmoz publishes it for linux/amd64 only,
+so on an ARM server use another OpenSSH image with the same `sshd_config`.
+Logins are by SSH key only (`deploy/sftp/sshd_config`);
+each folder is its own account, locked into its own folder, that can only use SFTP.
+Open the port (`DQ_SFTP_PORT`, 2222 by default) in the firewall, preferably only to
+the client's addresses.
+
+1. The company's Owner or an Admin makes an API key for the billing system under
+   Settings, Integrations (limited to one store if the system serves one store), and
+   tells you the beginning the screen shows (`dqk_ab12cd34…`).
+2. The client sends you the billing system's OpenSSH public key (`ssh-ed25519 AAAA...`;
+   `ssh-keygen -t ed25519` makes one). Never accept a password or a private key.
+3. Add the folder, as root (root owns the drop's folders, and the chroot needs that):
+
+   ```bash
+   docker compose run --rm --user root worker manage sftp-add-folder \
+       --folder acme-pos --api-key-id dqk_ab12cd34 \
+       --public-key "ssh-ed25519 AAAA... pos@acme"
+   docker compose --profile sftp up -d --force-recreate sftp
+   ```
+
+   A folder name is 3 to 32 lower-case letters, digits and hyphens. The command
+   checks the key is live, writes the folder list (`/srv/sftp/.dqstack/folders.json`,
+   outside every account's reach) and the accounts list for the SFTP server, and
+   notes the change in the company's activity log. The SFTP server makes its accounts
+   when it is created, hence `--force-recreate` after every change.
+4. The billing system connects to `sftp://acme-pos@YOUR-DOMAIN:2222/` with its private
+   key (it lands in `/upload`). Check the server's host key fingerprint with the
+   client the first time: `docker compose exec sftp ssh-keygen -lf /etc/ssh/hostkeys/ssh_host_ed25519_key.pub`.
+
+To stop a folder at once, revoke its API key under Settings, Integrations: its files
+then go to `failed/` unrecorded, with an alert. To remove it,
+`docker compose run --rm --user root worker manage sftp-remove-folder --folder acme-pos`
+and recreate the service; its files are left in the volume. The host key is kept in
+the `sftp-hostkeys` volume, so upgrades do not change it. Files are not deleted
+automatically; `processed/` grows by a few kilobytes a night per store.
+
+Upgrading the SFTP image: look up the new digest of the `alpine` tag
+(`docker buildx imagetools inspect atmoz/sftp:alpine`), put it in
+`docker-compose.yml`, and recreate the service.

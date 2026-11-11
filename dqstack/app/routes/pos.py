@@ -125,10 +125,15 @@ def pos_ctx(request: Request, db: Session = Depends(get_db),
         raise HTTPException(401, "That API key is not valid, or has been revoked.")
     limiter.check(f"pos:{k.id}", limit=600, window_s=60)
     _touch(k.id)
+    return key_ctx(k, f"pos:{k.prefix}", request.client.host if request.client else None)
+
+
+def key_ctx(k: ApiKey, device: str, ip: str | None = None) -> SimpleNamespace:
+    """Who is acting when a key sends: the key itself, for its own company only. Also
+    used by the SFTP file drop (filedrop.py), which acts with the folder's key."""
     return SimpleNamespace(company_id=k.company_id, key=k, role="admin",
                            person=SimpleNamespace(id=None, name=f"POS: {k.name}"),
-                           device=f"pos:{k.prefix}", ip=request.client.host if request.client else None,
-                           can=lambda *a, **kw: True)
+                           device=device, ip=ip, can=lambda *a, **kw: True)
 
 
 # ===================================================================== messages
@@ -266,6 +271,9 @@ def messages(body: MessagesIn, kc=Depends(pos_ctx), db: Session = Depends(get_db
             "refused": sum(r["status"] == "refused" for r in results)}
 
 
+FILE_LIMIT = 25 * 1024 * 1024
+
+
 @router.post("/pos/v1/files")
 async def file_drop(file: UploadFile = File(...), kc=Depends(pos_ctx),
                     db: Session = Depends(get_db)):
@@ -273,7 +281,20 @@ async def file_drop(file: UploadFile = File(...), kc=Depends(pos_ctx),
     sku, qty, price, discount, payment_method, original_bill_number. Rows of one bill
     are one message, identified by type, store and bill number, so a file sent twice
     changes nothing."""
-    text = (await file.read(25 * 1024 * 1024)).decode("utf-8-sig", errors="replace")
+    data = await file.read(FILE_LIMIT)
+    # The same check as the SFTP drop: without a store and a bill number per row, every
+    # row of a store would merge into one nameless bill.
+    from ..filedrop import _header_problem
+    problem = _header_problem(data)
+    if problem:
+        raise HTTPException(422, problem)
+    return process_file(db, kc, data)
+
+
+def process_file(db: Session, kc, data: bytes) -> dict:
+    """One nightly file, by the API or from the SFTP drop (filedrop.py): parsed into
+    bills, each recorded through `process` with its repeat protection. Commits."""
+    text = data.decode("utf-8-sig", errors="replace")
     bills: dict[tuple, dict] = {}
     for row in csv.DictReader(io.StringIO(text)):
         row = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
