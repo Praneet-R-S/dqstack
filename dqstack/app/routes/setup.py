@@ -48,8 +48,11 @@ STEPS: list[tuple[str, str, str, int | None, str, bool]] = [
      "Order suggestions appear only for products whose stock is known.", 30,
      "#/stock/opening", False),
     ("sales_history", "Load sales history",
-     "Daily units sold per store and product. At least 8 weeks to start; 12 months so "
-     "festivals are learned; 2 to 3 years is best.", 20, "#/imports/new/sales_history", False),
+     "Daily units sold per store and product. 2 weeks give a first estimate and 8 weeks "
+     "full forecasting; 12 months so festivals are learned from your own sales (until "
+     "then a national festival pattern is used, flagged lower confidence); 2 to 3 years "
+     "is best. With no history at all, forecasts start after 2 weeks of recorded sales.",
+     20, "#/imports/new/sales_history", False),
     ("prices", "Prices and promotions",
      "Optional. Past prices improve accuracy, and planned promotions are forecast in "
      "advance.", 15, "#/imports/new/prices", True),
@@ -144,10 +147,15 @@ def checklist(db: Session, company_id: str) -> dict:
         if key == "sales_history":
             if weeks >= 8:
                 return "done", f"{int(weeks)} weeks of sales"
+            if weeks >= 2:
+                return "in_progress", (f"{int(weeks)} weeks loaded: forecasts are estimates "
+                                       "until 8 weeks")
             if weeks > 0:
-                return "in_progress", f"{int(weeks)} weeks loaded; 8 needed to start"
+                return "in_progress", (f"{int(round(weeks * 7))} days loaded: the first "
+                                       "estimate needs 2 weeks, full forecasting 8")
             if m == "none":
-                return "done", "No history: new store mode"
+                return "done", ("No history: forecasts start after 2 weeks of recorded "
+                                "sales")
             return "todo", ""
         if key == "prices":
             if n_prices:
@@ -253,6 +261,26 @@ def readiness(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
             "stock_known": known, "score": score,
             "score_parts": {"history": round(100 * history), "catalogue": round(100 * catalogue),
                             "stock": round(100 * stock)}})
+    # How each store will be forecast (coldstart.py): from its own sales at 8 weeks;
+    # a new store from the company's established stores; otherwise an estimate from
+    # 2 weeks; with no sales anywhere, nothing yet.
+    established = any(s["weeks_of_sales"] >= 8 for s in stores_out)
+    company_weeks = _weeks_of_sales(db, cid)
+    for s in stores_out:
+        if s["weeks_of_sales"] >= 8:
+            s["forecast_mode"], s["forecast_mode_text"] = "own", "Forecast from its own sales"
+        elif established:
+            s["forecast_mode"] = "from_other_stores"
+            s["forecast_mode_text"] = ("New store: estimated from the same products in your "
+                                       "other stores until it has 8 weeks of its own sales")
+        elif company_weeks >= 2:
+            s["forecast_mode"] = "estimate"
+            s["forecast_mode_text"] = ("Estimate, little history: full forecasting after 8 "
+                                       "weeks of sales")
+        else:
+            s["forecast_mode"] = "none"
+            s["forecast_mode_text"] = ("No forecast yet: forecasts start after 2 weeks of "
+                                       "recorded sales")
     missing = []
     if not stores_out:
         missing.append({"what": "No stores yet", "route": "#/settings/stores"})
@@ -262,7 +290,9 @@ def readiness(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
         missing.append({"what": f"{group_indian(n_products - priced)} products have no price, "
                                 "cost or GST rate", "route": "#/imports/new/products"})
     if not pairs_total:
-        missing.append({"what": "No sales history: forecasts start in new store mode",
+        missing.append({"what": "No sales history yet, so there is nothing of your own to "
+                                "forecast from. Forecasts start, as estimates, after 2 weeks "
+                                "of recorded sales (Checkout, daily files or a history upload)",
                         "route": "#/imports/new/sales_history"})
     if not _count(db, Supplier, cid):
         missing.append({"what": "No suppliers: company defaults (2 day lead time, weekly "

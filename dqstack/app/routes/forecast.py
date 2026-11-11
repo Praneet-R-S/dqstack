@@ -62,7 +62,10 @@ def status(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                                               "data_cutoff": mv.data_cutoff.isoformat()
                                               if mv.data_cutoff else None,
                                               "backtest": mv.backtest, "promotion": mv.promotion},
-            "history_days": days, "days_needed": max(0, jobs.MIN_DAYS - days)}
+            # days_needed: until the first forecast (an estimate, 2 weeks);
+            # days_to_full: until full forecasting (8 weeks); needs: both in words.
+            "history_days": days, "days_needed": max(0, jobs.MIN_DAYS - days),
+            "days_to_full": max(0, jobs.OWN_DAYS - days), "needs": jobs.needs_text(days)}
 
 
 @router.get("/forecast/runs")

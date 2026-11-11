@@ -105,6 +105,14 @@ def test_done_when_first_forecast_and_backtest_run_unattended(make_client, monke
         assert db.get(ModelArtifact, mv.id).size > 10_000
         bt = mv.backtest
         assert bt["weeks"] >= 4 and 0 < bt["wape"] < 1.0 and 0 <= bt["inside_range"] <= 1
+        # Stage 4: the blend and the single best method were scored on the same weeks,
+        # the one that earned more is issued, and the nightly run loads it that way.
+        p = mv.promotion
+        from dqstack.pipeline import ENSEMBLE
+        assert p["issue"] in ("blend", "single") and p["single_method"] in ENSEMBLE
+        assert p["new_margin"] == max(p["blend_margin"], p["single_margin"])
+        assert (p["issue"] == "single") == (p["single_margin"] > p["blend_margin"])
+        assert jobs._load(db, mv)["issue"] == p["issue"]
         nightly_runs = list(db.scalars(select(ForecastRun).where(ForecastRun.kind == "nightly")))
         assert [r.status for r in nightly_runs] == ["succeeded"]
         first = nightly_runs[0]
@@ -182,12 +190,13 @@ def test_early_forecast_for_two_to_six_months(make_client):
 
 def test_too_little_history_says_how_much_more_is_needed(make_client):
     owner = make_client()
-    _company(owner, days=30)
+    _company(owner, days=10)
     assert worker.tick() == []                               # nothing to train yet
     st = owner.get("/api/forecast/status").json()
-    assert st["history_days"] == 30 and st["days_needed"] == 26 and st["current"] is None
+    assert st["history_days"] == 10 and st["days_needed"] == 4 and st["current"] is None
+    assert st["days_to_full"] == 46 and "2 weeks" in st["needs"]
     r = owner.post("/api/forecast/run", {"kind": "train"}).json()
-    assert r["status"] == "skipped" and "8 weeks" in r["message"]
+    assert r["status"] == "skipped" and "2 weeks" in r["message"]
 
 
 def test_the_promotion_rule_keeps_the_model_that_earns_more(make_client, monkeypatch):
@@ -205,6 +214,40 @@ def test_the_promotion_rule_keeps_the_model_that_earns_more(make_client, monkeyp
     assert vs["v2"]["promotion"] == {"decision": "kept the current model", "new_margin": 100.0,
                                      "current_margin": 150.0, "current_version": "v1",
                                      "origins": 4}
+
+
+@pytest.mark.parametrize("single, issue", [(160.0, "single"), (90.0, "blend")])
+def test_training_issues_the_single_best_method_only_when_it_earns_more(
+        make_client, monkeypatch, single, issue):
+    owner = make_client()
+    _company(owner, days=90)
+    worker.tick()                                            # v1, promoted
+    monkeypatch.setattr("dqstack.live.can_issue_single", lambda m: True)
+    monkeypatch.setattr("dqstack.live.recent_scores", lambda models, *a, **k: {
+        "new": {"margin": 100.0, "wape": 0.3, "inside_range": 0.9, "fill_rate": 0.9, "origins": 4},
+        "new_single": {"margin": single, "wape": 0.28, "inside_range": 0.88, "fill_rate": 0.92,
+                       "origins": 4},
+        "current": {"margin": 95.0, "wape": 0.3, "inside_range": 0.9, "fill_rate": 0.9,
+                    "origins": 4}})
+    r = owner.post("/api/forecast/run", {"kind": "train"}).json()
+    assert r["status"] == "succeeded"
+    assert ("single best forecasting method" in r["message"]) == (issue == "single")
+    vs = {m["version"]: m for m in owner.get("/api/forecast/models").json()}
+    assert vs["v2"]["status"] == "active" and vs["v1"]["status"] == "retired"
+    p = vs["v2"]["promotion"]
+    assert (p["issue"], p["blend_margin"], p["single_margin"]) == (issue, 100.0, single)
+    assert p["new_margin"] == max(100.0, single) and p["current_margin"] == 95.0
+    bt = vs["v2"]["backtest"]
+    if issue == "single":       # its own figures, from the weeks it was scored on
+        assert (bt["margin"], bt["fill_rate"], bt["weeks"]) == (160.0, 0.92, 4)
+        assert "blend_backtest" in bt
+    else:
+        assert "blend_backtest" not in bt
+    with dbmod.SessionLocal() as db:
+        assert jobs.issue_of(db.scalar(select(ModelVersion).where(
+            ModelVersion.version == "v2"))) == issue
+        assert jobs.issue_of(db.scalar(select(ModelVersion).where(
+            ModelVersion.version == "v1"))) == "blend"        # trained before the comparison
 
 
 def test_monitoring_scores_last_nights_forecast(make_client):
@@ -336,7 +379,7 @@ def test_every_tier_gives_the_engine_enough_training_origins(days):
     assert sp.train[-1] + 1 > jobs.NN_REGION          # NHITS has its windows
 
 
-@pytest.mark.parametrize("days,tier", [(30, None), (55, None), (56, "starter"),
-                                       (238, "starter"), (301, "starter")])
+@pytest.mark.parametrize("days,tier", [(7, None), (13, None), (14, "starter"), (30, "starter"),
+                                       (56, "starter"), (238, "starter"), (301, "starter")])
 def test_short_histories(days, tier):
     assert jobs.plan(days)[0] == tier

@@ -17,8 +17,15 @@ Which engine a company gets depends on its history (see `plan`):
   >= 667 days     the full pipeline, demo settings
   >= 358 days     the full pipeline, origin blocks scaled to the history
   >= 302 days     the full pipeline, minimal origin blocks
-  >= 56 days      the early forecast (statistical candidates, no training)
-  less            no forecast yet; the screens say so
+  >= 14 days      the early forecast (statistical candidates, no training)
+  less            no forecast yet; the screens say what is needed
+
+Whatever the tier, a series with less than 8 weeks of its own sales is an estimate,
+labelled as such (coldstart.py): a new store borrows from the company's established
+stores, a new product in the early forecast from its category. Festivals the
+company's sales have not shown yet get the national prior, flagged lower confidence
+(priors.py). A company with more series than DQ_TRAIN_SHARD_SERIES is trained in
+shards, in parallel processes (shards.py).
 """
 
 from __future__ import annotations
@@ -49,9 +56,10 @@ from ..db import utcnow
 from ..models import (Alert, CalendarEvent, Company, DailySales, Decision, ForecastRun,
                       ForecastScore, ModelArtifact, ModelVersion, Product, Recommendation,
                       StockOnHand, Store, Supplier, SupplierProduct)
-from . import source
+from . import coldstart, priors, shards, source
 
-MIN_DAYS = 56
+MIN_DAYS = coldstart.MIN_DAYS      # 14: the first forecast, an estimate (see `plan`)
+OWN_DAYS = coldstart.OWN_DAYS      # 56: 8 weeks, full forecasting; no longer an estimate
 FLAG_PER_STORE = 20
 
 
@@ -111,7 +119,15 @@ def plan(history_days: int) -> tuple[str | None, dict | None, bool]:
     origins) or `live - 161` (4, 3, 3), and every training origin must be at least
     `min_origin`. The tiers below are where at least 8 training origins survive and
     the neural candidate (NHITS) has a full input window plus horizon before the
-    last training origin."""
+    last training origin.
+
+    Below that, the early forecast from two weeks (MIN_DAYS = 14). Two weeks, not
+    one, because the engine's own Stage 1 needs 14 observed days before it will
+    describe a series at all (diagnose.run: fewer and every series is "cold start",
+    and with no series past that point it stops); two weeks also give every
+    weekday two observations, which is what the weekly-seasonal candidates
+    (seasonal naive, Holt-Winters, ADIDA's weekday profile) read. Everything under
+    8 weeks is labelled "estimate, little history"."""
     live = history_days - 1
     if (live - 217 - 400) // 7 + 1 >= MIN_TRAIN_ORIGINS:        # 667 days or more
         return "engine", {}, False
@@ -125,6 +141,27 @@ def plan(history_days: int) -> tuple[str | None, dict | None, bool]:
     if history_days >= MIN_DAYS:
         return "starter", None, True
     return None, None, True
+
+
+def needs_text(history_days: int) -> str | None:
+    """What the forecast still needs, in plain words, for the status answer and the
+    setup pages. None once nothing is missing."""
+    if history_days <= 0:
+        return ("No sales are recorded yet, so there is nothing of your own to forecast "
+                "from, and no estimates are shown. Forecasts start after 2 weeks of "
+                "recorded sales, from Checkout, a daily sales file or a sales history upload.")
+    if history_days < MIN_DAYS:
+        return (f"{history_days} day{'s' * (history_days != 1)} of sales so far. The first "
+                f"forecast, an estimate, starts after 2 weeks ({MIN_DAYS - history_days} "
+                f"more); full forecasting after 8 weeks.")
+    if history_days < OWN_DAYS:
+        return (f"Forecasts are estimates until there are 8 weeks of sales "
+                f"({OWN_DAYS - history_days} more days). Festivals not yet in your sales "
+                f"use a national pattern and are flagged lower confidence.")
+    if history_days < 365:
+        return ("Festivals not yet in your sales use a national pattern and are flagged "
+                "lower confidence, until a full year of sales has shown them.")
+    return None
 
 
 def active_version(db: Session, company_id: str) -> ModelVersion | None:
@@ -200,31 +237,57 @@ def _start(db: Session, company_id: str, kind: str, trigger: str,
     return run
 
 
+def _skip(db: Session, run: ForecastRun, message: str) -> ForecastRun:
+    run.status = "skipped"
+    run.message = message
+    run.finished_at = utcnow()
+    db.commit()
+    return run
+
+
+def _longest_series(data: source.CompanyData) -> int:
+    """The most days any one series has been observed (closed days and known empty
+    shelves are not observations)."""
+    s = data.tables["sales"]
+    return int(s.groupby(["item_id", "store_id"]).size().max()) if len(s) else 0
+
+
 def train(db: Session, company_id: str, trigger: str = "onboarding",
           run_id: str | None = None) -> ForecastRun:
     run = _start(db, company_id, "train", trigger, run_id)
     t0 = time.perf_counter()
     try:
-        data = source.load(db, company_id)
+        try:
+            data = source.load(db, company_id)
+        except source.NotEnoughHistory as e:
+            return _skip(db, run, needs_text(e.days) or
+                         "There are no sales of current products to forecast from yet.")
         tier, splits, quick = plan(data.history_days)
         run.data_cutoff = data.cutoff
         if tier is None:
-            run.status = "skipped"
-            run.message = (f"Forecasts start after 8 weeks of sales. There are "
-                           f"{data.history_days} days so far.")
-            run.finished_at = utcnow()
-            db.commit()
-            return run
+            return _skip(db, run, f"Forecasts start after 2 weeks of sales. There are "
+                                  f"{data.history_days} days so far.")
+        if tier == "starter" and _longest_series(data) < MIN_DAYS:
+            return _skip(db, run, "Forecasts start after 2 weeks of sales. No product has "
+                                  "2 weeks of recorded days yet: closed days and days the "
+                                  "shelf was known to be empty do not count.")
         cfg = company_cfg(db, company_id)
         mv = ModelVersion(company_id=company_id, version=_next_version(db, company_id),
                           tier=tier, status="candidate", data_cutoff=data.cutoff)
-        new_model: dict | str
+        new_model: dict | str | shards.ShardedModel
         current = active_version(db, company_id)
+        # Above DQ_TRAIN_SHARD_SERIES series, training is split (shards.py); at or
+        # below it, plan_for is None and this is the single-engine path unchanged.
+        split = shards.plan_for(data.tables) if tier == "engine" else None
         # Every engine call writes scratch files; all of them stay in a private folder.
         with scratch():
             if tier == "starter":
                 new_model = "starter"
                 summary = {"early": True}
+            elif split is not None:
+                new_model, blob, summary, n_series = shards.train(cfg, quick, data.tables,
+                                                                  splits, split)
+                mv.n_series = n_series
             else:
                 state = live_pipeline(cfg, quick, data.tables, splits)
                 blob = live.saved_model(state, cfg)
@@ -234,9 +297,15 @@ def train(db: Session, company_id: str, trigger: str = "onboarding",
                 del state
             mv.train_seconds = round(time.perf_counter() - t0, 1)
             models = {"new": new_model}
+            # Stage 4: the new model issued as the blend and as its single best method
+            # alone, scored on the same weeks; it issues whichever would earn more.
+            if live.can_issue_single(new_model):
+                models["new_single"] = live.issued_as(new_model, "single")
             if current is not None:
                 models["current"] = _load(db, current)
-            scores = live.recent_scores(models, data.tables, cfg)
+            shards.bind(models, data.tables)
+            # live.recent_scores, unless a model is sharded: then shard by shard.
+            scores = shards.recent_scores(models, data.tables, cfg)
         summary["recent"] = {k: {kk: _clean(vv) if isinstance(vv, float) else vv
                                  for kk, vv in v.items()} for k, v in scores.items()}
         if tier == "starter":
@@ -245,19 +314,38 @@ def train(db: Session, company_id: str, trigger: str = "onboarding",
                             "inside_range": _clean(scores["new"]["inside_range"]),
                             "fill_rate": _clean(scores["new"]["fill_rate"]),
                             "margin": _clean(scores["new"]["margin"])})
+        issue = "single" if ("new_single" in scores and
+                             scores["new_single"]["margin"] > scores["new"]["margin"]) else "blend"
+        chosen = scores["new_single" if issue == "single" else "new"]
+        if issue == "single":
+            # The engine's rolling backtest tested the blend. What this version issues
+            # was tested on the recent weeks scored above, so those are its figures;
+            # the blend's backtest is kept beside them.
+            summary = {"weeks": chosen["origins"], "wape": _clean(chosen["wape"]),
+                       "inside_range": _clean(chosen["inside_range"]),
+                       "fill_rate": _clean(chosen["fill_rate"]),
+                       "margin": _clean(chosen["margin"]), "recent": summary["recent"],
+                       **({"workers": summary["workers"]} if "workers" in summary else {}),
+                       "blend_backtest": {k: v for k, v in summary.items()
+                                          if k not in ("recent", "workers")}}
         mv.backtest = summary
-        mv.backtest_profit_paise = int(round(scores["new"]["margin"] * 100))
+        mv.backtest_profit_paise = int(round(chosen["margin"] * 100))
         db.add(mv)
         db.flush()
         if tier == "engine":
             db.add(ModelArtifact(version_id=mv.id, company_id=company_id, size=len(blob),
                                  sha256=hashlib.sha256(blob).hexdigest(), content=blob))
-        promote = current is None or scores["new"]["margin"] >= scores["current"]["margin"]
+        promote = current is None or chosen["margin"] >= scores["current"]["margin"]
         mv.promotion = {"decision": "promoted" if promote else "kept the current model",
-                        "new_margin": _clean(scores["new"]["margin"]),
+                        "new_margin": _clean(chosen["margin"]),
                         "current_margin": _clean(scores["current"]["margin"]) if current else None,
                         "current_version": current.version if current else None,
-                        "origins": scores["new"]["origins"]}
+                        "origins": chosen["origins"]}
+        if "new_single" in scores:              # what this version issues, and why
+            mv.promotion.update({"issue": issue,
+                                 "blend_margin": _clean(scores["new"]["margin"]),
+                                 "single_margin": _clean(scores["new_single"]["margin"]),
+                                 "single_method": single_method(new_model)})
         if promote:
             if current is not None:
                 current.status = "retired"
@@ -269,9 +357,16 @@ def train(db: Session, company_id: str, trigger: str = "onboarding",
         run.model_version, run.model_version_id = mv.version, mv.id
         run.accuracy = summary
         run.timings = {"seconds": round(time.perf_counter() - t0, 1)}
-        run.message = (f"Model {mv.version} trained on {data.history_days} days of sales and "
-                       + ("is now in use." if promote else
-                          f"kept {current.version}, which would have earned more."))
+        parts = ""
+        if split is not None:
+            run.timings.update({"shards": len(new_model.shards), "workers": summary["workers"]})
+            parts = f" in {len(new_model.shards)} parts"
+        run.message = (f"Model {mv.version} trained on {data.history_days} days of sales{parts} "
+                       "and " + ("is now in use." if promote else
+                                 f"kept {current.version}, which would have earned more.")
+                       + (" It uses its single best forecasting method rather than the blend "
+                          "of all of them, which would have earned less on the same weeks."
+                          if issue == "single" else ""))
         run.finished_at = utcnow()
         co = db.get(Company, company_id)
         co.setup = {k: v for k, v in (co.setup or {}).items() if k != "retrain_requested"}
@@ -290,11 +385,32 @@ def live_pipeline(cfg, quick: bool, tables: dict, splits: dict | None) -> dict:
                         tables=tables, splits=splits)
 
 
-def _load(db: Session, mv: ModelVersion) -> dict | str:
+def _load(db: Session, mv: ModelVersion) -> dict | str | shards.ShardedModel:
+    """A saved model version, issuing what its training chose (`issue_of`)."""
     if mv.tier == "starter":
         return "starter"
     art = db.get(ModelArtifact, mv.id)
-    return live.load_model(art.content)
+    model = live.load_model(art.content)
+    model = shards.ShardedModel(model) if shards.is_payload(model) else model
+    return live.issued_as(model, issue_of(mv))
+
+
+def issue_of(mv: ModelVersion) -> str:
+    """"single" when training found the single best method would earn more than the
+    blend on the same recent weeks; "blend" otherwise, and for every version trained
+    before that comparison existed."""
+    return "single" if (mv.promotion or {}).get("issue") == "single" else "blend"
+
+
+def single_method(model) -> str | None:
+    """The single best method's name ("lgbm_quantile", ...); for a model trained in
+    shards, each shard has its own, so this names one only when they all agree."""
+    if isinstance(model, shards.ShardedModel):
+        names = {s.get("best_single") for s in model.shards}
+        return names.pop() if len(names) == 1 else None
+    if isinstance(model, dict):
+        return model.get("best_single")
+    return None
 
 
 def _fail(db: Session, run: ForecastRun, e: Exception, what: str) -> None:
@@ -356,27 +472,45 @@ def nightly(db: Session, company_id: str, trigger: str = "schedule",
         mv = active_version(db, company_id)
         if mv is None:
             run.status = "skipped"
-            run.message = "There is no trained model yet. The first one trains once 8 weeks " \
-                          "of sales are loaded."
+            run.message = "There is no trained model yet. The first one trains once 2 weeks " \
+                          "of sales are recorded."
             run.finished_at = utcnow()
             db.commit()
             return run
         _bills_to_daily(db, company_id)
         data = source.load(db, company_id)
         cfg = company_cfg(db, company_id)
+        n_shards = None
         with scratch():
             if mv.tier == "starter":
                 res = live.starter(data.tables, cfg)
             else:
-                res = live.forecast(_load(db, mv), data.tables, cfg)
-        n = write_recommendations(db, company_id, run, res, data, cfg)
+                model = _load(db, mv)
+                if isinstance(model, shards.ShardedModel):
+                    n_shards = len(model.shards)
+                    res = model.forecast(data.tables, cfg)     # shard by shard, merged
+                else:
+                    res = live.forecast(model, data.tables, cfg)
+        # Estimates for series without 8 weeks of their own sales, then the national
+        # prior for festivals the company's sales have not shown (both in place).
+        labels = coldstart.apply(res, data, mv.tier)
+        festival = priors.apply(db, company_id, res, data, mv.tier)
+        n = write_recommendations(db, company_id, run, res, data, cfg, labels=labels,
+                                  festival=festival)
+        n_est = db.scalar(select(func.count()).select_from(Recommendation).where(
+            Recommendation.run_id == run.id, Recommendation.estimate.is_(True))) or 0
         run.tier = mv.tier
         run.model_version, run.model_version_id = mv.version, mv.id
         run.data_cutoff = data.cutoff
         run.status = "succeeded"
-        run.timings = {"seconds": round(time.perf_counter() - t0, 1), "series": n}
+        run.timings = {"seconds": round(time.perf_counter() - t0, 1), "series": n,
+                       "estimates": n_est}
+        if n_shards:
+            run.timings["shards"] = n_shards
         run.message = (f"Forecast for {n:,} products and stores, from sales to "
-                       f"{data.cutoff:%d %b %Y}.")
+                       f"{data.cutoff:%d %b %Y}."
+                       + (f" {n_est:,} of them are estimates: less than 8 weeks of their "
+                          f"own sales." if n_est else ""))
         run.finished_at = utcnow()
         db.flush()
         score_previous(db, company_id, run, data)
@@ -403,8 +537,41 @@ def _bills_to_daily(db: Session, company_id: str, days: int = 3) -> None:
     db.flush()
 
 
+def _festival_reasons(upcoming: list[tuple[date, str]], applied: list[tuple],
+                      cutoff: date) -> list[dict]:
+    """The festivals worth a line on the card: those in the next 14 days, and any in
+    the next 28 days that the national prior was applied for (lower confidence)."""
+    basis: dict[tuple[date, str], str | None] = {(d, n): None for d, n in upcoming}
+    for d, n, b in applied:
+        if d <= cutoff + timedelta(days=HORIZON):
+            basis[(d, n)] = b
+    out = []
+    for (d, name), b in sorted(basis.items())[:2]:
+        if b == "first":
+            out.append({"key": "festival", "confidence": "lower",
+                        "text": f"{name} on {d:%d %b}: lower confidence, first {name} in "
+                                "your data, so a national festival pattern is used"})
+        elif b == "national":
+            out.append({"key": "festival", "confidence": "lower",
+                        "text": f"{name} on {d:%d %b}: lower confidence, the early forecast "
+                                "uses a national festival pattern"})
+        else:
+            out.append({"key": "festival", "text": f"{name} on {d:%d %b}"})
+    return out
+
+
 def write_recommendations(db: Session, company_id: str, run: ForecastRun,
-                          res: live.LiveResult, data: source.CompanyData, cfg) -> int:
+                          res: live.LiveResult, data: source.CompanyData, cfg,
+                          labels: dict[int, dict] | None = None,
+                          festival: dict[str, list[tuple]] | None = None) -> int:
+    """`labels` (coldstart.apply) says which series are estimates and how they were
+    made; `festival` (priors.apply) which festivals had the national prior applied,
+    per store. Without them, a series under 8 weeks is a plain estimate."""
+    labels = labels if labels is not None else {
+        int(s): {"basis": "little_history" if h else "no_history", "own_weight": 1.0,
+                 "text": "Estimate: less than 8 weeks of its own sales"}
+        for s, h in enumerate(res.history_days) if h < OWN_DAYS}
+    festival = festival or {}
     rules = rules_mod.effective(db.get(Company, company_id).rules)
     P = res.P
     item = P.series["item_id"].astype(str).to_numpy()
@@ -455,13 +622,12 @@ def write_recommendations(db: Session, company_id: str, run: ForecastRun,
             suggested = int(math.ceil(need / case) * case) if need else 0
         under = int(round(parts["underage_cost"][s] * 100 * 1000 / sc))   # paise per unit
         over = int(round(parts["overage_cost"][s] * 100 * 1000 / sc))
-        estimate = bool(res.history_days[s] < MIN_DAYS)
+        label = labels.get(s)
+        estimate = label is not None
         reasons = []
         if estimate:
-            reasons.append({"key": "estimate", "text": "Estimate from similar products: "
-                                                        "no sales history of its own yet"})
-        for d, name in events.get(sid, [])[:2]:
-            reasons.append({"key": "festival", "text": f"{name} on {d:%d %b}"})
+            reasons.append({"key": "estimate", "text": label["text"], "basis": label["basis"]})
+        reasons += _festival_reasons(events.get(sid, []), festival.get(sid, []), data.cutoff)
         mid7 = int(round(week[s, 1] * sc))
         rate = recent.get((sid, pid), 0.0) * 7
         if rate >= 3000 and mid7 > 1.4 * rate:

@@ -17,11 +17,15 @@ What the engine sees, and why:
   applies to.
 * A product launched with no sales yet is carried from the day it was added, so
   the engine's cold-start candidates (similar products, launch curves) forecast it.
+* A new store -- less than 8 weeks of its own sales, in a company with an
+  established store (8 weeks or more) -- carries every product the company sells,
+  observed only from its own first sale: days before it opened say nothing about
+  its demand. `coldstart.apply` then forecasts it from the established stores.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 import numpy as np
@@ -32,6 +36,7 @@ from sqlalchemy.orm import Session
 from ...config import HORIZON
 from ..models import (CalendarEvent, Company, DailySales, PriceRecord, Product, StockMovement,
                       Store)
+from .coldstart import OWN_DAYS
 
 STATE_CODES = {
     "Andhra Pradesh": "AP", "Arunachal Pradesh": "AR", "Assam": "AS", "Bihar": "BR",
@@ -73,6 +78,13 @@ class CompanyData:
     start: date
     cutoff: date
     history_days: int
+    # Per store: the first day of its own recorded sales, and how many days that is
+    # to the cutoff. New stores (under 8 weeks) are forecast from the donors
+    # (8 weeks or more) by coldstart.apply.
+    store_first: dict[str, date] = field(default_factory=dict)
+    store_days: dict[str, int] = field(default_factory=dict)
+    new_stores: set[str] = field(default_factory=set)
+    donor_stores: set[str] = field(default_factory=set)
 
     def scale(self, product_id: str) -> int:
         return scale_of(self.products[product_id].unit)
@@ -103,6 +115,11 @@ def load(db: Session, company_id: str, as_of: date | None = None) -> CompanyData
     cutoff = real["day"].max()
     history_days = int((cutoff - start).days) + 1
     store_last = real.groupby("store_id")["day"].max().to_dict()
+    store_first = real.groupby("store_id")["day"].min().to_dict()
+    store_days = {sid: int((cutoff - store_first[sid]).days) + 1 if sid in store_first else 0
+                  for sid in stores}
+    donor_stores = {sid for sid, d in store_days.items() if d >= OWN_DAYS}
+    new_stores = {sid for sid, d in store_days.items() if d < OWN_DAYS} if donor_stores else set()
 
     # ---- missing days: closures and known stock-outs
     closures = _closures(db, company_id, stores, start.date(), cutoff.date())
@@ -121,6 +138,8 @@ def load(db: Session, company_id: str, as_of: date | None = None) -> CompanyData
     # has no observed days: zero sales before it existed would read as no demand.
     observed_from: dict[tuple[str, str], pd.Timestamp] = {}
     for sid in stores:
+        # A new store is observed from its own first sale (none yet: not at all).
+        opened = store_first.get(sid, cutoff + pd.Timedelta(days=1))
         for pid, p in products.items():
             begin = first_sale.get((sid, pid))
             moved = first_move.get((sid, pid))
@@ -132,6 +151,11 @@ def load(db: Session, company_id: str, as_of: date | None = None) -> CompanyData
                     if p.created_at else start
                 begin = max(min(made, cutoff), start)
                 observed_from[(sid, pid)] = max(made, start)
+            if sid in new_stores and p.status != "discontinued":
+                if begin is None and pid in sold_anywhere:
+                    begin = min(opened, cutoff)
+                if begin is not None:
+                    observed_from[(sid, pid)] = max(observed_from.get((sid, pid), begin), opened)
             if begin is None:
                 continue
             if p.status == "discontinued":
@@ -183,7 +207,9 @@ def load(db: Session, company_id: str, as_of: date | None = None) -> CompanyData
     tables = {"sales": sales, "prices": prices, "calendar": calendar, "items": items,
               "stores": store_tbl, "_declared_rows": {"sales": len(sales)}}
     return CompanyData(tables=tables, products=products, stores=stores, start=start.date(),
-                       cutoff=cutoff.date(), history_days=history_days)
+                       cutoff=cutoff.date(), history_days=history_days,
+                       store_first={s: d.date() for s, d in store_first.items()},
+                       store_days=store_days, new_stores=new_stores, donor_stores=donor_stores)
 
 
 def _closures(db: Session, company_id: str, stores: dict, lo: date, hi: date) -> pd.DataFrame:
