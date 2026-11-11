@@ -117,8 +117,8 @@ p, li, dd, summary { text-wrap: pretty; }
 .btn-ghost:hover { background: var(--bg-4); }
 .button-lg.btn { padding: var(--s-100) var(--s-300); min-height: 52px; border-radius: var(--r-2xl); }
 
-.skip { position: fixed; left: var(--s-200); top: var(--s-200); z-index: 100; padding: var(--s-75) var(--s-100); background: var(--ink); color: var(--bg); border-radius: var(--r-lg); transform: translateY(-200%); transition: transform 300ms var(--ease); }
-.skip:focus { transform: none; }
+.skip-link { position: fixed; left: var(--s-200); top: var(--s-200); z-index: 100; padding: var(--s-75) var(--s-100); background: var(--ink); color: var(--bg); border-radius: var(--r-lg); transform: translateY(-200%); transition: transform 300ms var(--ease); }
+.skip-link:focus { transform: none; }
 
 /* ------------------------------------------------------------------ the bar and the shop clock */
 .bar { position: fixed; z-index: 50; left: 0; right: 0; top: calc(env(safe-area-inset-top, 0px) + var(--s-200)); display: flex; justify-content: center; pointer-events: none; padding: 0 var(--s-200); }
@@ -377,7 +377,7 @@ html.js .deal.in { opacity: 1; transform: none; }
 .faq summary::-webkit-details-marker { display: none; }
 .faq summary::after { content: ""; flex: none; width: 12px; height: 12px; border-right: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2); transform: rotate(45deg) translateY(-3px); transition: transform 500ms var(--ease); }
 .faq details[open] summary::after { transform: rotate(225deg) translateY(-3px); }
-.faq details p { color: var(--ink-2); padding-bottom: var(--s-300); max-width: 680px; }
+.faq .faq-body p { color: var(--ink-2); padding-bottom: var(--s-300); max-width: 680px; }
 
 /* ------------------------------------------------------------------ 12. ready */
 .ready { min-height: 100vh; min-height: 100svh; display: flex; align-items: center; overflow: hidden; padding: 128px 0 var(--s-900); }

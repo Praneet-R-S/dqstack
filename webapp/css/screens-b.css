@@ -186,3 +186,9 @@
 @media (max-width: 640px) {
   .b-dl-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------------------------------------------------------------- forecasts: the small fan per row */
+.b-fan { display: block; width: 168px; height: 40px; }
+.b-fan-band { fill: var(--series-forecast); opacity: 0.22; }
+.b-fan-mid { fill: none; stroke: var(--series-forecast); stroke-width: 1.5; stroke-linejoin: round; }
+.b-fan-cell { display: flex; flex-direction: column; gap: 2px; }

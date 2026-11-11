@@ -235,7 +235,13 @@
           h("p", { class: "text-3 b-card-sub" }, h("span", { class: "mono" }, row.sku), row.category ? " · " + row.category : "", row.supplier ? " · " + row.supplier : "")),
         h("div", { class: "b-card-badges" },
           ui.badge(fmt.rupees(row.money_at_risk_paise, { whole: true }) + " at risk", "risk"),
-          row.estimate ? h("span", { class: "badge", "data-kind": "attention", title: "Cold start: no sales history, so this is an estimate" }, "Estimate, no sales history") : null,
+          row.estimate ? (function () {
+            // The reason says how the estimate was made: no history of its own, or only a little.
+            var est = (row.reasons || []).filter(function (r) { return r && r.key === "estimate"; })[0];
+            var little = est && est.basis === "little_history";
+            return h("span", { class: "badge", "data-kind": "attention", title: est && est.text ? est.text : "An estimate: this product has less than 8 weeks of its own sales" },
+              little ? "Estimate, little history" : "Estimate, no sales history");
+          })() : null,
           d ? ui.badge(d.action === "approve" ? "Approved" : d.action === "skip" ? "Skipped" : "Changed", d.action === "change" ? "attention" : "ok") : null)));
       card.appendChild(h("dl", { class: "b-facts" },
         fact("Forecast, next 7 days", units(row.week.mid_milli, u), { note: "likely " + units(row.week.lo_milli, u) + " to " + units(row.week.hi_milli, u), cls: "b-fact-forecast" }),
@@ -1133,8 +1139,10 @@
   var REPORT_HELP = {
     sales: "Units and revenue by day and store.", sales_by_category: "Where the money comes from.", best_worst: "What sells most and least.",
     stock_value: "What the stock on the shelves cost.", slow_dead_stock: "Stock that is not moving.", shrinkage: "Stock lost without a sale.",
-    wastage: "Thrown away, damaged or expired.", forecast_accuracy: "How close the forecast came to what sold.",
-    supplier_performance: "On time and in full, by supplier.", lost_sales: "Sales missed while out of stock.",
+    stock_turn: "How fast stock sells through, and how many days it lasts.",
+    wastage: "Thrown away, damaged or expired, with expiry losses on their own.", forecast_accuracy: "How close the forecast came to what sold.",
+    count_compliance: "Cycle counts done against those due, by ABC class.",
+    supplier_performance: "Fill rate, on-time delivery and emergency orders, by supplier.", lost_sales: "Sales missed while out of stock.",
     profit_comparison: "Stock targets from real costs against one blanket service level.", accounting: "Totals for your accountant."
   };
 
@@ -1255,6 +1263,21 @@
   var RUN_STATUS = { succeeded: ["Done", "ok"], failed: ["Failed", "risk"], running: ["Running", "data"], queued: ["Waiting", "data"] };
   var MODEL_STATUS = { active: ["In use", "ok"], retired: ["Retired", "neutral"], rejected: ["Not used", "attention"], training: ["Training", "data"] };
   function tierName(t) { return t === "engine" ? "Full forecast" : t === "starter" ? "Starter estimate" : cap(t || "—"); }
+  // Stage 4: a version issues the blend of every method, or its single best method alone
+  // when that would have earned more on the same recent weeks.
+  var METHOD_NAMES = { lgbm_quantile: "LightGBM quantile", lgbm_tweedie: "LightGBM Tweedie", seasonal_naive: "seasonal naive",
+    ets: "exponential smoothing", croston_sba: "Croston/SBA", tsb: "TSB", adida: "ADIDA", nhits: "NHITS",
+    zeroshot_prior: "zero-shot prior", lifecycle_cohort: "lifecycle cohort" };
+  function singleName(p) { return p && p.single_method ? (METHOD_NAMES[p.single_method] || p.single_method) : "each part's own best method"; }
+  function issueName(p) { return p && p.issue === "single" ? "One method alone: " + singleName(p) : "The blend of every method"; }
+  function issueWords(p) {
+    if (!p || p.single_margin === null || p.single_margin === undefined || p.blend_margin === null || p.blend_margin === undefined) return null;
+    var weeks = p.origins ? "last " + plural(p.origins, "week") : "same recent weeks";
+    return h("p", { class: "text-2 b-note", title: "Stage 4: the blend against the single best method, on the same weeks and the same stock rules" },
+      "On the " + weeks + ", the blend of every forecasting method would have earned " + rupeesFromRupees(p.blend_margin, { whole: true }) +
+      " and the best single method, " + singleName(p) + ", " + rupeesFromRupees(p.single_margin, { whole: true }) + ". " +
+      (p.issue === "single" ? "So this version uses that method alone." : "So this version uses the blend."));
+  }
 
   function backtestWords(bt) {
     if (!bt) return [h("p", { class: "text-2" }, "No test results yet.")];
@@ -1361,9 +1384,12 @@
       } else {
         act.appendChild(h("dl", { class: "b-facts b-facts-wide" },
           fact("Version", model.version), fact("Kind", tierName(model.tier)), fact("Learned from data to", fmt.date(model.data_cutoff)),
-          fact("Sales history", plural(st.history_days, "day"))));
+          fact("Sales history", plural(st.history_days, "day")),
+          model.tier === "engine" ? fact("Forecast it issues", issueName(model.promotion)) : null));
         act.appendChild(h("h3", { class: "title-3 b-sub-head" }, "How it did when tested"));
         backtestWords(model.backtest).forEach(function (n) { act.appendChild(n); });
+        var iw = issueWords(model.promotion);
+        if (iw) act.appendChild(iw);
       }
       main.appendChild(act);
 
@@ -1382,7 +1408,8 @@
           var detail = p.current_margin !== null && p.current_margin !== undefined ?
             "New earned " + rupeesFromRupees(p.new_margin, { whole: true, short: true }) + " against " + rupeesFromRupees(p.current_margin, { whole: true, short: true }) + " for " + (p.current_version || "the current one") :
             (p.new_margin !== null && p.new_margin !== undefined ? "First model; earned " + rupeesFromRupees(p.new_margin, { whole: true, short: true }) + " in the test" : "");
-          return h("span", null, txt, detail ? h("div", { class: "text-3 b-small" }, detail + (p.origins ? " over " + plural(p.origins, "week") : "")) : null);
+          return h("span", null, txt, detail ? h("div", { class: "text-3 b-small" }, detail + (p.origins ? " over " + plural(p.origins, "week") : "")) : null,
+            p.issue === "single" ? h("div", { class: "text-3 b-small" }, "Uses one method alone: " + singleName(p)) : null);
         } }
       ], models, { caption: "Model versions", empty: { title: "No model versions yet", text: "The first one appears after the first training." } }));
       main.appendChild(mv);
@@ -1417,7 +1444,112 @@
         ], mon.by_category, { caption: "Forecast scores by category" }));
       }
       main.appendChild(mo);
-      main.appendChild(h("p", { class: "text-2 b-note" }, "For every chart and the full evidence behind these numbers, open the ", h("a", { href: "/planner/" }, "planner workspace"), "."));
+      main.appendChild(h("p", { class: "text-2 b-note" }, "Every product's own forecast and range is on ", h("a", { href: "#/forecasts" }, "Forecasts"), ". How the method itself was tested, on DQ-Stack's demo dataset, is in the ", h("a", { href: "/planner/" }, "planner workspace"), "."));
     }, failed(main, alive, "Model performance"));
+  } });
+  /* ---------------------------------------------------------------- forecasts (the spreadsheet) */
+  /* Every product in the store from the company's own current forecast: the middle figure,
+     its likely range, four weeks drawn as a small fan, the stock target and the order.
+     The planner's spreadsheet and charts, read from this company's data. */
+  function fanSvg(daily, name) {
+    var W = 168, H = 40, n = daily ? daily.length : 0;
+    if (n < 2) return h("span", { class: "text-3" }, "—");
+    var max = 1;
+    daily.forEach(function (d) { max = Math.max(max, d[2]); });
+    function x(i) { return (1 + (i / (n - 1)) * (W - 2)).toFixed(1); }
+    function y(v) { return (H - 2 - (v / max) * (H - 4)).toFixed(1); }
+    var band = "M" + daily.map(function (d, i) { return x(i) + " " + y(d[2]); }).join(" L") + " L" +
+      daily.map(function (d, i) { return [i, d]; }).reverse().map(function (p) { return x(p[0]) + " " + y(p[1][0]); }).join(" L") + " Z";
+    var mid = "M" + daily.map(function (d, i) { return x(i) + " " + y(d[1]); }).join(" L");
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("class", "b-fan");
+    svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "Next 28 days for " + name + ": the middle forecast with its likely range");
+    var p1 = document.createElementNS("http://www.w3.org/2000/svg", "path"); p1.setAttribute("d", band); p1.setAttribute("class", "b-fan-band");
+    var p2 = document.createElementNS("http://www.w3.org/2000/svg", "path"); p2.setAttribute("d", mid); p2.setAttribute("class", "b-fan-mid");
+    svg.appendChild(p1); svg.appendChild(p2);
+    return svg;
+  }
+  function forecastCsv(rows, store, cutoff) {
+    var head = ["SKU", "Name", "Category", "Store", "Next 7 days, middle", "Next 7 days, low", "Next 7 days, high", "Next 28 days, middle",
+      "Stock target", "Covers demand (% of the time)", "On hand", "On order", "Suggested order", "Estimate", "Why"];
+    function cell(v) { v = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    function q(m) { return m === null || m === undefined ? "" : m / 1000; }
+    var lines = [head.map(cell).join(",")];
+    rows.forEach(function (r) {
+      var m28 = (r.daily || []).reduce(function (a, d) { return a + d[1]; }, 0);
+      lines.push([r.sku, r.name, r.category || "", r.store, q(r.week.mid_milli), q(r.week.lo_milli), q(r.week.hi_milli), q(m28),
+        q(r.target_milli), Math.round((r.service_level || 0) * 100), r.stock_known ? q(r.on_hand_milli) : "", q(r.on_order_milli),
+        q(r.suggested_milli), r.estimate ? "yes" : "", (r.reasons || []).map(function (x) { return typeof x === "string" ? x : x.text; }).join("; ")].map(cell).join(","));
+    });
+    var blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    var name = "forecasts-" + String(store).toLowerCase().replace(/[^a-z0-9]+/g, "") + "-" + (cutoff || "") + ".csv";
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+    DQ.toast("Downloaded " + name + ".");
+  }
+  DQ.route("#/forecasts", { title: "Forecasts", nav: "Forecasts", render: function (main, params, query, alive) {
+    var sid = DQ.store();
+    if (!sid) return noStore(main, "Forecasts");
+    var only = query.only === "look";
+    loading(main, "Forecasts", storeName());
+    return Promise.all([
+      DQ.get("/api/recommendations" + DQ.qs({ store_id: sid, q: query.q, flagged: only ? "true" : null, limit: 5000 })),
+      DQ.get("/api/products/categories").catch(function () { return []; })
+    ]).then(function (res) {
+      if (!alive()) return;
+      var rec = res[0], cats = res[1];
+      DQ.clear(main);
+      function go(o) { DQ.go("#/forecasts" + DQ.qs(Object.assign({ q: query.q, category: query.category, only: only ? "look" : null }, o))); }
+      if (!rec.run) {
+        main.appendChild(ui.page("Forecasts", { sub: storeName() }));
+        main.appendChild(ui.empty({ title: "No forecast yet", text: "The forecast starts once there are two weeks of daily sales. The setup page says what is still needed.", action: { label: "See what the forecast needs", href: "#/setup/forecast" } }));
+        return;
+      }
+      var rows = query.category ? rec.rows.filter(function (r) { return r.category === query.category; }) : rec.rows;
+      main.appendChild(ui.page("Forecasts", {
+        sub: h("span", null, storeName() + " · forecast from data to " + fmt.date(rec.run.data_cutoff) + " · ", fresh("made at", rec.run.finished_at)),
+        actions: [ui.button("Download as a spreadsheet", function () { forecastCsv(rows, storeName(), rec.run.data_cutoff); }, "ghost", { title: "Every product shown here as a CSV file" })]
+      }));
+      var qIn = ui.input({ type: "search", value: query.q || "", placeholder: "Name or SKU" });
+      var cat = ui.select([{ value: "", label: "All categories" }].concat(cats.map(function (c) { return { value: c.category, label: c.category }; })), query.category || "", { onchange: function () { go({ category: cat.value }); } });
+      main.appendChild(h("form", { class: "b-filters", role: "search", onsubmit: function (e) { e.preventDefault(); go({ q: qIn.value.trim() }); } },
+        ui.field("Search this store's forecasts", qIn), ui.field("Category", cat),
+        h("div", { class: "b-filter-btns" }, h("button", { class: "btn btn-primary", type: "submit" }, "Search"),
+          query.q || query.category || only ? h("a", { class: "btn btn-ghost", href: "#/forecasts" }, "Clear") : null)));
+      main.appendChild(h("div", { class: "b-chipbar", role: "group", "aria-label": "Which products" },
+        h("button", { type: "button", class: "b-filter-chip", "aria-pressed": only ? "false" : "true", onclick: function () { go({ only: null }); } }, "Every product ", h("span", { class: "mono" }, fmt.num(only ? rec.total : rows.length))),
+        h("button", { type: "button", class: "b-filter-chip", "data-kind": "attention", "aria-pressed": only ? "true" : "false", onclick: function () { go({ only: "look" }); } }, h("span", { class: "b-chip-dot", "aria-hidden": "true" }), "Worth a look today")));
+      main.appendChild(ui.table([
+        { key: "name", label: "Product", render: function (r) {
+          return h("div", { class: "b-prodcell" },
+            h("a", { href: "#/products/" + r.product_id, class: "b-plain-link", onclick: function (e) { e.stopPropagation(); } }, r.name),
+            h("div", { class: "text-3 mono b-small" }, r.sku, r.category ? " · " + r.category : ""),
+            r.estimate ? h("span", { class: "badge", "data-kind": "attention" }, "Estimate") : null);
+        } },
+        { key: "week", label: "Next 7 days", kind: "qty", render: function (r) {
+          return h("div", null, units(r.week.mid_milli, r.unit), h("div", { class: "text-3 b-small" }, "likely " + units(r.week.lo_milli, r.unit) + " to " + units(r.week.hi_milli, r.unit)));
+        } },
+        { key: "daily", label: "Next 28 days", render: function (r) {
+          var m28 = (r.daily || []).reduce(function (a, d) { return a + d[1]; }, 0);
+          return h("div", { class: "b-fan-cell" }, fanSvg(r.daily, r.name), h("div", { class: "text-3 b-small" }, "about " + units(Math.round(m28 / 1000) * 1000, r.unit) + " in all"));
+        } },
+        { key: "target_milli", label: "Stock target", kind: "qty", render: function (r) {
+          return h("div", null, units(r.target_milli, r.unit), h("div", { class: "text-3 b-small" }, "covers demand " + fmt.pct(r.service_level) + " of the time"));
+        } },
+        { key: "on_hand_milli", label: "On hand", kind: "qty", render: function (r) { return r.stock_known ? units(r.on_hand_milli, r.unit) : h("span", { title: "Not counted yet" }, "Unknown"); } },
+        { key: "suggested_milli", label: "Suggested order", kind: "qty", render: function (r) { return r.suggested_milli ? units(r.suggested_milli, r.unit) : "—"; } },
+        { key: "reasons", label: "Why", render: function (r) {
+          var rs = (r.reasons || []).map(function (x) { return typeof x === "string" ? x : x.text; });
+          return rs.length ? h("div", { class: "b-why" }, rs.slice(0, 2).join("; ")) : h("span", { class: "text-3" }, "Nothing unusual");
+        } }
+      ], rows, {
+        caption: "Forecasts for " + storeName(),
+        onRow: function (r) { DQ.go("#/products/" + r.product_id); },
+        empty: { title: "Nothing matches", text: "No product in " + storeName() + " matches these filters.", action: { label: "Show every product", href: "#/forecasts" } }
+      }));
+      if (rec.total > rec.rows.length) main.appendChild(h("p", { class: "text-3 b-foot" }, "Showing the first " + fmt.num(rec.rows.length) + " of " + fmt.num(rec.total) + " products. Search or choose a category to narrow it."));
+      main.appendChild(h("p", { class: "text-3 b-foot" }, "Ranges are the likely low and high: real sales should land between them about 90 times in 100. The stock target sits where an empty shelf and a leftover cost the same, inside your business rules."));
+    }, failed(main, alive, "Forecasts"));
   } });
 })();

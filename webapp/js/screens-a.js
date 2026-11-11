@@ -228,8 +228,8 @@
         kids.push(h("p", null, "The first forecast is being made now. It usually takes a few minutes; come back to this page to see it."));
         kids.push(h("a", { class: "btn btn-ghost", href: admin ? "#/setup/forecast" : "#/home" }, "See progress"));
       } else if (st.days_needed > 0) {
-        kids.push(h("p", null, "Forecasts start after 8 weeks of daily sales. " + plural(st.history_days, "day") +
-          " of sales are loaded so far; " + plural(st.days_needed, "more day") + " needed."));
+        kids.push(h("p", null, st.needs || ("Forecasts start after 2 weeks of daily sales. " + plural(st.history_days, "day") +
+          " of sales are loaded so far; " + plural(st.days_needed, "more day") + " needed.")));
         if (DQ.can("imports.upload")) kids.push(h("a", { class: "btn btn-primary", href: "#/imports/new/sales_history" }, "Load sales history"));
       } else {
         kids.push(h("p", null, "There is enough sales history to start. " + (admin ?
@@ -559,9 +559,10 @@
       var est = ready && ready.first_forecast_minutes;
       body.appendChild(sectionCard("Sales history", [
         h("p", null, plural(st.history_days || 0, "day") + " of sales are loaded (" + plural(Math.floor((st.history_days || 0) / 7), "week") + ")."),
-        st.days_needed > 0 ? notice("attention", ["Forecasts start after 8 weeks of sales: " + plural(st.days_needed, "more day") + " needed. ",
+        st.days_needed > 0 ? notice("attention", [(st.needs || ("Forecasts start after 2 weeks of sales: " + plural(st.days_needed, "more day") + " needed.")) + " ",
           h("a", { href: "#/imports/new/sales_history" }, "Load sales history")]) :
-          h("p", { class: "text-2" }, "That is enough to start. A full year lets it learn festivals; two to three years is best.")]));
+          st.days_to_full > 0 ? notice("data", st.needs || ("Forecasts are estimates until there are 8 weeks of sales.")) :
+          h("p", { class: "text-2" }, "That is enough for full forecasting. A full year lets it learn festivals; two to three years is best.")]));
 
       var kids = [];
       if (latest) {

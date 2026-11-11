@@ -209,9 +209,9 @@ Numbers move between runs; treat `artifacts/metrics.json` as authoritative and t
   WRMSSE, MASE and bias *identical* to the uncalibrated arm — exactly what the
   median-anchor design intends.
 - **The critical fractile beats a blanket 95% service level in 75/75 cost scenarios**
-  (holding 0.33×–3×, markdown 0.25×–4×, margin 0.6×–1.5×), mean advantage ~$120k,
-  never below ~$31.6k. This is the examiner-proof answer to "what if your holding cost
-  is wrong".
+  (holding 0.33×–3×, markdown 0.25×–4×, margin 0.6×–1.5×), mean advantage ~$91k,
+  never below ~$11.9k (C18 full run). This is the examiner-proof answer to "what if your
+  holding cost is wrong".
 - **The ensemble owns bias**: |bias| ~0.06 against ~0.14 for the best single model,
   better at 8/8. Every individual candidate under-forecasts by 13–36%; only the
   combination does not.
@@ -1318,10 +1318,24 @@ its live headline and one click in, three numbered tiles for the work in order.
 - Training **reproduces** within 0.06% on every metric (full retrain, compared against
   the previous `metrics.json`).
 - Bias was scored on the **median**; on zero-heavy skewed demand that reads 12–17% low by
-  construction. New `evaluate.mean_from_quantiles()` / `bias_mean`: orders forecast −3.1%.
+  construction. New `evaluate.mean_from_quantiles()` / `bias_mean`: orders forecast −4.3%.
 - Coverage counted ties at zero as hits. New `strict_after`, `tie_aware_gap`,
-  `tie_aware_ok`. Upper range (≥75%, sets stock) honest within 1 point. **Lower tail is a
-  real miss**: 10% of outcomes below the stated 5% floor. Open.
+  `tie_aware_ok`. Upper range (≥75%, sets stock) honest within 1 point. **Lower tail,
+  fixed in C18**: it was honest in sample (0.050/0.100/0.251); the 10% was out of sample.
+  One additive offset per stratum could not follow a series whose level or reconciliation
+  shift moved, and kept a positive floor under zero-heavy series. Below the median Stage 6
+  now uses a factor from the strict conformal rank (P(y<q) ≤ τ; zero-heavy strata get the
+  honest floor 0; thin strata fall back by median size). Second fix: Stage 6 was fitted on
+  the reconciled forecast and applied to the one orders read too, whose errors differ, so
+  orders now have their own calibrator (`conformal_orders`, saved with the model; models
+  saved earlier fall back to `conformal`). Median never moves; WRMSSE, MASE, median bias
+  unchanged. Full run, 8 backtest origins, share below the 5/10/25% floors: reconciled
+  6.7/12.8/27.6% → 4.3/7.1/17.6% (5% over only at 07-07: 7.8%, was 11.1%), eval WSPL
+  −1.4%; orders 3.0/6.3/16.2%, honest at every origin (a quick run before the change:
+  0.8/2.6/11.0%, too low), WSPL 0.1233 → 0.1231, margin +0.17% at eval and flat over the
+  backtest, fill −0.2 to −0.4 pt. **Open:** the orders' upper levels run 2–4 points under
+  (P90 holds 86% over the backtest; uncalibrated, 89%): upper offsets from the calibration
+  window do not carry forward. `test_calibration_lower_tail.py`, `test_calibration_paths.py`.
 - The leaderboard's "DQ-Stack (full)" is the *reconciled* forecast (for totals; ~18% worse
   at product level by design — totals get 30–40% better). Orders read the unreconciled one
   (`for_decisions=False`). New row **"DQ-Stack (as issued for orders)" = 0.691**, the best
@@ -1433,6 +1447,61 @@ Two people counting one product are compared count against count (carried forwar
 sales between them), never against the system figure; the manager picks one, or sends
 it for a recount.
 
+**Forecasting gaps, closed after step 12** (supersedes ">= 56 an early forecast" and
+"not built" above). The early forecast starts at 14 days (`jobs.MIN_DAYS`: the engine's
+Stage 1 stops below 14 observed days per series), and every series with under 8 weeks
+of its own sales is labelled `estimate` (`forecast/coldstart.py`): a new store borrows
+the same products from the company's established stores, scaled by its first weeks of
+sales or else its size class; a new product in the early tier borrows its category's
+median; the borrowed share falls to zero at 8 weeks; a company with no sales anywhere
+gets nothing and is told what is needed. Festivals absent from a company's history get
+a national prior derived from the demo generator's own lifts, halved and capped at 3x
+(`forecast/priors.py`), flagged lower confidence. Above `DQ_TRAIN_SHARD_SERIES` (20,000)
+series, `forecast/shards.py` splits by category, then store group, and trains, forecasts
+and scores each shard in its own spawned process (`DQ_TRAIN_WORKERS`); shard scores add
+up to whole-panel scores (tested). Measured side by side: 16 series forced into 4 shards
+train and first-forecast in 134 s against 74 s for one engine, nightly 14.8 s against
+2.5 s (process start-up and per-shard fixed costs: why shards start at 20,000 series).
+The engine's Stage 0 to 1 costs about 41 ms per series, so a 250,000-series night (20
+shards on 13 workers) is an estimated 20 to 35 minutes, near the 30-minute nightly
+limit; training at that scale is unmeasured. Trap: a shard process must set its scratch folders before `dqstack.config`
+is imported, so `shards.py` imports the engine only inside functions.
+
+**Stage 4, the single best method** (spec: "allow issuing the single best model when it
+earns more"). Training keeps `best_single`, the method with the lowest pinball on the
+meta origins (the weights' own objective), and `conformal_single`, a Stage 6 calibrator
+fitted on that method's own forecasts at the conformal origins (never a borrowed one:
+see the orders calibrator in section 5). `live.issued_as(model, "blend"|"single")` gives
+the same saved model issued either way; `jobs.train` scores both with the promotion
+rule's own evidence (same recent weeks, same simulator), issues the one that earns more
+(ties to the blend), records `issue`, `blend_margin`, `single_margin` and
+`single_method` in `model_versions.promotion`, and `jobs._load` issues it that way every
+night. The choice lives with the version, not in the saved bytes, so models saved before
+this issue the blend unchanged. A sharded model issues every shard's own best method or
+every shard's blend. Scoring both costs one extra decision simulation per origin, not a
+second forecast: `forecast_panel(..., shared)` reuses the methods' forecasts. On the
+demo's evaluation origin the blend earns more than the best single method (834,122
+against 828,146 realised margin for LightGBM quantile, `artifacts/economics.csv`); the
+spec's 0.99 lakh the other way was measured before the range fixes.
+
+**Other specification gaps closed after step 12.** Exchanges at the till (a return and
+a new sale in one transaction, payment method `exchange`; `checkout.exchange`). The
+Owner's weekly summary and monthly report with every report attached (`summaries.py`).
+Stock turn, days of cover and order performance with emergency orders (`reports.py`,
+14 reports). The nightly SFTP file drop (`filedrop.py`, `deploy/sftp/`, compose profile
+`sftp`; email-in is not built), which records files through the POS API's own code; that
+API now refuses a file without store and bill number columns. A Forecasts screen
+(`#/forecasts`: every product's forecast, range fan, stock target and order, as a CSV
+download) replaces the demo planner in the store app's menu. Phased by the spec itself
+and not built: Hindi, and the Tally and Zoho connectors.
+
+**The public landing page** (`site/index.html`, `site/assets/{css,js}/landing.*`) is
+one trading day in a shop told by scroll, built to the Scroll Craft brief in
+`scrollcraft/builds/dqstack-landing/BRIEF.md`. Its decision card runs the real
+critical-fractile arithmetic of `decide.py` in the browser. The page is generated from a
+template by a build script kept outside the repository; edit `site/index.html` directly
+and keep `tests/test_site.py` passing (skip link, FAQ markup, legal links, no codes).
+
 **Running it.** `python -m dqstack.app` (development, migrates SQLite first);
 `python -m dqstack.app.manage seed-demo --email ...` makes a demo company with a trained
 forecast (login written to the git-ignored `data/demo-login.txt` on this machine);
@@ -1495,8 +1564,11 @@ for eleven weeks and writing badly for one.
   weekly retraining and must not be read as if it did.
 - **Eight paired origins is underpowered.** Where direction is consistent but the test
   is not significant, the honest verdict is "consistent direction, underpowered".
-- **Lower-tail coverage is arithmetically unreachable** on 43%-zero demand; Stage 6
-  declines to chase it and reports which levels it declined and why.
+- **A floor is judged on the strict side.** On 43%-zero demand the share *at or below*
+  a 5% level cannot come down to 5%, so Stage 6 targets P(y < q) ≤ τ (ties at zero are
+  not misses). Zero-heavy strata get the honest floor 0, which keeps the pooled share
+  below a floor under nominal by design, and the reconciled view still goes over at
+  origins far from the calibration window, where MinT's leaf error has moved.
 
 ---
 

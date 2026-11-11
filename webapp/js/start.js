@@ -13,7 +13,7 @@
     { label: "Stock", items: ["#/stock", "#/count", "#/receive", "#/transfers", "#/wastage"] },
     { label: "Buying", items: ["#/orders", "#/suppliers"] },
     { label: "Selling", items: ["#/checkout", "#/bills", "#/day-close", "#/sales"] },
-    { label: "Insight", items: ["#/reports", "#/model", "/planner/"] },
+    { label: "Insight", items: ["#/forecasts", "#/reports", "#/model"] },
     { label: "Company", items: ["#/imports", "#/alerts", "#/settings", "#/activity"] }
   ];
   var PUBLIC = ["#/signin", "#/signup", "#/forgot", "#/reset/:token", "#/invite/:token"];
