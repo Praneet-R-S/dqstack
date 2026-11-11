@@ -256,3 +256,51 @@ def test_standalone_stores_and_other_roles(make_client):
     invite_and_join(owner, clerk, "Kavya Clerk", "stock_clerk", [s1["id"]])
     assert clerk.post("/api/checkout/bills", _bill(s1, "X2", [(pid["RICE"], 1000, 45_000)])
                       ).status_code == 403
+
+
+def test_exchange_is_a_refund_and_a_new_sale_saved_together(make_client):
+    owner, cashier, s1, pid = _till(make_client)
+    r = cashier.post("/api/checkout/bills", _bill(s1, "T1-0100", [(pid["DAL"], 2000, 18_000)]))
+    assert r.status_code == 201, r.text
+    dal0, soap0 = _hand(s1["id"], pid["DAL"]), _hand(s1["id"], pid["SOAP"])
+    base = {"store_id": s1["id"], "original_bill_number": "T1-0100", "reason": "Wrong item",
+            "return_lines": [{"product_id": pid["DAL"], "qty_milli": 1000, "resaleable": True}],
+            "manager_pin": "4321", "device_id": "till-1"}
+    # Return one dal (Rs 180), take 5 soaps (Rs 225): Rs 180 credit, Rs 45 paid in cash.
+    body = {**base, "refund_number": "R-1", "bill_number": "T1-0101",
+            "lines": [{"product_id": pid["SOAP"], "qty_milli": 5000, "unit_price_paise": 4_500}],
+            "payments": [{"method": "exchange", "amount_paise": 18_000},
+                         {"method": "cash", "amount_paise": 4_500, "tendered_paise": 5_000}]}
+    # Without the manager's PIN nothing is saved.
+    assert cashier.post("/api/checkout/exchanges", {**body, "manager_pin": None}).status_code == 403
+    assert _hand(s1["id"], pid["DAL"]) == dal0
+    x = cashier.post("/api/checkout/exchanges", body)
+    assert x.status_code == 201, x.text
+    j = x.json()
+    assert j["refund"]["total_paise"] == -18_000 and j["bill"]["total_paise"] == 22_500
+    assert j["bill"]["change_paise"] == 500
+    assert _hand(s1["id"], pid["DAL"]) == dal0 + 1000
+    assert _hand(s1["id"], pid["SOAP"]) == soap0 - 5000
+    # Sent again: recognised, nothing moves twice.
+    again = cashier.post("/api/checkout/exchanges", body).json()
+    assert again["duplicate"] is True and _hand(s1["id"], pid["SOAP"]) == soap0 - 5000
+    # Cash in the drawer: the Rs 45 paid; the credit nets to zero.
+    z = owner.get(f"/api/checkout/z-report?store_id={s1['id']}").json()
+    assert z["by_method_paise"]["exchange"] == 0
+    # The new items cost less: the rest is handed back.
+    small = {**base, "refund_number": "R-2", "bill_number": "T1-0102",
+             "lines": [{"product_id": pid["SOAP"], "qty_milli": 1000, "unit_price_paise": 4_500}],
+             "payments": [{"method": "exchange", "amount_paise": 4_500}], "refund_method": "upi"}
+    y = cashier.post("/api/checkout/exchanges", small).json()
+    assert sorted(p["amount_paise"] for p in y["refund"]["payments"]) == [-13_500, -4_500]
+    # Credit can only be what was returned, used once, and only in an exchange.
+    over = {**base, "refund_number": "R-3", "bill_number": "T1-0103",
+            "return_lines": [{"product_id": pid["DAL"], "qty_milli": 1000}],
+            "lines": [{"product_id": pid["SOAP"], "qty_milli": 6000, "unit_price_paise": 4_500}],
+            "payments": [{"method": "exchange", "amount_paise": 27_000}]}
+    assert cashier.post("/api/checkout/exchanges", over).status_code == 422   # dal all returned
+    with dbmod.SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Bill).where(Bill.bill_number == "R-3")) == 0
+    plain = _bill(s1, "T1-0104", [(pid["SOAP"], 1000, 4_500)])
+    plain["payments"] = [{"method": "exchange", "amount_paise": 4_500}]
+    assert cashier.post("/api/checkout/bills", plain).status_code == 422

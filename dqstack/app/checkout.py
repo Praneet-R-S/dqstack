@@ -169,13 +169,17 @@ def _build_lines(db: Session, c, store: Store, lines: list[dict], on: date,
     return built, total, tax, disc
 
 
-def _check_payments(payments: list[dict], total: int) -> tuple[list[BillPayment], int]:
+EXCHANGE = "exchange"     # credit from items returned in the same exchange
+
+
+def _check_payments(payments: list[dict], total: int, exchange: bool = False
+                    ) -> tuple[list[BillPayment], int]:
     if not payments:
         raise HTTPException(422, "Take a payment before completing the bill.")
     out, paid, change = [], 0, 0
     for pmt in payments:
         method = pmt.get("method")
-        if method not in METHODS:
+        if method not in METHODS and not (exchange and method == EXCHANGE):
             raise HTTPException(422, "Payment must be cash, UPI or card.")
         amount = int(pmt.get("amount_paise") or 0)
         if amount <= 0:
@@ -195,8 +199,8 @@ def _check_payments(payments: list[dict], total: int) -> tuple[list[BillPayment]
     return out, change
 
 
-def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
-        ) -> tuple[Bill, bool]:
+def pay(db: Session, c, store: Store, body: dict, trusted: bool = False,
+        exchange: bool = False) -> tuple[Bill, bool]:
     """Complete a bill: the paid-bill rule. Returns (bill, duplicate). `trusted` is
     for an existing POS, whose own controls already approved its prices."""
     number = (body.get("bill_number") or "").strip()
@@ -216,7 +220,7 @@ def pay(db: Session, c, store: Store, body: dict, trusted: bool = False
                                            _business_day(store, tz, at), manager, trusted)
     if not lines:
         raise HTTPException(422, "The bill has no items.")
-    payments, change = _check_payments(body.get("payments") or [], total)
+    payments, change = _check_payments(body.get("payments") or [], total, exchange)
     bill = seen or Bill(company_id=c.company_id, store_id=store.id, bill_number=number)
     if seen is not None:
         bill.lines.clear()
@@ -337,8 +341,8 @@ def void_by_number(db: Session, c, store: Store, number: str, reason: str, lines
 
 # ===================================================================== refunds
 
-def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True
-           ) -> tuple[Bill, bool]:
+def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True,
+           defer_payment: bool = False) -> tuple[Bill, bool]:
     """`require_pin` is off only for an existing POS, which approved the refund itself."""
     number = (body.get("refund_number") or "").strip()
     if not number:
@@ -390,6 +394,7 @@ def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True
         q_sold, v_sold = sold[pid]
         if qty <= 0 or qty > q_sold - back.get(pid, 0):
             raise HTTPException(422, "You cannot return more than was bought.")
+        back[pid] = back.get(pid, 0) + qty      # two lines of one product count together
         value = v_sold * qty // q_sold
         p = db.get(Product, pid)
         bill.lines.append(BillLine(company_id=c.company_id, product_id=pid, qty_milli=qty,
@@ -398,7 +403,9 @@ def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True
                                    resaleable=bool(ln.get("resaleable", True))))
         total += value
     bill.total_paise = -total
-    bill.payments.append(BillPayment(company_id=c.company_id, method=method, amount_paise=-total))
+    if not defer_payment:           # an exchange sets the refund's payments itself
+        bill.payments.append(BillPayment(company_id=c.company_id, method=method,
+                                         amount_paise=-total))
     db.add(bill)
     db.flush()
     ledger.lock_rows(db, c.company_id, store.id, [l.product_id for l in bill.lines])
@@ -420,6 +427,56 @@ def refund(db: Session, c, store: Store, body: dict, require_pin: bool = True
         "reason": reason, "approved_by": manager.name if manager else "the POS"},
         store_id=store.id)
     return bill, False
+
+
+def exchange(db: Session, c, store: Store, body: dict) -> tuple[Bill, Bill, bool]:
+    """A return and a new sale on one screen (section 7 rule 7), saved together or not at
+    all. The returned items' value is credit on the new bill; if the new items cost
+    more the customer pays the rest, and if less the rest is handed back by
+    `refund_method`. Needs a manager's PIN, like any refund. Returns (refund, bill,
+    duplicate); both numbers come from the till, so a resend is recognised."""
+    rnum = (body.get("refund_number") or "").strip()
+    bnum = (body.get("bill_number") or "").strip()
+    if not rnum or not bnum or rnum == bnum:
+        raise HTTPException(422, "An exchange needs a refund number and a new bill number.")
+
+    def find(n: str) -> Bill | None:
+        return db.scalar(select(Bill).where(Bill.company_id == c.company_id,
+                                            Bill.store_id == store.id, Bill.bill_number == n))
+    r_seen, b_seen = find(rnum), find(bnum)
+    if r_seen is not None and b_seen is not None and b_seen.state == "paid":
+        return r_seen, b_seen, True
+    if r_seen is not None or (b_seen is not None and b_seen.state in ("paid", "refund")):
+        raise HTTPException(409, "One of these numbers is already used. Start the exchange again.")
+    back_by = body.get("refund_method") or "cash"
+    if back_by not in METHODS:
+        raise HTTPException(422, "Money handed back must be cash, UPI or card.")
+    ref, _ = refund(db, c, store, {
+        "refund_number": rnum, "original_bill_number": body.get("original_bill_number"),
+        "lines": body.get("return_lines") or [], "reason": body.get("reason"),
+        "method": back_by, "manager_pin": body.get("manager_pin"),
+        "manager_id": body.get("manager_id"), "device_id": body.get("device_id")},
+        defer_payment=True)
+    credit = -ref.total_paise
+    sale, _ = pay(db, c, store, {**body, "bill_number": bnum,
+                                 "manager_pin": body.get("manager_pin"),
+                                 "manager_id": body.get("manager_id")}, exchange=True)
+    used = sum(p.amount_paise for p in sale.payments if p.method == EXCHANGE)
+    if used != min(credit, sale.total_paise):
+        raise HTTPException(422, f"Use {rupees(min(credit, sale.total_paise))} of the "
+                                 f"{rupees(credit)} returned as credit on the new bill.")
+    ref.payments.append(BillPayment(company_id=c.company_id, method=EXCHANGE,
+                                    amount_paise=-used))
+    if credit > used:
+        ref.payments.append(BillPayment(company_id=c.company_id, method=back_by,
+                                        amount_paise=-(credit - used)))
+    audit.log(db, c, "bill.exchanged", "bill", sale.id, after={
+        "refund": rnum, "new_bill": bnum, "returned": rupees(credit),
+        "new_items": rupees(sale.total_paise),
+        "customer_paid": rupees(max(sale.total_paise - credit, 0)),
+        "handed_back": rupees(max(credit - sale.total_paise, 0))}, store_id=store.id)
+    db.flush()
+    return ref, sale, False
 
 
 # ===================================================================== devices and day end

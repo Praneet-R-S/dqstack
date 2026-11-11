@@ -1160,6 +1160,11 @@
   }
 
   /* ================================================================ CHECKOUT */
+  /* An exchange started from a bill's page: the items coming back, the manager's PIN and
+     the credit. Kept in memory only (never on the device's storage, since it holds a
+     PIN), so a reload simply cancels it. */
+  var EXCH = null;
+
   DQ.route("#/checkout", { title: "Checkout", nav: "Checkout", can: "sales.bill", render: function (main, params, query, alive) {
     var store = DQ.storeObj();
     if (!store) return noStore(main);
@@ -1174,6 +1179,10 @@
     var mayOverride = DQ.can("sales.refund", sid);
     var cart = till.get("cart", sid, null);
     if (!cart || !cart.number || cart.store_id !== sid) cart = newCart();
+    if (EXCH && EXCH.store_id !== sid) EXCH = null;
+    var exch = EXCH;
+    if (!exch) cart.payments = cart.payments.filter(function (p) { return p.method !== "exchange"; });
+    var backBy = "cash";
     var done = null;                          // the receipt being shown after payment
     var method = "cash";
 
@@ -1400,6 +1409,13 @@
       payBar.hidden = !!done || !cart.lines.length;
       barTotal.textContent = money(cartTotal(cart));
       if (done) { paintReceipt(); return; }
+      if (exch) {
+        cart.payments = cart.payments.filter(function (p) { return p.method !== "exchange"; });
+        var use = Math.min(exch.credit, cartTotal(cart));
+        if (use > 0) cart.payments.unshift({ method: "exchange", amount_paise: use });
+        payBox.appendChild(msgBox("data", "Exchange for bill " + exch.original_bill_number + ": " + money(exch.credit) + " credit from the items returned. Scan the new items."));
+        payBox.appendChild(h("div", { class: "row" }, ui.button("Cancel the exchange", function () { EXCH = exch = null; cart.payments = cart.payments.filter(function (p) { return p.method !== "exchange"; }); save(); paintPay(); }, "ghost", { class: "btn btn-ghost btn-sm" })));
+      }
       var total = cartTotal(cart), paid = paidSoFar(cart), left = total - paid;
       var count = cart.lines.reduce(function (a, l) { return a + (l.unit && l.unit !== "each" ? 1 : l.qty_milli / 1000); }, 0);
       var discounts = cart.lines.reduce(function (a, l) { return a + (l.discount_paise || 0) + (l.override && l.listed_paise ? Math.max(l.listed_paise - l.price_paise, 0) * l.qty_milli / 1000 : 0); }, 0);
@@ -1411,10 +1427,22 @@
       var body = h("div", { class: "c-form" });
       if (cart.payments.length) {
         body.appendChild(h("ul", { class: "c-pays" }, cart.payments.map(function (p, i) {
-          return h("li", null, h("span", null, cap(p.method === "upi" ? "UPI" : p.method) + (p.tendered_paise ? " (received " + money(p.tendered_paise) + ")" : "")), h("span", { class: "mono" }, money(p.amount_paise)),
-            h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Remove this payment", onclick: function () { cart.payments.splice(i, 1); save(); paintPay(); } }, "Remove"));
+          return h("li", null, h("span", null, (p.method === "exchange" ? "Exchange credit" : cap(p.method === "upi" ? "UPI" : p.method)) + (p.tendered_paise ? " (received " + money(p.tendered_paise) + ")" : "")), h("span", { class: "mono" }, money(p.amount_paise)),
+            p.method === "exchange" ? null : h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Remove this payment", onclick: function () { cart.payments.splice(i, 1); save(); paintPay(); } }, "Remove"));
         })));
         body.appendChild(h("p", { class: "c-left" }, "Still to pay ", h("strong", { class: "mono" }, money(left))));
+      }
+      if (exch && left <= 0) {
+        // The new items cost no more than the credit: complete, handing back any rest.
+        var back = exch.credit - total;
+        var backSel = ui.select([{ value: "cash", label: "Hand back by cash" }, { value: "upi", label: "Hand back by UPI" }, { value: "card", label: "Hand back to the card" }], backBy, { id: "c-exch-back" });
+        backSel.addEventListener("change", function () { backBy = backSel.value; });
+        if (back > 0) body.appendChild(h("div", { class: "c-change-big" }, h("span", null, "Hand back to the customer"), h("strong", { class: "mono" }, money(back))));
+        if (back > 0) body.appendChild(ui.field("How", backSel));
+        body.appendChild(h("p", { class: "form-error", role: "alert", hidden: true, id: "c-pay-err" }));
+        body.appendChild(ui.button("Complete the exchange", complete, "primary", { class: "btn btn-primary btn-block c-pay-btn" }));
+        payBox.appendChild(card("Payment", body));
+        return;
       }
       body.appendChild(ui.tabs([{ value: "cash", label: "Cash" }, { value: "upi", label: "UPI" }, { value: "card", label: "Card" }], method, function (v) { method = v; paintPay(); }));
       var err = h("p", { class: "form-error", role: "alert", hidden: true, id: "c-pay-err" });
@@ -1466,11 +1494,31 @@
       var left = cartTotal(cart) - paidSoFar(cart);
       if (left <= 0) complete(); else { method = method === "cash" ? "upi" : method; paintPay(); }
     }
+    /* An exchange goes to the server as one request (the return and the new bill are
+       saved together), so it needs the internet; it is never queued on the till. */
+    function completeExchange(bill) {
+      if (!navigator.onLine) { paintPay(); var e0 = document.getElementById("c-pay-err"); if (e0) { e0.textContent = "An exchange needs the internet. Try again when the till is back online, or cancel the exchange."; e0.hidden = false; } return; }
+      DQ.clear(payBox); payBox.appendChild(card(null, h("p", { class: "c-total-value" }, "Completing the exchange…")));
+      DQ.post("/api/checkout/exchanges", Object.assign({}, bill, {
+        original_bill_number: exch.original_bill_number, refund_number: exch.refund_number,
+        return_lines: exch.return_lines, reason: exch.reason, refund_method: backBy,
+        manager_pin: exch.pin })).then(function (res) {
+        var back = Math.max(exch.credit - cartTotal(cart), 0);
+        EXCH = exch = null;
+        DQ.toast("Exchange done." + (back ? " Hand back " + money(back) + " by " + methodName(backBy) + "." : ""));
+        finish(bill, res.bill);
+      }, function (e) {
+        paintPay();
+        var err = document.getElementById("c-pay-err");
+        if (err) { err.textContent = "Not done yet: " + e.message; err.hidden = false; }
+      });
+    }
     function complete() {
       if (cart.lines.some(function (l) { return l.loading; })) { DQ.toast("Wait a moment: an item is still being looked up.", { kind: "attention" }); return; }
       var bill = { store_id: sid, bill_number: cart.number, device_id: DQ.deviceId(), offline: false, paid_at: new Date().toISOString(),
         lines: cart.lines.map(payloadLine), manager_pin: cart.pin || null,
         payments: cart.payments.map(function (p) { return { method: p.method, amount_paise: p.amount_paise, tendered_paise: p.method === "cash" ? p.tendered_paise : null, reference: p.reference || null }; }) };
+      if (exch) { completeExchange(bill); return; }
       var pend = till.pending(sid);
       var keepOffline = function () { bill.offline = true; pend = till.pending(sid); pend.push(bill); till.set("pending", sid, pend); finish(bill, null); syncTill(sid); };
       if (!navigator.onLine || pend.length) { keepOffline(); return; }
@@ -1667,6 +1715,7 @@
       var total = h("p", { class: "c-value", "aria-live": "polite" });
       var err = h("div", { class: "form-error", role: "alert", hidden: true });
       var btn = ui.button("Refund", go, "primary");
+      var exBtn = ui.button("Exchange instead", exchangeInstead, "ghost", { title: "Return these items and take others: the value returned pays toward the new bill" });
       function chosen() {
         return rows.filter(function (r) { return r.on.checked; }).map(function (r) {
           var m = fmt.toMilli(r.q.value);
@@ -1675,6 +1724,40 @@
         });
       }
       function paintTotal() { var c = chosen(), v = c.reduce(function (a, x) { return a + x.value; }, 0); total.textContent = c.length ? "Refund about " + money(v) : "Tick what is being returned."; btn.textContent = c.length ? "Refund " + money(v) : "Refund"; }
+      /* Same checks as a refund, then on to Checkout with the credit. The credit is worked
+         out the way the server does: per product, from that product's lines on the bill. */
+      function checked() {
+        err.hidden = true;
+        var c = chosen();
+        if (!c.length) { err.textContent = "Tick at least one item being returned."; err.hidden = false; return null; }
+        var bad = c.filter(function (x) { return x.m === null || x.m <= 0 || x.m > x.r.line.qty_milli || (x.r.unit === "each" && x.m % 1000); })[0];
+        if (bad) { err.textContent = bad.r.name + ": return between 1 and " + qty(bad.r.line.qty_milli, bad.r.unit) + ", in whole units where it is sold that way."; err.hidden = false; return null; }
+        if (reason.value.trim().length < 3) { err.textContent = "Give the reason for the return."; err.hidden = false; reason.focus(); return null; }
+        if (!/^\d{4,8}$/.test(pin.value)) { err.textContent = "A manager types their PIN to approve the return."; err.hidden = false; pin.focus(); return null; }
+        return c;
+      }
+      function exchangeInstead() {
+        var c = checked(); if (!c) return;
+        if (!navigator.onLine) { err.textContent = "An exchange needs the internet."; err.hidden = false; return; }
+        var per = {};
+        c.forEach(function (x) {
+          var k = x.r.line.product_id + (x.r.cond.value === "1" ? ":ok" : ":dmg");
+          per[k] = per[k] || { product_id: x.r.line.product_id, qty_milli: 0, resaleable: x.r.cond.value === "1" };
+          per[k].qty_milli += x.m;
+        });
+        var credit = 0, byProduct = {};
+        Object.keys(per).forEach(function (k) { byProduct[per[k].product_id] = (byProduct[per[k].product_id] || 0) + per[k].qty_milli; });
+        Object.keys(byProduct).forEach(function (pid) {
+          var qs = 0, vs = 0;
+          b.lines.forEach(function (l) { if (l.product_id === pid) { qs += l.qty_milli; vs += Math.floor(l.qty_milli * l.unit_price_paise / 1000) - (l.discount_paise || 0); } });
+          // Per return line, as the server values each line it receives.
+          Object.keys(per).forEach(function (k) { if (per[k].product_id === pid) credit += Math.floor(vs * per[k].qty_milli / qs); });
+        });
+        EXCH = { store_id: b.store_id, original_bill_number: b.bill_number, refund_number: refNo, reason: reason.value.trim(),
+          pin: pin.value, credit: credit, return_lines: Object.keys(per).map(function (k) { return per[k]; }) };
+        if (DQ.store() !== b.store_id) DQ.setStore(b.store_id);
+        DQ.go("#/checkout");
+      }
       function go() {
         err.hidden = true;
         var c = chosen();
@@ -1696,7 +1779,8 @@
       }
       paintTotal();
       return card("Return items", h("div", { class: "c-form" }, h("p", { class: "text-2" }, "Tick the items coming back. A paid bill is never edited: a refund is recorded against it."), list,
-        ui.field("Reason", reason), h("div", { class: "grid-2" }, ui.field("Refund method", methodSel), ui.field("Manager PIN", pin)), total, err, h("div", { class: "row" }, btn)));
+        ui.field("Reason", reason), h("div", { class: "grid-2" }, ui.field("Refund method", methodSel), ui.field("Manager PIN", pin)), total, err, h("div", { class: "row" }, btn, exBtn),
+        h("p", { class: "text-3" }, "Exchange: the value of the ticked items pays toward the new items on Checkout. Both are saved together.")));
     }
   } });
 

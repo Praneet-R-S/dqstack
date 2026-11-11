@@ -208,6 +208,31 @@ def refund(body: RefundIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db))
     return {**bill_dict(bill), "duplicate": dup}
 
 
+class ExchangeIn(BaseModel):
+    store_id: str
+    original_bill_number: str = Field(min_length=1, max_length=64)
+    refund_number: str = Field(min_length=1, max_length=64)
+    return_lines: list[RefundLineIn] = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=200)
+    refund_method: str = "cash"          # for any money handed back
+    bill_number: str = Field(min_length=1, max_length=64)
+    lines: list[LineIn] = Field(min_length=1, max_length=500)
+    payments: list[PaymentIn] = Field(max_length=10)   # the credit, plus anything paid
+    manager_pin: str | None = Field(default=None, max_length=8)
+    manager_id: str | None = None
+    device_id: str | None = Field(default=None, max_length=64)
+    till: str | None = Field(default=None, max_length=32)
+
+
+@router.post("/exchanges", status_code=201)
+def exchange(body: ExchangeIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """A return and a new sale together: both are saved, or neither."""
+    store = _till_store(db, c, body.store_id)
+    ref, sale, dup = K.exchange(db, c, store, body.model_dump())
+    db.commit()
+    return {"refund": bill_dict(ref), "bill": bill_dict(sale), "duplicate": dup}
+
+
 class HeartbeatIn(BaseModel):
     store_id: str
     device_id: str = Field(min_length=1, max_length=64)
