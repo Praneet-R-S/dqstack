@@ -10,7 +10,9 @@ Every minute, in each company's own time zone:
   * an early retrain when monitoring has asked for one;
   * any run an Owner or Admin queued by hand;
   * alerts, and the Owner's weekly summary (Monday from 07:00) and monthly report (the
-    1st from 07:00), summaries.py.
+    1st from 07:00), summaries.py;
+  * the Zoho Inventory sync, nightly (00:30 by default) and when an Admin presses
+    "Sync now" (connectors/zoho.py).
 
 The SFTP nightly file drop (filedrop.py) is looked at every half-minute in a thread of
 its own, so a long training run does not hold up a store's files.
@@ -151,6 +153,14 @@ def tick(now: datetime | None = None) -> list[tuple[str, str, str]]:
             except Exception:  # noqa: BLE001 -- nor do its summaries
                 db.rollback()
                 log.exception("owner summaries for %s failed", co.id)
+    try:
+        # Zoho Inventory: nightly, and "Sync now" from the Connectors screen. Each sync
+        # records its own failure and alert; this guard is for the unexpected.
+        from .connectors import zoho
+        for company_id, status in zoho.run_due(now):
+            log.info("%s zoho sync: %s", company_id, status)
+    except Exception:  # noqa: BLE001 -- connectors never stop the schedule
+        log.exception("connector syncs failed")
     for company_id, (kind, trigger, run_id) in todo:
         status = run_job(kind, company_id, trigger, run_id)
         ran.append((company_id, kind, status))

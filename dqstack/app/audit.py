@@ -28,7 +28,8 @@ def _jsonable(v: Any) -> Any:
     return v
 
 
-SECRET_FIELDS = {"password_hash", "manager_pin_hash", "token_hash", "key_hash", "csrf_token"}
+SECRET_FIELDS = {"password_hash", "manager_pin_hash", "token_hash", "key_hash", "csrf_token",
+                 "credentials"}
 
 
 def snapshot(obj, fields: list[str] | None = None) -> dict:

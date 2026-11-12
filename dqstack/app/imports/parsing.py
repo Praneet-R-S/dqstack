@@ -42,6 +42,9 @@ def read_table(content: bytes, filename: str) -> tuple[list[str], list[list[str]
                         ".xlsx or CSV.")
     if name.endswith((".xlsx", ".xlsm")) or content[:2] == b"PK":
         headers, rows = _read_xlsx(content)
+    elif name.endswith(".xml") or _starts_xml(content):
+        raise FileError("This is an XML file, not a spreadsheet. A Tally export is read under "
+                        "Connectors, Tally, which turns it into products or sales.")
     else:
         headers, rows = _read_csv(content)
     headers = [h.strip() for h in headers]
@@ -55,6 +58,16 @@ def read_table(content: bytes, filename: str) -> tuple[list[str], list[list[str]
     width = len(headers)
     rows = [(r + [""] * width)[:width] for r in rows]
     return headers, rows
+
+
+def _starts_xml(content: bytes) -> bool:
+    """A file whose first character is "<", in UTF-8 or UTF-16: XML, not a table."""
+    head = content[:64].replace(b"\x00", b"")
+    for bom in (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff"):
+        if head.startswith(bom):
+            head = head[len(bom):]
+            break
+    return head.lstrip()[:1] == b"<"
 
 
 def _decode(content: bytes) -> str:

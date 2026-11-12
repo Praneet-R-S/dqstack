@@ -51,6 +51,8 @@ KINDS: dict[str, tuple[tuple[str, ...], str, str]] = {
     "accuracy_drop": (("admin", "owner"), "attention", "#/model"),
     # A nightly file from the SFTP drop that was not (fully) recorded (filedrop.py).
     "file_drop_failed": (("admin",), "risk", "#/settings/integrations"),
+    # A Zoho Inventory sync that failed or refused rows (connectors/zoho.py).
+    "connector_failed": (("admin",), "risk", "#/connectors"),
     # The Owner's summaries (summaries.py): Owners, and Admins who tick them.
     "owner_summary": (("owner",), "info", "#/reports"),
     "owner_monthly": (("owner",), "info", "#/reports"),
@@ -65,6 +67,7 @@ LABELS = {
     "forecast_nightly_failed": "Forecast did not run", "forecast_train_failed": "Training failed",
     "accuracy_drop": "Forecast accuracy dropped",
     "file_drop_failed": "Nightly file not recorded",
+    "connector_failed": "Connector sync failed",
     "owner_summary": "Weekly owner summary", "owner_monthly": "Monthly owner report",
 }
 # Sent by summaries.py with their own text and workbook, never by deliver(); an Admin

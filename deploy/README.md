@@ -438,3 +438,86 @@ automatically; `processed/` grows by a few kilobytes a night per store.
 Upgrading the SFTP image: look up the new digest of the `alpine` tag
 (`docker buildx imagetools inspect atmoz/sftp:alpine`), put it in
 `docker-compose.yml`, and recreate the service.
+
+## 14. Connectors: Tally and Zoho Inventory (optional)
+
+The Connectors screen (Company, Connectors; Owners and Admins) has one tab for each.
+Neither needs a server setting beyond those in section 2: Tally works by files, and
+each company brings its own Zoho app. Everything brought in becomes an ordinary
+import, checked by the same rules as a spreadsheet, listed on the Imports screen with
+its problems, and undoable there.
+
+### Tally (files)
+
+**To Tally.** Choose a period and stores and download a zip: `1-masters.xml` (units,
+stock groups, one godown per store, ledgers, stock items with HSN and GST rate) and
+`2-vouchers.xml` (sales, credit notes, purchases). In TallyPrime: Import, Masters,
+then Import, Transactions (Tally.ERP 9: Gateway of Tally, Import of Data). By default
+there is one sales voucher per store per day with a line per product and GST split by
+rate (CGST and SGST: a sale in a shop is intra-state), one credit note per store per
+day for refunds, and one purchase voucher per delivery received (IGST when the
+supplier's GSTIN is from another state than the store). One voucher per bill is a
+setting. Ledger names, voucher type names and units are set per company, since Tally
+companies name them differently; `{rate}` in a name becomes the rate.
+
+Before a client relies on it, do one trial import into a copy of their Tally company
+and check:
+
+1. Company features: GST enabled; credit notes allowed in invoice mode if refunds
+   are exported; multiple godowns on, or turn godowns off in the settings.
+2. The masters import creates nothing unexpected (Tally's "Behaviour of import if
+   master exists" decides whether existing ledgers are altered).
+3. A day's sales voucher shows the same taxable value and CGST and SGST as the
+   Z-report; the GSTR-1 HSN summary shows the products' HSN and units (UQC).
+4. Importing the same period twice: each voucher carries a REMOTEID from DQ-Stack;
+   check how the Tally release treats a repeat (it may add duplicates). Import each
+   period once.
+
+**From Tally.** Export the Stock Items list (Masters) or the Day Book / Sales Register
+as XML (Data Interchange) and read it on the Tally tab: stock items become products
+(SKU from the Part No., else the first alias, else the name); sales vouchers and
+credit notes become a sales history or daily sales file. Godowns are matched to stores
+by code, by name, or by the list on the tab. UTF-16 files (Tally's usual export) and
+UTF-8 are both read; a file declaring a DTD is refused.
+
+### Zoho Inventory (API)
+
+Each company registers its own app with Zoho, so no Zoho keys live on the server.
+
+1. The client's Admin opens the Zoho API Console for their data centre
+   (`https://api-console.zoho.in` for India; `.com`, `.eu`, `.com.au`, `.jp`, `.sa`,
+   `zohocloud.ca` elsewhere) and adds a **Server-based Application**:
+   * Homepage URL: `DQ_PUBLIC_URL`
+   * Authorized Redirect URI: `DQ_PUBLIC_URL/api/connectors/zoho/callback`
+     (for example `https://dqstack.example.in/api/connectors/zoho/callback`; the
+     Connectors screen shows it with a Copy button)
+2. They type the Client ID and Client Secret into Connectors, Zoho Inventory, choose
+   the data centre and press Connect. Zoho asks them to allow read access and sends
+   them back; the organisation and its warehouses are read at once.
+3. They match each Zoho warehouse to a store, choose whether sales come from
+   invoices or sales orders and go in as daily sales (moving stock) or sales history,
+   and press Sync now.
+
+A **Self Client** also works: in its Generate Code tab use the scopes the screen
+shows, then paste the code on the screen instead of being redirected.
+
+Scopes asked for, all read-only: `ZohoInventory.items.READ`,
+`ZohoInventory.invoices.READ`, `ZohoInventory.salesorders.READ`,
+`ZohoInventory.settings.READ` (the organisation and its warehouses).
+
+The worker syncs every connected company nightly at 00:30 company time (a setting
+per company) and runs "Sync now" within a minute (in development, at once). Only
+changes since the last sync are read: items and documents sorted by last change,
+pages of 200, at most 90 requests a minute (Zoho allows 100 per organisation), and on
+a 429 it waits as Zoho says (or 2, 4, 8 ... seconds, six times) before giving up until
+the next run. A failed sync changes nothing and raises a "Connector sync failed" alert
+for Owners and Admins with the reason in plain words; one that needs a new consent
+(the access was removed in Zoho, or the app's secret changed) shows "Connect again".
+
+The client secret, refresh token and access token are stored encrypted in the
+database with a key derived from `DQ_SECRET_KEY` (`dqstack/app/connectors/secrets.py`).
+**Changing `DQ_SECRET_KEY` makes them unreadable**: every Zoho connection then shows
+"connect again" and its Admin repeats step 2. Nothing else is lost.
+
+Outbound HTTPS to `accounts.zoho.<dc>` and `www.zohoapis.<dc>` must be allowed from
+the worker and web containers.

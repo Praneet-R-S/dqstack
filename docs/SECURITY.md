@@ -26,6 +26,7 @@ an automated test in `tests/app/` proves it, on SQLite and on PostgreSQL 16 in C
 | Availability 99.5% monthly | An operations target. A single server is the first step; add a second app server behind a load balancer and a managed database for this. | `deploy/README.md` |
 | Optional OTP and Google or Microsoft sign-in | Built and tested. A company can ask for a 6-digit code after the password (for Owners and Admins, or everyone), sent by text or email; codes last 10 minutes, die after 5 wrong tries, are stored only as a keyed hash, and a dead code counts toward the lockout. Password reset by a code to the phone, with the same answer whether or not the number has an account. Google and Microsoft sign-in (OpenID Connect with PKCE; ID token signature, issuer, audience, expiry and nonce checked) for existing, active people only; a Microsoft sign-in counts only from the Microsoft organisation the company named. Not yet tried against the real Google, Microsoft or SMS services. | `signin.py`, `oidc.py`, `routes/auth.py`, `test_signin_extras.py` |
 | A cashier's account is for the till only | Built and tested: beyond the role matrix, the server answers a cashier only on the till's endpoints (checkout, catalogue and prices, alerts) | `deps.py`, `test_screen_apis.py` |
+| Third-party credentials (connectors) | Built and tested. Zoho client secrets and tokens are encrypted at rest (Fernet: AES-128-CBC with HMAC-SHA256, key derived by HKDF-SHA256 from `DQ_SECRET_KEY` with its own label), never sent to the browser, left out of the company export and the activity log. Tampered or unreadable ciphertext reads as "not connected". Only read-only Zoho scopes are requested. The OAuth callback is bound to a random, hashed, 15-minute `state` held server-side for the signed-in Admin's company, and the token request goes only to Zoho's own accounts hosts, whatever the callback names. Not yet tried against a real Zoho account. | `connectors/secrets.py`, `connectors/zoho.py`, `routes/connectors.py`, `test_connectors_zoho.py` |
 | DPDP Act readiness: notice to staff, retention and deletion, breach response | Privacy notice drafted (needs legal review); export and deletion after a confirmed period built and tested. A breach response plan is a document for the operator to write. | `site/privacy.html`, `routes/platform.py` |
 
 ## Other notes
@@ -49,3 +50,20 @@ an automated test in `tests/app/` proves it, on SQLite and on PostgreSQL 16 in C
   is better served by one key per store (or per till server), as the scale test does.
 * Dependencies are pinned exactly (`requirements-app.txt`, `constraints.txt`) and
   tested in CI; review them for security releases at least monthly.
+* Connectors (`dqstack/app/connectors/`, `deploy/README.md` section 14):
+  * Zoho Inventory is reached with the scopes `ZohoInventory.items.READ`,
+    `ZohoInventory.invoices.READ`, `ZohoInventory.salesorders.READ` and
+    `ZohoInventory.settings.READ` only: DQ-Stack cannot change anything in Zoho. Each
+    company registers its own Zoho app; the server holds no Zoho keys of its own.
+  * The stored refresh token can read that company's Zoho items, invoices and sales
+    orders until revoked. Disconnecting revokes it at Zoho (best effort) and wipes it
+    here, with the documents read with it. Rotating `DQ_SECRET_KEY` makes every stored
+    token unreadable, which is a way to cut them all off at once (Admins reconnect).
+  * Only Owners and Admins (`integrations.manage`) can see or change a connector; the
+    screen shows whether a secret is stored, never the secret.
+  * Tally files are parsed in memory (50 MB limit). A file declaring a DTD or entity
+    is refused before parsing, and Python's parser does not fetch external entities.
+    Tally's illegal control-character references (`&#4;`) are removed before parsing.
+    The export is plain ASCII XML built element by element, so a product or supplier
+    name cannot inject markup; ledger names typed by an Admin may not contain `<`,
+    `>`, `&` or quotes.

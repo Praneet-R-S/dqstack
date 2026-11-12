@@ -48,7 +48,7 @@ from ..security import (AuthError, _aware, authenticate, new_token, session_for,
 router = APIRouter(prefix="/api", tags=["platform"])
 DELETION_DAYS = 30
 SECRET_COLUMNS = {"password_hash", "manager_pin_hash", "token_hash", "csrf_token", "key_hash",
-                  "content"}
+                  "content", "credentials"}
 
 
 # ===================================================================== platform auth

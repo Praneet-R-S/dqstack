@@ -881,6 +881,69 @@ class Attachment(IdMixin, CreatedMixin, Base):
     person_id: Mapped[str | None] = mapped_column(String(32))
 
 
+class Connector(IdMixin, CreatedMixin, Base):
+    """A link to another system a company already uses (connectors/): Tally, Zoho
+    Inventory. One per kind per company. `settings` holds what an Admin chose (ledger
+    names, the warehouse-to-store map); `credentials` holds tokens and client secrets,
+    encrypted (connectors/secrets.py) and never sent to a browser or exported.
+    `cursor` is where the last successful sync stopped, per document kind."""
+    __tablename__ = "connectors"
+    __table_args__ = (UniqueConstraint("company_id", "kind"),)
+    company_id: Mapped[str] = company_fk()
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)             # tally|zoho
+    # not_connected | connecting | connected | needs_reconnect | ready (Tally: files only)
+    status: Mapped[str] = mapped_column(String(20), default="not_connected", nullable=False)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    credentials: Mapped[bytes | None] = mapped_column(LargeBinary)
+    cursor: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConnectorRun(IdMixin, Base):
+    """One sync (or one Tally file in or out): when, what it read and changed, and in
+    plain words why it failed. The import jobs it made are listed so each can be
+    opened, and undone, on the Imports screen."""
+    __tablename__ = "connector_runs"
+    __table_args__ = (Index("ix_connector_run_company_started", "company_id", "started_at"),)
+    company_id: Mapped[str] = company_fk()
+    connector_id: Mapped[str] = mapped_column(String(32), ForeignKey("connectors.id",
+                                                                     ondelete="CASCADE"),
+                                              index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    trigger: Mapped[str] = mapped_column(String(16), default="schedule", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                                 nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    import_job_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)      # plain-language outcome
+    error: Mapped[str | None] = mapped_column(Text)        # technical detail, for support
+    person_id: Mapped[str | None] = mapped_column(String(32))
+
+
+class ConnectorDoc(IdMixin, Base):
+    """The last version seen of each outside document a sync reads (a Zoho item,
+    invoice or sales order), reduced to what DQ-Stack uses. A day's sales are rebuilt
+    from every document of that day, so a changed or voided invoice corrects its day
+    instead of adding to it, and an unchanged one is recognised and skipped."""
+    __tablename__ = "connector_docs"
+    __table_args__ = (UniqueConstraint("connector_id", "doc_kind", "external_id"),
+                      Index("ix_connector_doc_day", "connector_id", "doc_kind", "day"))
+    company_id: Mapped[str] = company_fk()
+    connector_id: Mapped[str] = mapped_column(String(32), ForeignKey("connectors.id",
+                                                                     ondelete="CASCADE"),
+                                              nullable=False)
+    doc_kind: Mapped[str] = mapped_column(String(16), nullable=False)    # item|invoice|salesorder
+    external_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    day: Mapped[date | None] = mapped_column(Date)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    data: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class PlatformStatus(Base):
     """Small facts about the running system, for the platform's health page: the
     worker's last pass, the last backup check. Not company data."""

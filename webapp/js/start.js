@@ -14,7 +14,7 @@
     { label: "Buying", items: ["#/orders", "#/suppliers"] },
     { label: "Selling", items: ["#/checkout", "#/bills", "#/day-close", "#/sales"] },
     { label: "Insight", items: ["#/forecasts", "#/reports", "#/model"] },
-    { label: "Company", items: ["#/imports", "#/alerts", "#/settings", "#/activity"] }
+    { label: "Company", items: ["#/imports", "#/connectors", "#/alerts", "#/settings", "#/activity"] }
   ];
   var PUBLIC = ["#/signin", "#/signup", "#/forgot", "#/reset/:token", "#/invite/:token"];
   /* A cashier's app is the till (section 2: "bills customers on the Checkout screen"):
