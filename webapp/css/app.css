@@ -75,9 +75,11 @@ a { color: var(--ui-accent); }
 .save-status[data-kind="busy"]::before { content: "● "; color: var(--series-forecast); }
 .save-status[data-kind="attention"] { color: var(--state-attention); }
 .save-status[data-kind="risk"] { color: var(--state-risk); }
-.bell { position: relative; display: inline-grid; place-items: center; width: var(--tap); height: var(--tap); border-radius: 50%; color: var(--text-secondary); text-decoration: none; }
+.bell { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: var(--tap); padding: 0 12px; border-radius: 999px; color: var(--text-secondary); text-decoration: none; font-weight: 500; }
+.bell-icon { display: inline-grid; place-items: center; }
+.bell-icon svg { display: block; }
 .bell:hover { background: var(--bg-hover); }
-.bell-count { position: absolute; top: 4px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font: 600 11px/18px var(--font-num); text-align: center; background: var(--state-attention); color: var(--bg-base); }
+.bell-count { position: static; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font: 600 11px/18px var(--font-num); text-align: center; background: var(--state-attention); color: var(--bg-base); }
 .bell-count[data-kind="risk"] { background: var(--state-risk); }
 .account-wrap { position: relative; }
 .account { width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-primary); font: 600 13px var(--font-ui); cursor: pointer; }

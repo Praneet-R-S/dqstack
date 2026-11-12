@@ -88,7 +88,10 @@
     search.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && search.value.trim()) DQ.go("#/stock?q=" + encodeURIComponent(search.value.trim()));
     });
-    var bell = h("a", { class: "bell", href: "#/alerts", "aria-label": "Alerts" }, h("span", { class: "bell-icon", "aria-hidden": "true" }, "●"), h("span", { class: "bell-count", id: "bell-count", hidden: true }));
+    /* The alerts link says its name: a bell icon and the word, with the count beside it. */
+    var bellIcon = h("span", { class: "bell-icon", "aria-hidden": "true" });
+    bellIcon.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+    var bell = h("a", { class: "bell", href: "#/alerts" }, bellIcon, h("span", { class: "bell-label" }, t("Alerts")), h("span", { class: "bell-count", id: "bell-count", hidden: true }));
     var me = DQ.me.person;
     var menuBtn = h("button", { class: "account", type: "button", "aria-haspopup": "true", "aria-expanded": "false" }, initials(me.name));
     var menu = h("div", { class: "account-menu", hidden: true },
@@ -120,6 +123,9 @@
       el.hidden = !c.open;
       el.textContent = c.open > 99 ? "99+" : String(c.open);
       el.setAttribute("data-kind", c.risk ? "risk" : "attention");
+      var link = el.parentNode;
+      if (c.open) link.setAttribute("aria-label", t("Alerts") + ": " + el.textContent);
+      else link.removeAttribute("aria-label");
     }, function () { /* the bell is best effort */ });
   }
 
