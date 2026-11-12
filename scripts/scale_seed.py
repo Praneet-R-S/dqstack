@@ -126,15 +126,18 @@ def seed(args) -> int:
              "WHERE st.company_id = :c AND pr.company_id = :c")
     opening = args.opening_units * 1000
     with eng.begin() as conn:
+        # The company id comes from the store row, not from :c again: PostgreSQL types a
+        # parameter once per statement, and :c in the WHERE (varchar) and in the select
+        # list (text) are inconsistent there.
         n_soh = _insert_select(conn, StockOnHand.__table__, {
-            "company_id": ":c", "store_id": "st.id", "product_id": "pr.id",
+            "company_id": "st.company_id", "store_id": "st.id", "product_id": "pr.id",
             "on_hand_milli": str(opening), "avg_cost_paise": "700", "known": ":yes",
             "known_since": ":opened", "opening_milli": str(opening),
             "baseline_at": ":opened", "last_movement_at": ":opened"}, cross,
             {**p, "yes": True})
         n_mv = _insert_select(conn, StockMovement.__table__, {
-            "id": new_id, "company_id": ":c", "store_id": "st.id", "product_id": "pr.id",
-            "qty_milli": str(opening), "type": "'opening'", "source_type": "'scale_seed'",
+            "id": new_id, "company_id": "st.company_id", "store_id": "st.id",
+            "product_id": "pr.id", "qty_milli": str(opening), "type": "'opening'", "source_type": "'scale_seed'",
             "unit_cost_paise": "700", "at": ":opened"}, cross, p)
     with eng.begin() as conn:
         if pg:
