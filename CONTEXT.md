@@ -209,8 +209,8 @@ Numbers move between runs; treat `artifacts/metrics.json` as authoritative and t
   WRMSSE, MASE and bias *identical* to the uncalibrated arm — exactly what the
   median-anchor design intends.
 - **The critical fractile beats a blanket 95% service level in 75/75 cost scenarios**
-  (holding 0.33×–3×, markdown 0.25×–4×, margin 0.6×–1.5×), mean advantage ~$91k,
-  never below ~$11.9k (C18 full run). This is the examiner-proof answer to "what if your
+  (holding 0.33×–3×, markdown 0.25×–4×, margin 0.6×–1.5×), mean advantage ~$94k,
+  never below ~$12.6k (C19 full run). This is the examiner-proof answer to "what if your
   holding cost is wrong".
 - **The ensemble owns bias**: |bias| ~0.06 against ~0.14 for the best single model,
   better at 8/8. Every individual candidate under-forecasts by 13–36%; only the
@@ -1318,7 +1318,7 @@ its live headline and one click in, three numbered tiles for the work in order.
 - Training **reproduces** within 0.06% on every metric (full retrain, compared against
   the previous `metrics.json`).
 - Bias was scored on the **median**; on zero-heavy skewed demand that reads 12–17% low by
-  construction. New `evaluate.mean_from_quantiles()` / `bias_mean`: orders forecast −4.3%.
+  construction. New `evaluate.mean_from_quantiles()` / `bias_mean`: orders forecast −4.1% (C19).
 - Coverage counted ties at zero as hits. New `strict_after`, `tie_aware_gap`,
   `tie_aware_ok`. Upper range (≥75%, sets stock) honest within 1 point. **Lower tail,
   fixed in C18**: it was honest in sample (0.050/0.100/0.251); the 10% was out of sample.
@@ -1336,6 +1336,17 @@ its live headline and one click in, three numbered tiles for the work in order.
   backtest, fill −0.2 to −0.4 pt. **Open:** the orders' upper levels run 2–4 points under
   (P90 holds 86% over the backtest; uncalibrated, 89%): upper offsets from the calibration
   window do not carry forward. `test_calibration_lower_tail.py`, `test_calibration_paths.py`.
+- **Upper levels checked forward in time (C19).** Stage 6 fits an upper-level offset on
+  the earlier conformal origins, keeps it only if it lowers that level's pinball loss on
+  the latest origin, and re-estimates a kept one on that origin (`calibrate.py` rule 4;
+  the pipeline passes each row's origin to all three calibrators). Floors and median
+  untouched; a fit without origins, and every saved model, is unchanged. Quick run (4
+  origins): orders P75/P90/P95 72.1/87.0/92.5% (was 71.4/85.2/91.4%), WSPL better at 4/4
+  origins, margin +0.09%. Full run (8 origins): the latest conformal origin still shows the
+  surplus, so every upper offset is kept; P90 stays 86.0% (uncalibrated 88.8%), WSPL
+  +0.07%, margin +0.06% (higher at 8/8 origins). Kept because it is never worse on margin
+  and clearly better where the drift has settled; it does **not** close the full run's gap
+  (see section 7). `test_calibration_time_guard.py`.
 - The leaderboard's "DQ-Stack (full)" is the *reconciled* forecast (for totals; ~18% worse
   at product level by design — totals get 30–40% better). Orders read the unreconciled one
   (`for_decisions=False`). New row **"DQ-Stack (as issued for orders)" = 0.691**, the best
@@ -1502,6 +1513,66 @@ critical-fractile arithmetic of `decide.py` in the browser. The page is generate
 template by a build script kept outside the repository; edit `site/index.html` directly
 and keep `tests/test_site.py` passing (skip link, FAQ markup, legal links, no codes).
 
+**Connectors: Tally and Zoho Inventory** (`dqstack/app/connectors/`, `routes/connectors.py`,
+screen `#/connectors` in `webapp/js/screens-d.js`, migration 0003: `connectors`,
+`connector_runs`, `connector_docs`). Both bring data in only through the Imports pipeline:
+converted rows become an .xlsx import job of an existing kind (`importing.py`), so checks,
+repeat-safety and Undo hold. Tally is file-based: the export is a zip of an "All Masters"
+file (units, groups, a godown per store, ledgers, stock items with HSN and GST) and a
+"Vouchers" file (one sales voucher per store per day by default, B2C, GST by rate as CGST
+and SGST; credit notes for refunds; a purchase voucher per delivery, IGST when the
+supplier's state differs), with ledger names set per company (`{rate}` in a name). The
+import reads Stock Items and Day Book XML, UTF-16 or UTF-8, stripping Tally's illegal
+`&#4;`. Zoho is OAuth with read-only scopes, a per-company app in a chosen data centre;
+syncs are incremental by `last_modified_time`, 90 requests a minute with 429 back-off,
+refresh on 401, one transaction; each day is rebuilt from the kept documents
+(`connector_docs`) so edits and voids correct their day; nightly at 00:30 and on "Sync
+now" via `worker.tick`; failures raise `connector_failed`. Credentials are encrypted with
+Fernet keyed by HKDF from `DQ_SECRET_KEY` (rotating the key forces a reconnect). Tested
+by round trips, synthetic Tally fixtures and a mocked Zoho; not yet tried in a real
+TallyPrime or Zoho organisation (deploy/README.md section 14 has the checklist).
+
+**Hindi** (`webapp/js/i18n.js` before core.js; `i18n-hi.js`, about 700 entries). A
+dictionary keyed by the English text, so untranslated text falls back to English.
+`DQ.h` translates text children and placeholder, title, aria-label, alt and text; joined
+sentences use `DQ.t` templates (`tt`/`ttn`/`tx` in the screens); server messages are
+translated in the browser, whole or by template, with `{n}`, `{pct}`, `{done}`,
+`{total}` matching digits only. Latin digits stay; only month names change. The
+language is per person (`people.language`), set by `PUT /api/auth/language` from the
+sign-in page, the account menu or My alert settings. Covered: sign-in, the frame, Home,
+Today, Stock, Alerts, Count, Receive, Transfers, Wastage, Checkout, Bills and returns, My
+shift. Manager screens and the printed receipt stay English. `tests/test_i18n.py` fails
+when a staff-screen string has no Hindi. A new language is one `i18n-xx.js` file, one
+script tag and one code in `SUPPORTED_LANGUAGES` (`routes/auth.py`). The Hindi needs a
+native speaker's review before clients use it.
+
+**Proven in Docker (Nov 2026; Docker became available).** The point-in-time restore
+drill (`deploy/ci/pitr-drill.sh`) passes against local-folder and S3-compatible storage:
+the last write reached storage 5 to 6 s after it was made, restore to T took 7 to 9 s
+(33 to 36 s with the switch-over; target 4 hours), exactly the rows before T came back
+and the old volume was untouched. It found two bugs, fixed: `dq-pitr` never created
+`WALG_FILE_PREFIX`, so with local storage no backup was ever taken; and
+`restore-to-time.sh` took the current volume to be `<project>_pgdata` while
+docker-compose.yml's default is the fixed `dqstack_pgdata`. The SFTP drop works against
+the real atmoz/sftp image (`tests/app/test_sftp_docker.py`, opt-in with
+`DQ_SFTP_DOCKER_TRIAL=1`): key-only login, the chroot, the upload, and the 10002/10001
+permission split. The whole stack builds and serves over HTTPS through Caddy (for the
+first ~10 s after start Caddy answers 503 until its first health check passes).
+The app suite on PostgreSQL 16 (`DQ_APP_TESTS_ON_POSTGRES=1`, connectors and Hindi
+included): 254 passed, 1 skipped, 23 min; sharded training alone takes ~6 min there,
+which is slow, not hung (pytest's faulthandler timeout crashed the run once on Windows
+while dumping a stack mid-pandas; do not use it). SQLite: 266 engine + 251 app passed.
+
+**Content-Security-Policy** (`main.py`, one per area): no inline script anywhere except
+the public pages' own small scripts, each allowed by its sha256 (computed per response
+by `site_page`); the planner alone may load DuckDB-WASM from jsDelivr
+(`'wasm-unsafe-eval'`, blob workers); the API is `default-src 'none'`; nothing may frame
+any page. Checked in a browser: the landing page's motion, the app (Hindi font
+included) and the planner's in-browser SQL all work under it. Traps: never add an
+inline script or an `on...=` attribute; a new external origin needs adding to the
+policy. The store app also now serves `/planner/series.arrow` (from the demo bundle):
+without it the planner's SQL console had no data when served by the store app.
+
 **Running it.** `python -m dqstack.app` (development, migrates SQLite first);
 `python -m dqstack.app.manage seed-demo --email ...` makes a demo company with a trained
 forecast (login written to the git-ignored `data/demo-login.txt` on this machine);
@@ -1512,6 +1583,12 @@ forecast (login written to the git-ignored `data/demo-login.txt` on this machine
 - **Migrations are now added as revisions** (`0002_signin_extras.py` follows the
   baseline); do not regenerate `0001` any more. The drift test fails if the models and
   migrations disagree.
+- **Use `127.0.0.1`, not `localhost`, in `DQ_TEST_POSTGRES_URL` on Windows.** psycopg
+  tries `::1` first and Docker Desktop's forwarded port can hang there forever, past
+  `connect_timeout`; the PostgreSQL run stalled for hours inside a fixture's connect.
+- **Run the demo pipeline alone.** A `python -m dqstack.pipeline --export` run made while
+  `tests/app` ran beside it came out with different Stage 6 floor factors and had to be
+  redone; run alone, it reproduced a clean run exactly.
 - **Browsers keep the app's files**: without `Cache-Control: no-cache` on `/app` a new
   release ran old JavaScript until a hard reload (fixed in `main.py`).
 - **The app's own log lines were invisible**: uvicorn configures only its loggers, so
@@ -1569,6 +1646,11 @@ for eleven weeks and writing badly for one.
   not misses). Zero-heavy strata get the honest floor 0, which keeps the pooled share
   below a floor under nominal by design, and the reconciled view still goes over at
   origins far from the calibration window, where MinT's leaf error has moved.
+- **Stage 6's upper levels lag a drifting window.** The forward check (C19) drops
+  offsets once the surplus they correct has gone by the latest conformal origin, but
+  cannot see a drift still under way: in the full run the uncalibrated orders forecast
+  holds 89% at P90 over the backtest and the calibrated one 86%. Closing it needs a
+  calibration window nearer the issue date, not a better guard.
 
 ---
 
