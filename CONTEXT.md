@@ -1506,12 +1506,21 @@ API now refuses a file without store and bill number columns. A Forecasts screen
 download) replaces the demo planner in the store app's menu. Phased by the spec itself
 and not built: Hindi, and the Tally and Zoho connectors.
 
-**The public landing page** (`site/index.html`, `site/assets/{css,js}/landing.*`) is
-one trading day in a shop told by scroll, built to the Scroll Craft brief in
-`scrollcraft/builds/dqstack-landing/BRIEF.md`. Its decision card runs the real
-critical-fractile arithmetic of `decide.py` in the browser. The page is generated from a
-template by a build script kept outside the repository; edit `site/index.html` directly
-and keep `tests/test_site.py` passing (skip link, FAQ markup, legal links, no codes).
+**The public landing page** (`site/index.html`, `site/assets/css/dive.css`,
+`site/assets/js/dive.js`) is "The Dive" (Nov 12, replacing the one trading day page,
+which is in git history): scroll is altitude, from a city at dusk down through street,
+shop, shutter, aisle and shelf to one price label that lifts off and becomes the forecast
+card, then back out as the city lights up. Brief, build notes and the shot list in
+`scrollcraft/builds/dqstack-dive/BRIEF.md`. The photographs were supplied by the user;
+`prepare.py` there turns them into `site/assets/img/dive/` (the city split into a sky
+plate and lit and unlit cut outs). Each pinned stage is a stack of levels; level i+1
+sits in level i at `data-anchor` and one homothety moves both (see the header of
+`dive.js`). `shoot.mjs` photographs any scroll position in headless Chrome without
+packages (`node shoot.mjs <url> <dir> <w> <h> [mobile] [rm] [perf]`). Edit
+`site/index.html` directly and keep `tests/test_site.py` passing (one h1, alt on every
+image, no hyphens in copy, FAQ markup equal to its schema, legal links). Before a public
+launch: the photographs show third party brands (Lay's, Coca-Cola, Pepsi and others) and
+the city is New York; confirm the rights, or reshoot as the brief's shot list asks.
 
 **Connectors: Tally and Zoho Inventory** (`dqstack/app/connectors/`, `routes/connectors.py`,
 screen `#/connectors` in `webapp/js/screens-d.js`, migration 0003: `connectors`,

@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>DQ-Stack: order what will sell, from stock you can trust</title>
-  <meta name="description" content="Store operations with demand forecasting built in, for Indian supermarkets and chains. An exact record of every shelf, and every night, tomorrow's stock targets and orders with their reasons.">
-  <meta name="theme-color" content="#000000">
+  <title>DQ-Stack: the right order for every shop, every night</title>
+  <meta name="description" content="Store operations with demand forecasting built in, for Indian supermarkets and chains. Every sale, delivery and count goes into tomorrow's forecast, and each morning every shelf has its order, with the reasons.">
+  <meta name="theme-color" content="#05070D">
   <meta name="color-scheme" content="dark">
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="DQ-Stack">
-  <meta property="og:title" content="DQ-Stack: order what will sell, from stock you can trust">
+  <meta property="og:title" content="DQ-Stack: the right order for every shop, every night">
   <meta property="og:description" content="Store operations with demand forecasting built in, for Indian retailers. Exact stock on every shelf, and orders that see the festival coming.">
   <meta property="og:image" content="/site-assets/og.png">
   <meta property="og:image:width" content="1200">
@@ -18,7 +18,7 @@
   <meta property="og:image:alt" content="DQ-Stack. Order what will sell, from stock you can trust.">
   <meta property="og:locale" content="en_IN">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="DQ-Stack: order what will sell, from stock you can trust">
+  <meta name="twitter:title" content="DQ-Stack: the right order for every shop, every night">
   <meta name="twitter:description" content="Store operations with demand forecasting built in, for Indian retailers.">
   <meta name="twitter:image" content="/site-assets/og.png">
 
@@ -26,17 +26,18 @@
   <link rel="apple-touch-icon" href="/site-assets/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
-  <link rel="preload" as="image" href="/site-assets/img/screens/today-1600.webp" imagesrcset="/site-assets/img/screens/today-960.webp 960w, /site-assets/img/screens/today-1600.webp 1600w" imagesizes="(min-width: 900px) 58vw, 100vw" fetchpriority="high">
-  <link rel="stylesheet" href="/site-assets/css/landing.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+  <link rel="preload" as="image" href="/site-assets/img/dive/city-off.webp" fetchpriority="high">
+  <link rel="preload" as="image" href="/site-assets/img/dive/city-sky.webp">
+  <link rel="stylesheet" href="/site-assets/css/dive.css">
   <script>
     /* Motion styles apply only when scripting works; reduced motion gets the still page.
-       If the main script has not started within four seconds, fall back to the plain page. */
+       If the main script has not started within four seconds, fall back to the still page. */
     (function () {
       var d = document.documentElement;
       d.classList.add("js");
       if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) d.classList.add("rm");
-      setTimeout(function () { if (!window.dqLanding) d.classList.remove("js"); }, 4000);
+      setTimeout(function () { if (!window.dqDive) d.classList.remove("js"); }, 4000);
     })();
   </script>
   <script type="application/ld+json">
@@ -57,9 +58,9 @@
       {"@type": "Question", "name": "Do we need barcode scanners or any new hardware?",
        "acceptedAnswer": {"@type": "Answer", "text": "No. A browser and a spreadsheet are enough to start. Any USB or Bluetooth scanner that types like a keyboard works when you want one, and a phone camera can scan for counts and deliveries."}},
       {"@type": "Question", "name": "We already have billing software. Do we have to replace it?",
-       "acceptedAnswer": {"@type": "Answer", "text": "No. Keep it, and upload the day's sales file or let it send each sale to DQ-Stack as it happens. The DQ-Stack till is optional."}},
+       "acceptedAnswer": {"@type": "Answer", "text": "No. Keep it, and upload the day's sales file or let it send each sale to DQ-Stack as it happens. Tally and Zoho Inventory connect directly. The DQ-Stack till is optional."}},
       {"@type": "Question", "name": "How much sales history do we need?",
-       "acceptedAnswer": {"@type": "Answer", "text": "Eight weeks of daily sales to start. Twelve months lets the forecast learn your festivals, and two to three years is best."}},
+       "acceptedAnswer": {"@type": "Answer", "text": "Two weeks of daily sales give a first estimate, clearly labelled, and eight weeks give full forecasting. Twelve months lets the forecast learn your own festivals, and two to three years is best."}},
       {"@type": "Question", "name": "How do we know the forecast is any good for our stores?",
        "acceptedAnswer": {"@type": "Answer", "text": "Your first forecast is tested on your own most recent weeks of sales, which it has not seen, and you see how close it came before you rely on it. After that it is scored every night against what actually sold."}},
       {"@type": "Question", "name": "What happens when the internet goes down?",
@@ -67,7 +68,7 @@
       {"@type": "Question", "name": "Who can see our data?",
        "acceptedAnswer": {"@type": "Answer", "text": "Each person sees only the stores they are assigned to, and only what their role allows. Every company's data is kept apart. DQ-Stack support can see yours only when an Owner grants access for a set time, and every look is recorded."}},
       {"@type": "Question", "name": "Does it work with Indian festivals and formats?",
-       "acceptedAnswer": {"@type": "Answer", "text": "Yes. Amounts are in rupees with lakh and crore, times are in IST, and national and state festivals come filled in for each store's state. You add local events and closures."}},
+       "acceptedAnswer": {"@type": "Answer", "text": "Yes. Amounts are in rupees with lakh and crore, times are in IST, and national and state festivals come filled in for each store's state. You add local events and closures. Store staff can use the app in Hindi."}},
       {"@type": "Question", "name": "Can we leave and take our data with us?",
        "acceptedAnswer": {"@type": "Answer", "text": "Yes. You can export every record as CSV and Excel, and your data is deleted after a confirmed period."}},
       {"@type": "Question", "name": "Can the DQ-Stack till issue our GST invoices?",
@@ -81,390 +82,265 @@
 
   <header class="bar">
     <nav class="bar-inner" aria-label="Main">
-      <a class="brand" href="/" aria-label="DQ-Stack home"><span class="brand-mark" aria-hidden="true"></span><span class="title-3">DQ-Stack</span></a>
-      <p class="clock" id="clock" aria-hidden="true"><span class="clock-dot"></span><span class="clock-time mono" id="clock-time">22:00</span><span class="clock-label caption-4" id="clock-label">Closing time</span></p>
+      <a class="brand" href="/" aria-label="DQ-Stack home"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">DQ-Stack</span></a>
       <ul class="bar-links">
-        <li><a href="#night" data-nav="night">The night</a></li>
-        <li><a href="#day" data-nav="day">The day</a></li>
-        <li><a href="#questions" data-nav="questions">Questions</a></li>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#team">The team</a></li>
+        <li><a href="#questions">Questions</a></li>
         <li><a href="/app/#/signin">Sign in</a></li>
       </ul>
-      <a class="btn btn-primary button-sm bar-cta" href="/app/#/signup">Set up your first store</a>
-      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="menu" aria-label="Open the menu"><span></span><span></span></button>
+      <a class="btn btn-primary btn-sm bar-cta" href="/app/#/signup">Set up your first store</a>
     </nav>
   </header>
 
-  <div class="menu" id="menu" hidden>
-    <a class="menu-link" href="#night" style="--i:0">The night</a>
-    <a class="menu-link" href="#day" style="--i:1">The day</a>
-    <a class="menu-link" href="#questions" style="--i:2">Questions</a>
-    <a class="menu-link" href="/app/#/signin" style="--i:3">Sign in</a>
-    <a class="btn btn-primary button-md" href="/app/#/signup">Set up your first store</a>
-  </div>
+  <!-- The altitude ruler: where the camera is, and a way to move it. -->
+  <nav class="alt" id="alt" aria-label="Altitude">
+    <p class="alt-read mono" id="alt-read" aria-hidden="true">2 km</p>
+    <ol class="alt-list">
+      <li><a href="#city" data-cam="0"><span class="alt-h mono">2 km</span><span class="alt-n">City</span></a></li>
+      <li><a href="#street" data-cam="1"><span class="alt-h mono">200 m</span><span class="alt-n">Street</span></a></li>
+      <li><a href="#shop" data-cam="2"><span class="alt-h mono">12 m</span><span class="alt-n">Shop</span></a></li>
+      <li><a href="#aisle" data-cam="3"><span class="alt-h mono">4 m</span><span class="alt-n">Aisle</span></a></li>
+      <li><a href="#shelf" data-cam="4"><span class="alt-h mono">1 m</span><span class="alt-n">Shelf</span></a></li>
+      <li><a href="#label" data-cam="5"><span class="alt-h mono">6 cm</span><span class="alt-n">Label</span></a></li>
+    </ol>
+    <span class="alt-dot" id="alt-dot" aria-hidden="true"></span>
+  </nav>
 
   <main id="main">
 
-    <!-- 1 · 22:00 · Closing time -->
-    <section class="act hero" id="top" data-clock="22:00" data-clock-label="Closing time" aria-labelledby="hero-title">
-      <div class="hero-shelf" aria-hidden="true">
-        <div class="rail" data-depth="0.060"><div class="tag"><b>Sandwich bread</b><span class="p">₹45</span><span class="m">Our price</span></div><div class="tag"><b>Curd 400 g</b><span class="p">₹45</span><span class="m">Our price</span></div><div class="tag"><b>Paneer 200 g</b><span class="p">₹90</span><span class="m">MRP ₹95</span><span class="chip exp">Expires 12 Nov</span></div><div class="tag"><b>Toned milk 500 ml</b><span class="p">₹30</span><span class="m">Our price</span><span class="chip ord">On order · 48</span></div><div class="tag"><b>Agarbatti</b><span class="p">₹48</span><span class="m">MRP ₹50</span></div><div class="tag"><b>Clay diyas, pack of 12</b><span class="p">₹110</span><span class="m">MRP ₹120</span><span class="chip low">Low · 6 left</span></div><div class="tag"><b>Detergent powder 1 kg</b><span class="p">₹125</span><span class="m">MRP ₹130</span></div><div class="tag"><b>Dishwash liquid 500 ml</b><span class="p">₹105</span><span class="m">MRP ₹110</span></div></div>
-        <div class="rail" data-depth="0.095"><div class="tag"><b>Ghee 500 ml</b><span class="p">₹325</span><span class="m">MRP ₹340</span><span class="chip low">Low · 3 left</span></div><div class="tag"><b>Groundnut oil 1 L</b><span class="p">₹199</span><span class="m">MRP ₹210</span></div><div class="tag"><b>Sunflower oil 1 L</b><span class="p">₹155</span><span class="m">MRP ₹165</span></div><div class="tag"><b>Bath soap 100 g</b><span class="p">₹42</span><span class="m">MRP ₹45</span></div><div class="tag"><b>Shampoo 180 ml</b><span class="p">₹165</span><span class="m">MRP ₹175</span></div><div class="tag"><b>Toothpaste 150 g</b><span class="p">₹99</span><span class="m">MRP ₹105</span></div><div class="tag"><b>Kabuli chana 1 kg</b><span class="p">₹132</span><span class="m">MRP ₹140</span></div><div class="tag"><b>Moong dal 1 kg</b><span class="p">₹150</span><span class="m">MRP ₹160</span></div></div>
-        <div class="rail" data-depth="0.130"><div class="tag"><b>Toor dal 1 kg</b><span class="p">₹175</span><span class="m">MRP ₹185</span></div><div class="tag"><b>Basmati rice 1 kg</b><span class="p">₹150</span><span class="m">MRP ₹160</span><span class="chip low">Low · 4 left</span></div><div class="tag"><b>Sona masoori rice 5 kg</b><span class="p">₹430</span><span class="m">MRP ₹450</span></div><div class="tag"><b>Whole wheat atta 10 kg</b><span class="p">₹499</span><span class="m">MRP ₹520</span></div><div class="tag"><b>Bhujia 200 g</b><span class="p">₹52</span><span class="m">MRP ₹55</span></div><div class="tag"><b>Glucose biscuits</b><span class="p">₹10</span><span class="m">Our price</span></div><div class="tag"><b>Kaju katli 500 g</b><span class="p">₹460</span><span class="m">MRP ₹480</span><span class="chip out">Out of stock</span></div><div class="tag"><b>Potato chips 50 g</b><span class="p">₹20</span><span class="m">Our price</span></div></div>
-        <div class="rail" data-depth="0.165"><div class="tag"><b>Iodised salt 1 kg</b><span class="p">₹26</span><span class="m">MRP ₹28</span></div><div class="tag"><b>Sugar 1 kg</b><span class="p">₹46</span><span class="m">MRP ₹50</span></div><div class="tag"><b>Tea 500 g</b><span class="p">₹265</span><span class="m">MRP ₹280</span><span class="chip ord">On order · 24</span></div><div class="tag"><b>Onions</b><span class="p">₹40</span><span class="m">MRP ₹45</span></div><div class="tag"><b>Potatoes</b><span class="p">₹34</span><span class="m">MRP ₹38</span></div><div class="tag"><b>Tomatoes</b><span class="p">₹42</span><span class="m">MRP ₹48</span><span class="chip exp">Use by tomorrow</span></div><div class="tag"><b>Sandwich bread</b><span class="p">₹45</span><span class="m">Our price</span></div><div class="tag"><b>Curd 400 g</b><span class="p">₹45</span><span class="m">Our price</span></div></div>
-      </div>
-      <div class="hero-wash" aria-hidden="true"></div>
-      <div class="hero-light" aria-hidden="true"></div>
-      <div class="hero-copy-scrim" aria-hidden="true"></div>
-      <div class="wrap hero-grid">
-        <div class="hero-copy">
-          <h1 class="heading-1 hero-title" id="hero-title">Order what will sell.<br>Trust every number.</h1>
-          <p class="title-1 hero-sub">DQ-Stack keeps an exact record of every shelf in every store. Every night it turns your own sales into tomorrow's stock targets and orders, each with its range and its reason.</p>
-          <div class="hero-actions"><a class="btn btn-primary button-md" href="/app/#/signup">Set up your first store</a></div>
-          <p class="caption-2 hero-proof">Before you rely on it, the forecast is tested on your own recent weeks of sales, and you see the score.</p>
-        </div>
-      </div>
-      <figure class="hero-device">
-        <div class="display">
-          <img src="/site-assets/img/screens/today-1600.webp" srcset="/site-assets/img/screens/today-960.webp 960w, /site-assets/img/screens/today-1600.webp 1600w" sizes="(min-width: 900px) 58vw, 100vw" width="1600" height="1000" alt="The Today screen in DQ-Stack: each product worth a look, with its forecast for the next seven days, the likely range, the stock target, and a curve of what being wrong would cost." fetchpriority="high">
-        </div>
-      </figure>
-      <div class="receipt" aria-hidden="true"><div class="receipt-paper">      Sharma Supermarkets
-         Pune, Kothrud
-Bill 0412                  21:58
-────────────────────────────────
-Basmati rice 1 kg
-  2 x 150.00              300.00
-Clay diyas, pack of 12
-  3 x 110.00              330.00
-Toned milk 500 ml
-  4 x 30.00               120.00
-────────────────────────────────
-Total                     750.00
-incl. GST                  14.29
-UPI                       750.00
-           Thank you</div></div>
-    </section>
+    <!-- THE DIVE: one camera, from the whole city to one number on one shelf label. -->
+    <section class="dive scene" id="dive" data-length="1040" aria-label="From the city to one shelf label">
+      <span class="mark" id="city" style="--at:0"></span>
+      <span class="mark" id="street" style="--at:200"></span>
+      <span class="mark" id="shop" style="--at:310"></span>
+      <span class="mark" id="aisle" style="--at:465"></span>
+      <span class="mark" id="shelf" style="--at:545"></span>
+      <span class="mark" id="label" style="--at:790"></span>
 
-    <!-- 2 · 22:04 · The guess -->
-    <section class="act guess track" id="guess" data-clock="22:04" data-clock-label="Before the order" data-track aria-labelledby="guess-title">
-      <div class="sticky">
-        <div class="wrap guess-grid">
-          <div class="guess-lines">
-            <h2 class="sr-only" id="guess-title">The nightly guess</h2>
-            <p class="heading-3 kline" data-at="0.04">Every night, someone decides what to order.</p>
-            <p class="heading-3 kline" data-at="0.27">Too little, and the shelf is empty when the customer comes.</p>
-            <p class="heading-3 kline" data-at="0.49">Too much, and it expires in the back.</p>
-            <p class="heading-3 kline last" data-at="0.71">Both cost money. Neither shows up in the books.</p>
-          </div>
-          <div class="guess-art" aria-hidden="true">
-            <div class="flip" data-at="0.27">
-              <div class="flip-inner">
-                <div class="flip-face front"><span class="caption-4 ink-2">Kaju katli 500 g</span><span class="p">₹460</span><span class="caption-5 ink-3 mono">MRP ₹480</span></div>
-                <div class="flip-face back"><span class="caption-4 ink-2">Kaju katli 500 g</span><span class="stamp red">Out of stock</span><span class="caption-5 ink-3 mono">Saturday 11:40</span></div>
-              </div>
-            </div>
-            <div class="crate" data-at="0.49">
-              <span class="caption-4 ink-2">Paneer 200 g · back store</span>
-              <div class="crate-packs"><span></span><span></span><span></span><span></span><span></span><span></span></div>
-              <span class="stamp amber">Expired · ₹444 written off</span>
-            </div>
+      <div class="stage" id="dive-stage">
+        <div class="lvl" aria-hidden="true" data-w="1200" data-h="800" data-focus="620,360">
+          <div class="box"><img class="fill" src="/site-assets/img/dive/city-sky.webp" alt="Dusk sky over the city." width="1200" height="800" decoding="async"></div>
+          <p class="hero-word" aria-hidden="true">Every shop in this city makes the same guess tonight.</p>
+          <div class="box"><canvas class="fill city" width="1200" height="800" data-lights="0.18"></canvas></div>
+        </div>
+        <div class="lvl" aria-hidden="true" data-w="1672" data-h="941" data-focus="875,520" data-anchor="690,560">
+          <div class="box"><img class="fill" src="/site-assets/img/dive/street.webp" alt="A shopping street at dusk." width="1672" height="941" decoding="async" loading="lazy"></div>
+        </div>
+        <div class="lvl" aria-hidden="true" data-w="1672" data-h="941" data-focus="770,540" data-anchor="875,670">
+          <div class="box">
+            <img class="fill" src="/site-assets/img/dive/front.webp" alt="A supermarket front." width="1672" height="941" decoding="async" loading="lazy">
+            <div class="shutter" style="left:19.9%;top:27.4%;width:62.1%;height:61%"><div class="roll"></div><div class="spill"></div></div>
           </div>
         </div>
-      </div>
-    </section>
-
-    <!-- 3 · 22:10 · The ledger -->
-    <section class="act ledger track" id="ledger" data-clock="22:10" data-clock-label="Counting up" data-track aria-labelledby="ledger-title">
-      <div class="sticky">
-        <div class="wrap ledger-grid">
-          <div class="ledger-art">
-            <div class="note" aria-hidden="true">
-              <p class="caption-3">RICE 1 KG</p>
-              <p class="mono">48</p><p class="mono">52?</p><p class="caption-4">count again tomorrow</p>
-              <svg class="scribble" viewBox="0 0 300 180" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M18 62 C60 40, 90 86, 130 52" stroke="#2B2410" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M20 102 C64 82, 96 124, 140 92" stroke="#2B2410" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
-            </div>
-            <div class="ledger-card">
-              <table class="ledger-table">
-                <caption>Basmati rice 1 kg · Pune, Kothrud · every movement, newest last</caption>
-                <thead><tr><th scope="col">When</th><th scope="col">What</th><th scope="col">By</th><th scope="col" class="num">Change</th><th scope="col" class="num">On hand</th></tr></thead>
-                <tbody>
-                  <tr data-bal="40"><td class="mono">01 Nov 09:12</td><td class="what">Opening stock</td><td>Arjun Patil</td><td class="num plus">+40</td><td class="num">40</td></tr>
-                  <tr data-bal="64"><td class="mono">02 Nov 11:20</td><td class="what">Delivery from Fresh Farms</td><td>Kabir Khan</td><td class="num plus">+24</td><td class="num">64</td></tr>
-                  <tr data-bal="62"><td class="mono">02 Nov 18:41</td><td class="what">Sale, one bill</td><td>Till 1</td><td class="num minus">−2</td><td class="num">62</td></tr>
-                  <tr data-bal="53"><td class="mono">03 Nov 20:05</td><td class="what">Sales, 6 bills</td><td>Till 1</td><td class="num minus">−9</td><td class="num">53</td></tr>
-                  <tr data-bal="52"><td class="mono">04 Nov 16:30</td><td class="what">Damaged, torn bag</td><td>Kabir Khan</td><td class="num minus">−1</td><td class="num">52</td></tr>
-                  <tr data-bal="53"><td class="mono">05 Nov 19:02</td><td class="what">Customer return</td><td>Chirag Desai</td><td class="num plus">+1</td><td class="num">53</td></tr>
-                  <tr data-bal="50"><td class="mono">06 Nov 21:14</td><td class="what">Count, approved by Arjun Patil</td><td>Kabir Khan</td><td class="num minus">−3</td><td class="num">50</td></tr>
-                </tbody>
-              </table>
-              <div class="ledger-foot"><span class="caption-4 ink-3">On hand, the sum of every line</span><span class="mono" id="ledger-total">50</span></div>
-            </div>
+        <div class="lvl" aria-hidden="true" data-w="735" data-h="1103" data-focus="368,560" data-anchor="865,560">
+          <div class="box"><img class="fill" src="/site-assets/img/dive/aisle.webp" alt="A supermarket aisle." width="735" height="1103" decoding="async" loading="lazy"></div>
+        </div>
+        <div class="lvl" aria-hidden="true" data-w="1448" data-h="1086" data-focus="724,560" data-anchor="368,610">
+          <div class="box">
+            <img class="fill" src="/site-assets/img/dive/shelf-gaps.webp" alt="A shelf with empty spaces." width="1448" height="1086" decoding="async" loading="lazy">
+            <img class="fill wipe" src="/site-assets/img/dive/shelf-over.webp" alt="A shelf crowded with stock near expiry." width="1448" height="1086" decoding="async" loading="lazy">
+            <span class="wipe-line"></span>
           </div>
-          <div class="ledger-copy">
-            <h2 class="heading-2" id="ledger-title">Stock is never typed over.</h2>
-            <p class="body-3">Every bill, delivery, count and write off is a line with who, when and why. What is on the shelf is the sum of those lines, so any number can be traced back.</p>
-            <p class="caption-2 ink-3">A mistake is fixed with a new line, never by changing an old one.</p>
+        </div>
+        <div class="lvl backed" aria-hidden="true" data-w="1448" data-h="1086" data-focus="744,760" data-anchor="600,560" data-fit="430,852,1058,1040">
+          <div class="backdrop" style="background-image:url(/site-assets/img/dive/label.webp)"></div>
+          <div class="box">
+            <img class="fill" src="/site-assets/img/dive/label.webp" alt="A packet of chips above its price label." width="1448" height="1086" decoding="async" loading="lazy">
+            <span class="slot" style="left:29.7%;top:78.4%;width:43.4%;height:17.5%"></span>
+            <span class="ring" style="left:29.7%;top:78.5%;width:43.4%;height:17.3%"></span>
+          </div>
+          <div class="dim"></div>
+        </div>
+
+        <!-- The signature: the paper label lifts off the shelf and becomes the forecast. -->
+        <div class="card-face" id="card-face" aria-hidden="true"><span class="cf-p"><span class="cf-rs">₹</span>30</span><span class="cf-n">Lay's<br>Classic Chips<br>52 g</span></div>
+        <div class="card" id="card">
+          <div class="card-y"></div>
+          <div class="card-body">
+            <p class="card-k mono">Example forecast</p>
+            <p class="card-name">Lay's Classic Chips 52 g</p>
+            <div class="card-row card-range">
+              <span class="card-l">Next 7 days</span>
+              <span class="range" aria-hidden="true"><span class="range-band"></span><span class="range-dot"></span></span>
+              <span class="card-v">likely <b>42</b>, between 31 and 58</span>
+            </div>
+            <dl class="card-facts">
+              <div><dt>On the shelf</dt><dd class="mono">18</dd></div>
+              <div><dt>Target</dt><dd class="mono">42</dd></div>
+              <div><dt>Case</dt><dd class="mono">12</dd></div>
+            </dl>
+            <p class="card-order"><span>Order</span><b class="mono" id="card-n">24</b><span class="card-cases">2 cases</span></p>
+            <p class="card-why">Weekend ahead, and Diwali is on the calendar.</p>
+          </div>
+        </div>
+
+        <div class="cues">
+          <div class="cue cue-hero" data-at="0" data-span="70" data-fadein="0">
+            <h1 class="hero-title"><span class="h1-visual">Every shop in this city makes the same guess tonight.</span></h1>
+            <img class="still" src="/site-assets/img/dive/city.webp" alt="A city at dusk seen from above, its towers starting to light up." width="1200" height="800" loading="lazy">
+            <p class="lead">How much to order for tomorrow. DQ-Stack turns that guess into a number you can trust, for every product on every shelf.</p>
+            <p class="cue-actions"><a class="btn btn-primary btn-md" href="/app/#/signup">Set up your first store</a><a class="btn btn-ghost btn-md" href="#how">How it works</a></p>
+          </div>
+          <div class="cue cue-street pos-lead" data-at="190" data-span="120">
+            <img class="still" src="/site-assets/img/dive/street.webp" alt="A shopping street at dusk, shop windows lit, people walking." width="1672" height="941" loading="lazy">
+            <h2 class="h2">One street. Every shop on it closes with the same question.</h2>
+          </div>
+          <div class="cue cue-shop pos-low panel" data-at="305" data-span="115">
+            <img class="still" src="/site-assets/img/dive/front.webp" alt="A supermarket front with its shutter up and the aisles lit." width="1672" height="941" loading="lazy">
+            <h2 class="h2">Behind every shutter, someone decides what to order for tomorrow.</h2>
+            <p class="body">Most nights, it is a guess.</p>
+          </div>
+          <div class="cue cue-shelf pos-split" data-at="540" data-span="170">
+            <img class="still" src="/site-assets/img/dive/shelf-gaps.webp" alt="A shelf with empty spaces where snacks should be." width="1448" height="1086" loading="lazy">
+            <h2 class="h2 split-title panel">Two ways to get it wrong.</h2>
+            <p class="split-a"><b>Too little.</b> The shelf is empty when the customer comes, and the sale walks out of the door.</p>
+            <img class="still" src="/site-assets/img/dive/shelf-over.webp" alt="A shelf crowded with drinks and chips marked near expiry and half price." width="1448" height="1086" loading="lazy">
+            <p class="split-b"><b>Too much.</b> The stock sits until it nears expiry, then leaves at half price.</p>
+          </div>
+          <div class="cue cue-label pos-side panel" data-at="785" data-span="255" data-fadeout="0">
+            <img class="still" src="/site-assets/img/dive/label.webp" alt="A packet of chips on a shelf above its yellow price label." width="1448" height="1086" loading="lazy">
+            <h2 class="h2">DQ-Stack turns every label into one number.</h2>
+            <p class="body">Every sale, delivery, count and festival goes into tomorrow's forecast. Each morning the order is waiting, with the range it came from and the reason for it.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 4 · 01:00 · Overnight -->
-    <section class="act night" id="night" data-clock="01:00" data-clock-label="Overnight run" aria-labelledby="night-title">
-      <div class="wrap night-wrap">
-        <div class="night-head">
-          <h2 class="heading-2" id="night-title">While the store sleeps, the forecast runs.</h2>
-          <p class="body-3">It reads your own sales, stock, prices and calendar, one company at a time. It runs apart from the tills, so a slow night never slows a bill.</p>
+    <!-- HOW: the method, real screens travelling sideways. -->
+    <section class="how scene" id="how" data-length="320" aria-labelledby="how-title">
+      <div class="how-pin">
+        <div class="how-head wrap">
+          <h2 class="h2" id="how-title">How the number is made.</h2>
+          <p class="body">The same loop, every night, for every product in every store.</p>
         </div>
-        <div>
-          <ol class="board" aria-label="The overnight run, step by step">
-            <li data-flip><span class="t mono">01:00</span><span class="what body-3">Add up each day's sales, and mark the days a shelf was empty</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip><span class="t mono">01:01</span><span class="what body-3">Check the data is complete and fresh</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip><span class="t mono">01:02</span><span class="what body-3">Forecast 28 days for every product in every store</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip><span class="t mono">01:04</span><span class="what body-3">Set stock targets from margin, shelf life and the range</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip><span class="t mono">01:05</span><span class="what body-3">Suggest orders by supplier, rounded to whole cases</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip><span class="t mono">01:06</span><span class="what body-3">Rank the products worth a look in the morning</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip><span class="t mono">01:07</span><span class="what body-3">Score yesterday's forecast against what sold</span><span class="st mono" data-to="DONE">WAITING</span></li>
-            <li data-flip class="last"><span class="t mono">06:00</span><span class="what body-3">Ready for the morning</span><span class="st mono" data-to="READY">LATER</span></li>
-          </ol>
-          <p class="caption-2 night-note">If a night ever fails, yesterday's forecast stays in place with its age shown on every screen, and an admin is told.</p>
-        </div>
-      </div>
-      <div class="silence" aria-hidden="true"></div>
-    </section>
-
-    <!-- 5 · 01:03 · Nine days to Diwali (the peak) -->
-    <section class="act festival track" id="festival" data-clock="01:03" data-clock-label="Nine days to Diwali" data-clock-short="To Diwali" data-track aria-labelledby="fest-title">
-      <div class="sticky fest-frame">
-        <div class="fest-warm" aria-hidden="true"></div>
-        <canvas class="fest-canvas" id="fest-canvas" role="img" aria-label="Chart of clay diya sales in one store: two weeks of ordinary sales, then a forecast for the next sixteen days with its likely range. The forecast rises into Dhanteras and Diwali and falls after. Three deliveries arrive before the festival, and the stock on the shelf stays above zero through Diwali."></canvas>
-        <div class="fest-copy">
-          <div class="fc fc-1" data-in="0" data-out="0.16"><h2 class="heading-1" id="fest-title">Diwali is nine days away.</h2><p class="title-2">Clay diyas, pack of 12, in one store. Sample figures.</p></div>
-          <div class="fc fc-2" data-in="0.16" data-out="0.34"><p class="heading-5">The range is honest. It widens where the forecast is less sure.</p></div>
-          <div class="fc fc-3" data-in="0.34" data-out="0.52"><p class="heading-5">Orders leave in time for the supplier's lead time, in whole cases.</p></div>
-          <div class="fc fc-4" data-in="0.52" data-out="0.73"><p class="heading-5">It plans near the top of the range. On Diwali an empty shelf costs more than a pack left over, and diyas keep a year.</p></div>
-          <div class="fc fc-5" data-in="0.73" data-out="1.01"><p class="heading-2">On the day, the shelf is full.</p><p class="title-2">After the festival the forecast falls back, so nothing waits in the back.</p></div>
-        </div>
-        <ul class="fest-legend caption-4" aria-hidden="true">
-          <li><i style="background:#8F8A9C"></i>Sold</li>
-          <li><i style="background:#F5F3FA"></i>Forecast</li>
-          <li><i style="background:rgba(143,134,255,0.45)"></i>Likely range</li>
-          <li><i style="background:#19B3A3"></i>Planned for</li>
-          <li><i style="background:#D4A63A"></i>Deliveries</li>
-        </ul>
+        <ol class="how-track" id="how-track">
+          <li class="how-item">
+            <p class="how-step mono">During the day</p>
+            <h3 class="h3">Sales, deliveries and counts come in.</h3>
+            <p class="body">From the DQ-Stack till, your own billing software, Tally or a spreadsheet. Stock is never typed over; every movement is written down.</p>
+            <img src="/site-assets/img/screens/checkout-960.webp" srcset="/site-assets/img/screens/checkout-960.webp 960w, /site-assets/img/screens/checkout-1600.webp 1600w" sizes="(min-width: 900px) 46vw, 92vw" alt="The DQ-Stack till with a bill being made." width="1600" height="1000" loading="lazy">
+          </li>
+          <li class="how-item">
+            <p class="how-step mono">Overnight</p>
+            <h3 class="h3">The forecast runs.</h3>
+            <p class="body">Each product gets a range for the days ahead, learned from its own sales, the season and the festivals in your state, and tested on weeks it has not seen.</p>
+            <img src="/site-assets/img/screens/product-960.webp" srcset="/site-assets/img/screens/product-960.webp 960w, /site-assets/img/screens/product-1600.webp 1600w" sizes="(min-width: 900px) 46vw, 92vw" alt="A product page showing its forecast range for the coming days." width="1600" height="1000" loading="lazy">
+          </li>
+          <li class="how-item">
+            <p class="how-step mono">By morning</p>
+            <h3 class="h3">Orders are suggested, with reasons.</h3>
+            <p class="body">The target covers the days until the next delivery, the order rounds to the supplier's case, and every line says why.</p>
+            <img src="/site-assets/img/screens/orders-960.webp" srcset="/site-assets/img/screens/orders-960.webp 960w, /site-assets/img/screens/orders-1600.webp 1600w" sizes="(min-width: 900px) 46vw, 92vw" alt="Suggested orders grouped by supplier, each with its reason." width="1600" height="1000" loading="lazy">
+          </li>
+          <li class="how-item">
+            <p class="how-step mono">At opening</p>
+            <h3 class="h3">You decide the few that need you.</h3>
+            <p class="body">Today shows only what needs a person: an order to approve, a count that does not add up, a product about to run out.</p>
+            <img src="/site-assets/img/screens/today-960.webp" srcset="/site-assets/img/screens/today-960.webp 960w, /site-assets/img/screens/today-1600.webp 1600w" sizes="(min-width: 900px) 46vw, 92vw" alt="The Today screen listing the decisions for the morning." width="1600" height="1000" loading="lazy">
+          </li>
+        </ol>
       </div>
     </section>
 
-    <!-- 6 · the tagline -->
-    <section class="act tagline" id="tagline" aria-label="What DQ-Stack is built on">
-      <div class="wrap">
-        <p class="heading-1 tagline-text" data-words>Exact stock makes a better forecast. A better forecast keeps your stock exact.</p>
-      </div>
-    </section>
-
-    <!-- 7 · 07:30 · The morning (signature) -->
-    <section class="act morning" id="morning" data-clock="07:30" data-clock-label="Morning review" aria-labelledby="morning-title">
-      <div class="wrap morning-grid">
-        <div class="morning-copy">
-          <h2 class="heading-2" id="morning-title">Twenty decisions, not two thousand.</h2>
-          <p class="body-3">Each morning, Today lists the products worth a human look, the most money at risk first. Approve, change the target with a reason, or skip. The small ones approve in one go.</p>
-          <p class="body-2">Try one. Drag the stock target and watch what being wrong costs.</p>
-          <figure class="morning-phone">
-            <div class="phone"><img src="/site-assets/img/screens/m-today-390.webp" srcset="/site-assets/img/screens/m-today-390.webp 390w, /site-assets/img/screens/m-today-780.webp 780w" sizes="148px" width="390" height="844" loading="lazy" decoding="async" alt="Today on a phone: Sona masoori rice 5 kg with its forecast, stock target, suggested order and the cost of being wrong curve."></div>
-            <figcaption class="caption-2">The same curve sits on every product in Today, on a phone or a laptop.</figcaption>
-          </figure>
-        </div>
-
-        <div class="decide" id="decide">
-          <div class="decide-head">
-            <div class="seg" role="radiogroup" aria-label="Product">
-              <button type="button" role="radio" aria-checked="true" data-product="diya">Clay diyas, pack of 12</button>
-              <button type="button" role="radio" aria-checked="false" data-product="katli">Kaju katli 500 g</button>
-            </div>
-            <p class="caption-2 decide-facts" id="decide-facts">Sells for ₹110, costs ₹70, keeps a year.</p>
+    <!-- THE PULL BACK (peak): out of the shop, and the whole city lights up. -->
+    <section class="peak scene" id="peak" data-length="460" aria-label="Back out to the city">
+      <div class="stage" id="peak-stage">
+        <div class="lvl" aria-hidden="true" data-w="1200" data-h="800" data-focus="620,360">
+          <div class="box">
+            <img class="fill" src="/site-assets/img/dive/city-sky.webp" alt="Dusk sky over the city." width="1200" height="800" decoding="async" loading="lazy">
+            <canvas class="fill city" width="1200" height="800" data-lights="0.18"></canvas>
+            <span class="glow"></span>
           </div>
-          <svg class="decide-chart" id="decide-chart" viewBox="0 0 640 300" role="img" aria-labelledby="decide-desc"><desc id="decide-desc">Bars show how likely each level of demand is until the next delivery. The line shows the rupee cost of being wrong at each stock target. The marked point is where DQ-Stack would plan.</desc></svg>
-          <label class="decide-slider" for="decide-target">
-            <span class="row"><span class="caption-3 ink-3">YOUR STOCK TARGET</span><span class="mono" id="decide-value">30</span></span>
-            <input type="range" id="decide-target" min="0" max="80" step="1" value="30" aria-describedby="decide-out">
-          </label>
-          <dl class="decide-out" id="decide-out" aria-live="polite">
-            <div><dt>Short</dt><dd><span class="v" id="o-short">₹0</span><span class="sub" id="o-short-sub">about 0 packs missed</span></dd></div>
-            <div><dt>Left over</dt><dd><span class="v" id="o-over">₹0</span><span class="sub" id="o-over-sub">about 0 packs</span></dd></div>
-            <div class="cost"><dt>Cost of being wrong</dt><dd><span class="v" id="o-cost">₹0</span><span class="sub" id="o-cost-sub">against the best</span></dd></div>
-          </dl>
-          <div class="decide-actions">
-            <button type="button" class="btn btn-ghost button-sm" id="decide-best">Use DQ-Stack's target</button>
-            <p class="caption-2" id="decide-note">DQ-Stack would plan for 38.</p>
+        </div>
+        <div class="lvl" aria-hidden="true" data-w="1672" data-h="941" data-focus="875,520" data-anchor="690,560">
+          <div class="box"><img class="fill" src="/site-assets/img/dive/street.webp" alt="A shopping street at dusk." width="1672" height="941" decoding="async" loading="lazy"></div>
+        </div>
+        <div class="lvl" aria-hidden="true" data-w="1672" data-h="941" data-focus="770,540" data-anchor="875,670">
+          <div class="box"><img class="fill" src="/site-assets/img/dive/front-diwali.webp" alt="The supermarket decorated for Diwali." width="1672" height="941" decoding="async" loading="lazy"></div>
+        </div>
+        <div class="lvl backed" aria-hidden="true" data-w="1448" data-h="1086" data-focus="744,760" data-anchor="850,560" data-fit="430,852,1058,1040">
+          <div class="backdrop" style="background-image:url(/site-assets/img/dive/label.webp)"></div>
+          <div class="box">
+            <img class="fill" src="/site-assets/img/dive/label.webp" alt="A packet of chips above its price label." width="1448" height="1086" decoding="async" loading="lazy">
+            <span class="stamp" style="left:52%;top:62%"><span class="mono">24</span> ordered</span>
           </div>
-          <p class="caption-5 decide-fine">Prices and costs are from the demo store; demand is a sample of nine ordinary days (weekly orders, two day lead time). A pack short costs its margin. A pack left over costs holding, a 16% markdown risk, and spoilage once cover outruns shelf life. These are the rules DQ-Stack uses.</p>
+        </div>
+        <div class="cues">
+          <div class="cue cue-fest pos-trail" data-at="105" data-span="100">
+            <img class="still" src="/site-assets/img/dive/front-diwali.webp" alt="The same supermarket decorated for Diwali with marigolds and lamps." width="1672" height="941" loading="lazy">
+            <h2 class="h2">The festival was in the forecast before the lamps went up.</h2>
+            <p class="body">National and state festivals come filled in. After a year, it learns how your own shops sell through them.</p>
+          </div>
+          <div class="cue cue-every pos-centre" data-at="272" data-span="188" data-fadeout="0">
+            <img class="still" src="/site-assets/img/dive/city.webp" alt="The city at night, every building lit." width="1200" height="800" loading="lazy">
+            <h2 class="h1">Every shop. The right number.</h2>
+            <p class="lead">Each night, for every product in every store you run.</p>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 8 · 09:15 to 22:30 · The team's day (pan) -->
-    <section class="act day track" id="day" data-clock="09:15" data-clock-label="Ordering" data-track aria-labelledby="day-title">
-      <div class="sticky day-frame">
-        <div class="wrap day-head">
-          <h2 class="heading-2" id="day-title">One app for the whole team.</h2>
-          <p class="body-3">Everyone sees only their own stores, and only what their role allows.</p>
-        </div>
-        <div class="day-strip" id="day-strip">
-          <article class="panel" data-clock="09:15" data-clock-label="Ordering">
-            <div class="panel-copy">
-              <p class="panel-time"><span class="mono">09:15</span><span class="caption-4">Purchaser</span></p>
-              <h3 class="heading-4">Orders that explain themselves.</h3>
-              <p class="body-3">Suggested orders arrive grouped by supplier, rounded to whole cases and raised to each supplier's minimum, with the reason on every line. Approve, then send by email, WhatsApp or PDF.</p>
-            </div>
-            <div class="panel-media"><div class="display"><img src="/site-assets/img/screens/orders-960.webp" srcset="/site-assets/img/screens/orders-960.webp 960w, /site-assets/img/screens/orders-1600.webp 1600w" sizes="(min-width: 900px) 560px, 100vw" width="1600" height="1000" loading="lazy" decoding="async" alt="Suggested orders for one store, grouped by supplier, with stock target, on hand, on order, quantity, value and the reason for each line."></div></div>
-          </article>
-          <article class="panel" data-clock="11:20" data-clock-label="Delivery and counts" data-clock-short="Deliveries">
-            <div class="panel-copy">
-              <p class="panel-time"><span class="mono">11:20</span><span class="caption-4">Stock clerk</span></p>
-              <h3 class="heading-4">Deliveries and counts on a phone.</h3>
-              <p class="body-3">Receive against the order and note what arrived damaged. Then count what is due, most valuable first. Small differences post themselves; large ones wait for a manager.</p>
-            </div>
-            <div class="panel-media"><div class="phone"><img src="/site-assets/img/screens/m-count-390.webp" srcset="/site-assets/img/screens/m-count-390.webp 390w, /site-assets/img/screens/m-count-780.webp 780w" sizes="240px" width="390" height="844" loading="lazy" decoding="async" alt="The Count screen on a phone: start a cycle count of what is due, with an option for blind counting."></div></div>
-          </article>
-          <article class="panel" data-clock="18:45" data-clock-label="Evening rush">
-            <div class="panel-copy">
-              <p class="panel-time"><span class="mono">18:45</span><span class="caption-4">Cashier</span></p>
-              <h3 class="heading-4">A till that keeps billing.</h3>
-              <p class="body-3">Scan, take cash, UPI or card, and print the receipt or send it by WhatsApp. If the internet drops, bills wait on the device and go once it is back.</p>
-            </div>
-            <div class="panel-media"><div class="phone"><img src="/site-assets/img/screens/m-checkout-390.webp" srcset="/site-assets/img/screens/m-checkout-390.webp 390w, /site-assets/img/screens/m-checkout-780.webp 780w" sizes="240px" width="390" height="844" loading="lazy" decoding="async" alt="Checkout on a phone with two items in the bill and the total ready to pay."></div></div>
-          </article>
-          <article class="panel" data-clock="21:50" data-clock-label="Day close">
-            <div class="panel-copy">
-              <p class="panel-time"><span class="mono">21:50</span><span class="caption-4">Store manager</span></p>
-              <h3 class="heading-4">Close the day in a minute.</h3>
-              <p class="body-3">Every till has sent its bills, open bills are listed, and the cash is counted against the Z report. A closed day means tonight's forecast learns from complete sales.</p>
-            </div>
-            <div class="panel-media"><div class="display"><img src="/site-assets/img/screens/dayclose-960.webp" srcset="/site-assets/img/screens/dayclose-960.webp 960w, /site-assets/img/screens/dayclose-1600.webp 1600w" sizes="(min-width: 900px) 560px, 100vw" width="1600" height="1000" loading="lazy" decoding="async" alt="Day close: checks that every till has sent its bills, the Z report with totals by payment method, and the cash count."></div></div>
-          </article>
-          <article class="panel" data-clock="22:30" data-clock-label="Reports">
-            <div class="panel-copy">
-              <p class="panel-time"><span class="mono">22:30</span><span class="caption-4">Owner</span></p>
-              <h3 class="heading-4">Every report, in one workbook.</h3>
-              <p class="body-3">Sales, stock value, shrinkage, wastage, forecast accuracy and supplier performance, in Excel, PDF or CSV. Or all of them in one workbook for your accountant.</p>
-            </div>
-            <div class="panel-media"><div class="display"><img src="/site-assets/img/screens/reports-960.webp" srcset="/site-assets/img/screens/reports-960.webp 960w, /site-assets/img/screens/reports-1600.webp 1600w" sizes="(min-width: 900px) 560px, 100vw" width="1600" height="1000" loading="lazy" decoding="async" alt="The Reports page: choose the period and stores once, then download any report or all of them in one Excel workbook."></div></div>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- 9 · Nothing is lost -->
-    <section class="act safe" id="safe" data-clock="23:30" data-clock-label="Shutters down" aria-labelledby="safe-title">
-      <div class="wrap">
-        <div class="safe-head reveal">
-          <h2 class="heading-2" id="safe-title">Nothing is lost silently.</h2>
-          <p class="body-3">A shop goes wrong every day: a dropped connection, a double press, a miscount. DQ-Stack is built so none of it disappears.</p>
-        </div>
-        <ul class="deck">
-          <li class="card deal" style="--i:0">
-            <div class="card-vis" aria-hidden="true"><span>Bills waiting on this till</span><div class="queue" id="queue"><span></span><span></span><span></span><span></span><span></span></div><span class="okline" id="queue-msg">5 waiting · offline</span></div>
-            <h3 class="heading-6">The till keeps going offline.</h3>
-            <p class="body-6">Bills wait on the device in the order they happened, and go once the connection is back. A bill sent twice is counted once.</p>
-          </li>
-          <li class="card deal" style="--i:1">
-            <div class="card-vis" aria-hidden="true"><span>06 Nov 21:14 · Count · −3 · 50</span><span>07 Nov 09:02 · Correction · +1 · 51</span><span class="okline">Old lines stay as they were</span></div>
-            <h3 class="heading-6">Stock is never typed over.</h3>
-            <p class="body-6">A correction is a new line with a reason. On hand is always the sum of every line, and a check proves it.</p>
-          </li>
-          <li class="card deal" style="--i:2">
-            <div class="card-vis" aria-hidden="true"><span>Another company's bill, by its id</span><span class="big">Not found</span></div>
-            <h3 class="heading-6">Each company is kept apart.</h3>
-            <p class="body-6">Every request is checked on the server against the company and the person's stores. Support sees your data only when an Owner grants it, for a set time.</p>
-          </li>
-          <li class="card deal" style="--i:3">
-            <div class="card-vis" aria-hidden="true"><span>21:14 · Arjun Patil · Pune, Kothrud</span><span>Approved a count difference</span><span>Basmati rice 1 kg · 53 → 50</span></div>
-            <h3 class="heading-6">Every change is on the record.</h3>
-            <p class="body-6">Who did what, when and from which device, with the before and after. Nothing in the activity log can be changed or deleted.</p>
-          </li>
-          <li class="card deal" style="--i:4">
-            <div class="card-vis" aria-hidden="true"><span>Restore to</span><span class="big">09 Nov 14:30</span><span>any minute in the last 7 days</span></div>
-            <h3 class="heading-6">Backups you can rewind.</h3>
-            <p class="body-6">The database can be restored to a chosen minute from the last seven days, and a nightly copy is kept for thirty.</p>
-          </li>
-          <li class="card deal" style="--i:5">
-            <div class="card-vis" aria-hidden="true"><span>Export everything</span><span class="big">CSV · Excel</span><span>every record, every store</span></div>
-            <h3 class="heading-6">Leave with everything.</h3>
-            <p class="body-6">Export every record whenever you like. If you leave, your data is deleted after a period you confirm.</p>
-          </li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- 10 · Start -->
-    <section class="act start" id="start" aria-labelledby="start-title">
-      <div class="wrap start-grid">
-        <div class="start-copy reveal">
-          <h2 class="heading-2" id="start-title">Start with one store and a spreadsheet.</h2>
-          <ol class="steps">
-            <li><div><h3 class="title-2">Upload what you have.</h3><p class="body-6">Products, opening stock and daily sales, from your own spreadsheets. Each upload shows a check report before anything changes, and can be undone.</p></div></li>
-            <li><div><h3 class="title-2">See your own backtest.</h3><p class="body-6">Your first forecast is tested on your most recent weeks of sales, and you see how close it came before you rely on it.</p></div></li>
-            <li><div><h3 class="title-2">Run the day.</h3><p class="body-6">Today in the morning, deliveries and counts during the day, day close at night. The forecast does the rest overnight.</p></div></li>
-          </ol>
-          <p class="caption-2 history">Eight weeks of daily sales to start. Twelve months to learn your festivals. Two to three years is best.</p>
-          <ul class="assure"><li>No scanner needed</li><li>Keep your billing software</li><li>Export everything, any time</li></ul>
-        </div>
-        <figure class="start-shot reveal" style="--i:1">
-          <div class="display"><img src="/site-assets/img/screens/setup-960.webp" srcset="/site-assets/img/screens/setup-960.webp 960w, /site-assets/img/screens/setup-1600.webp 1600w" sizes="(min-width: 900px) 640px, 100vw" width="1600" height="1000" loading="lazy" decoding="async" alt="The setup checklist: thirteen steps from an empty company to the first forecast, each ticking itself as the data arrives."></div>
-          <figcaption class="caption-2">The setup checklist ticks itself as your data arrives.</figcaption>
+    <!-- THE TEAM: the people in the shop, as a settling deck. -->
+    <section class="team scene" id="team" data-length="240" aria-labelledby="team-title">
+      <div class="team-pin wrap">
+        <figure class="team-photo">
+          <img src="/site-assets/img/dive/people.webp" alt="A cashier billing a couple at the counter while a colleague carries a crate of vegetables." width="1122" height="1402" loading="lazy">
         </figure>
-      </div>
-    </section>
-
-    <!-- 11 · Questions -->
-    <section class="act questions" id="questions" aria-labelledby="q-title">
-      <div class="wrap q-grid">
-        <h2 class="heading-2" id="q-title">Questions before you start</h2>
-        <div class="faq">
-          <details class="faq-item"><summary class="title-2">Do we need barcode scanners or any new hardware?</summary><div class="faq-body"><p class="body-3">No. A browser and a spreadsheet are enough to start. Any USB or Bluetooth scanner that types like a keyboard works when you want one, and a phone camera can scan for counts and deliveries.</p></div></details>
-          <details class="faq-item"><summary class="title-2">We already have billing software. Do we have to replace it?</summary><div class="faq-body"><p class="body-3">No. Keep it, and upload the day's sales file or let it send each sale to DQ-Stack as it happens. The DQ-Stack till is optional.</p></div></details>
-          <details class="faq-item"><summary class="title-2">How much sales history do we need?</summary><div class="faq-body"><p class="body-3">Eight weeks of daily sales to start. Twelve months lets the forecast learn your festivals, and two to three years is best.</p></div></details>
-          <details class="faq-item"><summary class="title-2">How do we know the forecast is any good for our stores?</summary><div class="faq-body"><p class="body-3">Your first forecast is tested on your own most recent weeks of sales, which it has not seen, and you see how close it came before you rely on it. After that it is scored every night against what actually sold.</p></div></details>
-          <details class="faq-item"><summary class="title-2">What happens when the internet goes down?</summary><div class="faq-body"><p class="body-3">The till keeps billing. Bills are kept on the device in order and sent when the connection returns, and a bill sent twice is counted once. Counting and receiving on a phone keep working too.</p></div></details>
-          <details class="faq-item"><summary class="title-2">Who can see our data?</summary><div class="faq-body"><p class="body-3">Each person sees only the stores they are assigned to, and only what their role allows. Every company's data is kept apart. DQ-Stack support can see yours only when an Owner grants access for a set time, and every look is recorded.</p></div></details>
-          <details class="faq-item"><summary class="title-2">Does it work with Indian festivals and formats?</summary><div class="faq-body"><p class="body-3">Yes. Amounts are in rupees with lakh and crore, times are in IST, and national and state festivals come filled in for each store's state. You add local events and closures.</p></div></details>
-          <details class="faq-item"><summary class="title-2">Can we leave and take our data with us?</summary><div class="faq-body"><p class="body-3">Yes. You can export every record as CSV and Excel, and your data is deleted after a confirmed period.</p></div></details>
-          <details class="faq-item"><summary class="title-2">Can the DQ-Stack till issue our GST invoices?</summary><div class="faq-body"><p class="body-3">It prints receipts with the GST shown. Before you use it as your legal billing system, have your chartered accountant confirm the invoice format. Until then it works as a stock register beside your current billing.</p></div></details>
+        <div class="team-copy">
+          <h2 class="h2" id="team-title">One app for the whole shop.</h2>
+          <ul class="deck" id="deck">
+            <li class="deck-card"><p class="deck-role">Owner</p><p class="body">Every store's stock, sales and margin, and a weekly summary in plain words.</p></li>
+            <li class="deck-card"><p class="deck-role">Store manager</p><p class="body">Approves the morning's orders and the counts that do not add up.</p></li>
+            <li class="deck-card"><p class="deck-role">Purchaser</p><p class="body">Sends each order to the supplier by WhatsApp or email, and checks it in on arrival.</p></li>
+            <li class="deck-card"><p class="deck-role">Cashier</p><p class="body">Bills quickly, keeps billing when the internet drops, in Hindi or English.</p></li>
+          </ul>
         </div>
       </div>
     </section>
 
-    <!-- 12 · 06:00 · Ready -->
-    <section class="act ready" id="ready" data-clock="06:00" data-clock-label="Order ready" aria-labelledby="ready-title">
-      <div class="ready-shelf" aria-hidden="true">
-        <div class="rail" data-depth="0.060"><div class="tag"><b>Sandwich bread</b><span class="p">₹45</span><span class="m">Our price</span><span class="chip ok">In stock</span></div><div class="tag"><b>Curd 400 g</b><span class="p">₹45</span><span class="m">Our price</span><span class="chip ok">In stock</span></div><div class="tag"><b>Paneer 200 g</b><span class="p">₹90</span><span class="m">MRP ₹95</span><span class="chip ok">In stock</span></div><div class="tag"><b>Toned milk 500 ml</b><span class="p">₹30</span><span class="m">Our price</span><span class="chip ok">In stock</span></div><div class="tag"><b>Agarbatti</b><span class="p">₹48</span><span class="m">MRP ₹50</span><span class="chip ok">In stock</span></div><div class="tag"><b>Clay diyas, pack of 12</b><span class="p">₹110</span><span class="m">MRP ₹120</span><span class="chip ok">In stock</span></div><div class="tag"><b>Detergent powder 1 kg</b><span class="p">₹125</span><span class="m">MRP ₹130</span><span class="chip ok">In stock</span></div><div class="tag"><b>Dishwash liquid 500 ml</b><span class="p">₹105</span><span class="m">MRP ₹110</span><span class="chip ok">In stock</span></div></div>
-        <div class="rail" data-depth="0.095"><div class="tag"><b>Ghee 500 ml</b><span class="p">₹325</span><span class="m">MRP ₹340</span><span class="chip ok">In stock</span></div><div class="tag"><b>Groundnut oil 1 L</b><span class="p">₹199</span><span class="m">MRP ₹210</span><span class="chip ok">In stock</span></div><div class="tag"><b>Sunflower oil 1 L</b><span class="p">₹155</span><span class="m">MRP ₹165</span><span class="chip ok">In stock</span></div><div class="tag"><b>Bath soap 100 g</b><span class="p">₹42</span><span class="m">MRP ₹45</span><span class="chip ok">In stock</span></div><div class="tag"><b>Shampoo 180 ml</b><span class="p">₹165</span><span class="m">MRP ₹175</span><span class="chip ok">In stock</span></div><div class="tag"><b>Toothpaste 150 g</b><span class="p">₹99</span><span class="m">MRP ₹105</span><span class="chip ok">In stock</span></div><div class="tag"><b>Kabuli chana 1 kg</b><span class="p">₹132</span><span class="m">MRP ₹140</span><span class="chip ok">In stock</span></div><div class="tag"><b>Moong dal 1 kg</b><span class="p">₹150</span><span class="m">MRP ₹160</span><span class="chip ok">In stock</span></div></div>
-        <div class="rail" data-depth="0.130"><div class="tag"><b>Toor dal 1 kg</b><span class="p">₹175</span><span class="m">MRP ₹185</span><span class="chip ok">In stock</span></div><div class="tag"><b>Basmati rice 1 kg</b><span class="p">₹150</span><span class="m">MRP ₹160</span><span class="chip ok">In stock</span></div><div class="tag"><b>Sona masoori rice 5 kg</b><span class="p">₹430</span><span class="m">MRP ₹450</span><span class="chip ok">In stock</span></div><div class="tag"><b>Whole wheat atta 10 kg</b><span class="p">₹499</span><span class="m">MRP ₹520</span><span class="chip ok">In stock</span></div><div class="tag"><b>Bhujia 200 g</b><span class="p">₹52</span><span class="m">MRP ₹55</span><span class="chip ok">In stock</span></div><div class="tag"><b>Glucose biscuits</b><span class="p">₹10</span><span class="m">Our price</span><span class="chip ok">In stock</span></div><div class="tag"><b>Kaju katli 500 g</b><span class="p">₹460</span><span class="m">MRP ₹480</span><span class="chip ok">In stock</span></div><div class="tag"><b>Potato chips 50 g</b><span class="p">₹20</span><span class="m">Our price</span><span class="chip ok">In stock</span></div></div>
-        <div class="rail" data-depth="0.165"><div class="tag"><b>Iodised salt 1 kg</b><span class="p">₹26</span><span class="m">MRP ₹28</span><span class="chip ok">In stock</span></div><div class="tag"><b>Sugar 1 kg</b><span class="p">₹46</span><span class="m">MRP ₹50</span><span class="chip ok">In stock</span></div><div class="tag"><b>Tea 500 g</b><span class="p">₹265</span><span class="m">MRP ₹280</span><span class="chip ok">In stock</span></div><div class="tag"><b>Onions</b><span class="p">₹40</span><span class="m">MRP ₹45</span><span class="chip ok">In stock</span></div><div class="tag"><b>Potatoes</b><span class="p">₹34</span><span class="m">MRP ₹38</span><span class="chip ok">In stock</span></div><div class="tag"><b>Tomatoes</b><span class="p">₹42</span><span class="m">MRP ₹48</span><span class="chip ok">In stock</span></div><div class="tag"><b>Sandwich bread</b><span class="p">₹45</span><span class="m">Our price</span><span class="chip ok">In stock</span></div><div class="tag"><b>Curd 400 g</b><span class="p">₹45</span><span class="m">Our price</span><span class="chip ok">In stock</span></div></div>
+    <section class="questions" id="questions" aria-labelledby="q-title">
+      <div class="wrap q-grid">
+        <h2 class="h2" id="q-title">Questions before you start</h2>
+        <div class="faq">
+          <details class="faq-item"><summary>Do we need barcode scanners or any new hardware?</summary><div class="faq-body"><p class="body">No. A browser and a spreadsheet are enough to start. Any USB or Bluetooth scanner that types like a keyboard works when you want one, and a phone camera can scan for counts and deliveries.</p></div></details>
+          <details class="faq-item"><summary>We already have billing software. Do we have to replace it?</summary><div class="faq-body"><p class="body">No. Keep it, and upload the day's sales file or let it send each sale to DQ-Stack as it happens. Tally and Zoho Inventory connect directly. The DQ-Stack till is optional.</p></div></details>
+          <details class="faq-item"><summary>How much sales history do we need?</summary><div class="faq-body"><p class="body">Two weeks of daily sales give a first estimate, clearly labelled, and eight weeks give full forecasting. Twelve months lets the forecast learn your own festivals, and two to three years is best.</p></div></details>
+          <details class="faq-item"><summary>How do we know the forecast is any good for our stores?</summary><div class="faq-body"><p class="body">Your first forecast is tested on your own most recent weeks of sales, which it has not seen, and you see how close it came before you rely on it. After that it is scored every night against what actually sold.</p></div></details>
+          <details class="faq-item"><summary>What happens when the internet goes down?</summary><div class="faq-body"><p class="body">The till keeps billing. Bills are kept on the device in order and sent when the connection returns, and a bill sent twice is counted once. Counting and receiving on a phone keep working too.</p></div></details>
+          <details class="faq-item"><summary>Who can see our data?</summary><div class="faq-body"><p class="body">Each person sees only the stores they are assigned to, and only what their role allows. Every company's data is kept apart. DQ-Stack support can see yours only when an Owner grants access for a set time, and every look is recorded.</p></div></details>
+          <details class="faq-item"><summary>Does it work with Indian festivals and formats?</summary><div class="faq-body"><p class="body">Yes. Amounts are in rupees with lakh and crore, times are in IST, and national and state festivals come filled in for each store's state. You add local events and closures. Store staff can use the app in Hindi.</p></div></details>
+          <details class="faq-item"><summary>Can we leave and take our data with us?</summary><div class="faq-body"><p class="body">Yes. You can export every record as CSV and Excel, and your data is deleted after a confirmed period.</p></div></details>
+          <details class="faq-item"><summary>Can the DQ-Stack till issue our GST invoices?</summary><div class="faq-body"><p class="body">It prints receipts with the GST shown. Before you use it as your legal billing system, have your chartered accountant confirm the invoice format. Until then it works as a stock register beside your current billing.</p></div></details>
+        </div>
       </div>
-      <div class="ready-wash" aria-hidden="true"></div>
+    </section>
+
+    <!-- CLOSE: morning, the shutter up, one action. -->
+    <section class="ready" id="ready" aria-labelledby="ready-title">
+      <div class="ready-bg" id="ready-bg" style="background-image:url(/site-assets/img/dive/front.webp)"></div>
+      <div class="ready-wash"></div>
       <div class="wrap ready-inner">
-        <p class="mono ready-time" aria-hidden="true">06:00</p>
-        <h2 class="heading-1 ready-title" id="ready-title">Tomorrow's order is ready.</h2>
-        <p class="title-1">Set up your first store with a browser and a spreadsheet. Add the scanner and the till when you want them.</p>
-        <a class="btn btn-primary button-lg" href="/app/#/signup">Set up your first store</a>
-        <p class="caption-2">Already with us? <a href="/app/#/signin">Sign in</a></p>
+        <h2 class="h1" id="ready-title">Open tomorrow with the right stock.</h2>
+        <p class="lead">Start with one store, a browser and a spreadsheet. Add the scanner, the till and your other stores when you want them.</p>
+        <p class="cue-actions"><a class="btn btn-primary btn-lg" href="/app/#/signup">Set up your first store</a></p>
+        <p class="small">Already with us? <a href="/app/#/signin">Sign in</a></p>
       </div>
     </section>
   </main>
 
   <footer class="foot">
     <div class="wrap foot-grid">
-      <p class="caption-2">DQ-Stack. Store operations with demand forecasting, for Indian retailers.<br>Amounts in rupees. Times in IST.</p>
-      <nav class="foot-links caption-1" aria-label="Footer">
+      <p class="small">DQ-Stack. Store operations with demand forecasting, for Indian retailers.<br>Amounts in rupees. Times in IST.</p>
+      <nav class="foot-links" aria-label="Footer">
         <a href="/privacy.html">Privacy</a>
         <a href="/terms.html">Terms</a>
         <a href="/app/#/signin">Sign in</a>
       </nav>
-      <p class="caption-5">© 2026 DQ-Stack</p>
+      <p class="small">© 2026 DQ-Stack</p>
     </div>
   </footer>
 
-  <script src="/site-assets/js/landing.js" defer></script>
+  <script src="/site-assets/js/dive.js" defer></script>
 </body>
 </html>
