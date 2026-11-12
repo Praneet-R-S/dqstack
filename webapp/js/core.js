@@ -29,12 +29,18 @@
   DQ.routes = [];
 
   /* ---------------------------------------------------------------- DOM */
+  /* Text children and these attributes pass through DQ.tx (js/i18n.js): an English
+     label shows in the person's language when the dictionary has it. */
+  var TR = { text: 1, placeholder: 1, title: 1, "aria-label": 1, alt: 1 };
+  var tx = DQ.tx || function (s) { return s; };
+  var t = DQ.t || function (s) { return s; };
   function h(tag, attrs) {
     var el = document.createElement(tag);
     if (attrs) {
       Object.keys(attrs).forEach(function (k) {
         var v = attrs[k];
         if (v === null || v === undefined || v === false) return;
+        if (TR[k] && typeof v === "string") v = tx(v);
         if (k === "class") el.className = v;
         else if (k === "text") el.textContent = v;
         else if (k === "html") throw new Error("DQ.h never takes html: build nodes instead");
@@ -50,14 +56,15 @@
   function append(el, c) {
     if (c === null || c === undefined || c === false) return;
     if (Array.isArray(c)) { c.forEach(function (x) { append(el, x); }); return; }
-    el.appendChild(c instanceof Node ? c : document.createTextNode(String(c)));
+    el.appendChild(c instanceof Node ? c : document.createTextNode(typeof c === "string" ? tx(c) : String(c)));
   }
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
   DQ.h = h;
   DQ.clear = clear;
 
   /* ---------------------------------------------------------------- formats */
-  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  /* Month names follow the language; digits stay Latin with Indian grouping. */
+  function MONTH(i) { return (DQ.i18n ? DQ.i18n.months() : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])[i]; }
   function group(n) {                       // 1234567 -> 12,34,567
     var neg = n < 0, s = String(Math.abs(Math.trunc(n)));
     if (s.length > 3) {
@@ -107,18 +114,18 @@
     date: function (iso) {                  // 07 Nov 2026
       if (!iso) return "—";
       var p = iso.slice(0, 10).split("-");
-      return p[2] + " " + MONTHS[+p[1] - 1] + " " + p[0];
+      return p[2] + " " + MONTH(+p[1] - 1) + " " + p[0];
     },
-    dayShort: function (iso) { if (!iso) return "—"; var p = iso.slice(0, 10).split("-"); return +p[2] + " " + MONTHS[+p[1] - 1]; },
+    dayShort: function (iso) { if (!iso) return "—"; var p = iso.slice(0, 10).split("-"); return +p[2] + " " + MONTH(+p[1] - 1); },
     time: function (iso) { return iso ? ist(iso).time : "—"; },          // 14:32 (IST)
     dateTime: function (iso) { if (!iso) return "—"; var p = ist(iso); return DQ.fmt.date(p.date) + ", " + p.time + " IST"; },
     ago: function (iso) {
-      if (!iso) return "never";
+      if (!iso) return t("never");
       var m = Math.round((Date.now() - asDate(iso).getTime()) / 60000);
-      if (m < 1) return "just now";
-      if (m < 60) return m + " min ago";
-      if (m < 60 * 36) return Math.round(m / 60) + " h ago";
-      return Math.round(m / 1440) + " days ago";
+      if (m < 1) return t("just now");
+      if (m < 60) return t("{n} min ago", { n: m });
+      if (m < 60 * 36) return t("{n} h ago", { n: Math.round(m / 60) });
+      return t("{n} days ago", { n: Math.round(m / 1440) });
     },
     toMilli: function (text) { var v = parseFloat(String(text).replace(/,/g, "")); return isNaN(v) ? null : Math.round(v * 1000); },
     toPaise: function (text) { var v = parseFloat(String(text).replace(/[₹,\s]|Rs\.?/gi, "")); return isNaN(v) ? null : Math.round(v * 100); },
@@ -132,19 +139,22 @@
     if (!el) return;
     var waiting = DQ.queue ? DQ.queue.count() : 0;
     var text, kind;
-    if (!navigator.onLine) { text = "Offline" + (waiting ? ", " + waiting + " change" + (waiting > 1 ? "s" : "") + " waiting" : ""); kind = "attention"; }
-    else if (pendingWrites > 0) { text = "Saving…"; kind = "busy"; }
-    else if (waiting) { text = "Sending " + waiting + " waiting change" + (waiting > 1 ? "s" : ""); kind = "busy"; }
-    else if (lastError) { text = "Not saved: " + lastError; kind = "risk"; }
-    else { text = "Saved"; kind = "ok"; }
+    if (!navigator.onLine) { text = waiting ? DQ.tn(waiting, "Offline, {n} change waiting", "Offline, {n} changes waiting") : t("Offline"); kind = "attention"; }
+    else if (pendingWrites > 0) { text = t("Saving…"); kind = "busy"; }
+    else if (waiting) { text = DQ.tn(waiting, "Sending {n} waiting change", "Sending {n} waiting changes"); kind = "busy"; }
+    else if (lastError) { text = t("Not saved: {why}", { why: lastError }); kind = "risk"; }
+    else { text = t("Saved"); kind = "ok"; }
     el.textContent = text;
     el.setAttribute("data-kind", kind);
   }
   DQ.paintSave = paintSave;
 
   /* ---------------------------------------------------------------- API */
+  /* The server answers in English; the message is shown in the person's language when
+     the dictionary has it (whole, or by a template), and kept in English as .english. */
   function ApiError(message, status, problems) {
-    var e = new Error(message);
+    var e = new Error(tx(message));
+    e.english = message;
     e.status = status; e.problems = problems || [];
     return e;
   }
@@ -164,7 +174,7 @@
       return read.then(function (data) {
         if (!r.ok) {
           var msg = data && data.error ? data.error : "Something went wrong. Please try again.";
-          if (r.status === 401 && !opts.allow401) DQ.signedOut(msg);
+          if (r.status === 401 && !opts.allow401) DQ.signedOut(tx(msg));
           throw ApiError(msg, r.status, data && data.problems);
         }
         if (write && !opts.quiet) lastError = null;
@@ -176,7 +186,7 @@
       if (write && !opts.quiet) { pendingWrites--; paintSave(); }
       return data;
     }, function (err) {
-      if (write && !opts.quiet) { pendingWrites--; lastError = err.status ? err.message.slice(0, 80) : "no connection"; paintSave(); }
+      if (write && !opts.quiet) { pendingWrites--; lastError = err.status ? err.message.slice(0, 80) : t("no connection"); paintSave(); }
       throw err;
     });
   };
@@ -187,12 +197,12 @@
      "Preparing…" meanwhile; a failure becomes a message, never an error page. */
   DQ.download = function (path, btn) {
     var label = btn ? btn.textContent : null;
-    if (btn) { btn.disabled = true; btn.setAttribute("aria-busy", "true"); btn.textContent = "Preparing…"; }
+    if (btn) { btn.disabled = true; btn.setAttribute("aria-busy", "true"); btn.textContent = t("Preparing…"); }
     function done() { if (btn) { btn.disabled = false; btn.removeAttribute("aria-busy"); btn.textContent = label; } }
     return fetch(path, { credentials: "same-origin" }).then(function (r) {
       if (!r.ok) {
         return r.json().catch(function () { return {}; }).then(function (j) {
-          throw new Error((j && (j.detail || j.message)) || "The file could not be made (" + r.status + ").");
+          throw new Error(tx((j && (j.error || j.detail || j.message)) || "") || t("The file could not be made ({status}).", { status: r.status }));
         });
       }
       var cd = r.headers.get("Content-Disposition") || "";
@@ -204,7 +214,7 @@
         a.href = url; a.download = name; a.style.display = "none";
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
-        DQ.toast("Downloaded " + name + ".");
+        DQ.toast(t("Downloaded {name}.", { name: name }));
         done();
         return name;
       });
@@ -277,7 +287,7 @@
         h("div", { class: "dialog-actions" },
           h("button", { class: "btn btn-ghost", type: "button", onclick: function () { done(false); } }, o.cancelLabel || "Cancel"),
           h("button", { class: "btn " + (o.danger ? "btn-danger" : "btn-primary"), type: "button", onclick: function () {
-            if (reason && reason.value.trim().length < 3) { err.textContent = "Give a reason of a few words."; err.hidden = false; reason.focus(); return; }
+            if (reason && reason.value.trim().length < 3) { err.textContent = t("Give a reason of a few words."); err.hidden = false; reason.focus(); return; }
             done(true);
           } }, o.confirmLabel || "Confirm")));
       document.body.appendChild(dlg);
@@ -320,7 +330,7 @@
         if (err.status && err.status < 500 && err.status !== 401 && err.status !== 429) {
           // The server refused it for a reason a retry will not fix: keep it aside and say so.
           qsave(qload().filter(function (x) { return x.id !== item.id; }));
-          DQ.toast("Not saved: " + item.label + ". " + err.message, { kind: "risk" });
+          DQ.toast(t("Not saved: {what}. {why}", { what: tx(item.label), why: err.message }), { kind: "risk" });
           return DQ.queue.flush();
         }
         paintSave();
@@ -341,7 +351,7 @@
           opts.sub ? h("p", { class: "page-sub text-2" }, opts.sub) : null),
         opts.actions ? h("div", { class: "page-actions" }, opts.actions) : null);
     },
-    fresh: function (label, iso) { return h("span", { class: "fresh", title: iso ? DQ.fmt.dateTime(iso) : "" }, label + " " + (iso ? DQ.fmt.time(iso) : "—")); },
+    fresh: function (label, iso) { return h("span", { class: "fresh", title: iso ? DQ.fmt.dateTime(iso) : "" }, tx(label) + " " + (iso ? DQ.fmt.time(iso) : "—")); },
     badge: function (text, kind) { return h("span", { class: "badge", "data-kind": kind || "neutral" }, text); },
     statusKind: function (status) {
       return { "Out": "risk", "Count needed": "risk", "Low": "attention", "Expiring": "attention", "Overstocked": "excess", "OK": "ok" }[status] || "neutral";

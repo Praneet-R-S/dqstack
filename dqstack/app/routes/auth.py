@@ -137,6 +137,29 @@ def me(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     return me_payload(db, c)
 
 
+# The languages the store app has a dictionary for (webapp/js/i18n-*.js). The person's
+# choice is kept on their account, so it follows them from one till or phone to another.
+SUPPORTED_LANGUAGES = ("en", "hi")
+
+
+class LanguageIn(BaseModel):
+    language: str = Field(min_length=2, max_length=8)
+
+
+@router.put("/language")
+def set_language(body: LanguageIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """The signed-in person's own language. Anyone may set their own, cashiers too."""
+    if body.language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(422, "That language is not available yet.")
+    p = db.get(Person, c.person.id)
+    if p.language != body.language:
+        before = {"language": p.language}
+        p.language = body.language
+        audit.log(db, c, "person.language", "person", p.id, before, {"language": p.language})
+        db.commit()
+    return {"language": p.language}
+
+
 # ------------------------------------------------------------------ password reset
 
 class ForgotIn(BaseModel):

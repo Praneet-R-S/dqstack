@@ -291,6 +291,9 @@ def patch_person(person_id: str, body: PersonPatch, c: Ctx = Depends(ctx),
     if body.name is not None:
         p.name = body.name.strip()
     if body.language is not None:
+        from .auth import SUPPORTED_LANGUAGES
+        if body.language not in SUPPORTED_LANGUAGES:
+            raise HTTPException(422, "That language is not available yet.")
         p.language = body.language
     audit.log(db, c, "person.updated", "person", p.id, before, person_dict(p))
     db.commit()

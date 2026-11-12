@@ -11,6 +11,8 @@
 (function () {
   "use strict";
   var DQ = window.DQ, h = DQ.h, fmt = DQ.fmt, ui = DQ.ui;
+  /* Translation (js/i18n.js): tt(template, vars), ttn(n, one, many, vars), tx(sentence). */
+  var tt = DQ.t, ttn = DQ.tn, tx = DQ.tx;
 
   /* ================================================================ small helpers */
   function lsGet(k, def) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
@@ -28,8 +30,8 @@
     date: function (iso) { return iso && iso.length > 10 ? fmt.date(new Date(new Date(utc(iso)).getTime() + 330 * 60000).toISOString()) : fmt.date(iso); }
   };
   function bare(m, unit) { return fmt.qty(m, unit).replace(/ [a-z]+$/i, ""); }
-  function unitWord(unit) { return unit && unit !== "each" ? unit : "units"; }
-  function storeName(id) { var s = DQ.stores().filter(function (x) { return x.id === id; })[0]; return s ? s.name : "another store"; }
+  function unitWord(unit) { return unit && unit !== "each" ? unit : tt("units"); }
+  function storeName(id) { var s = DQ.stores().filter(function (x) { return x.id === id; })[0]; return s ? s.name : tt("another store"); }
   function storeById(id) { return DQ.stores().filter(function (x) { return x.id === id; })[0] || null; }
   function words(s) { return String(s || "").replace(/_/g, " "); }
   function cap(s) { s = words(s); return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -41,21 +43,22 @@
       title ? h("div", { class: "c-card-head" }, h("h2", { class: "title-3" }, title), opts.actions || null) : null, body);
   }
   function msgBox(kind, text) { return h("p", { class: "c-msg", "data-kind": kind, role: kind === "risk" ? "alert" : "status" }, text); }
+  function methodWord(m) { return m === "upi" ? "UPI" : tt(cap(m)); }
   function noStore(main) {
     main.appendChild(ui.empty({ title: "No store yet", text: "Add a store first. Every screen here works on one store at a time.", action: { label: "Go to Settings", href: "#/settings" } }));
   }
   /* Whole-unit check made on the device, the same rule the server applies. */
   function qtyProblem(milli, product, allowZero) {
-    if (milli === null || isNaN(milli)) return "Enter a number.";
-    if (milli < 0) return "A quantity cannot be negative.";
-    if (!allowZero && milli === 0) return "Enter more than zero.";
-    if (product && (product.unit || "each") === "each" && milli % 1000) return product.name + " is counted in whole units.";
+    if (milli === null || isNaN(milli)) return tt("Enter a number.");
+    if (milli < 0) return tt("A quantity cannot be negative.");
+    if (!allowZero && milli === 0) return tt("Enter more than zero.");
+    if (product && (product.unit || "each") === "each" && milli % 1000) return tt("{name} is counted in whole units.", { name: product.name });
     return null;
   }
   function setErr(input, text) {
     var e = document.getElementById(input.id + "-err");
     input.setAttribute("aria-invalid", text ? "true" : "false");
-    if (e) { e.textContent = text || ""; e.hidden = !text; }
+    if (e) { e.textContent = text ? tx(text) : ""; e.hidden = !text; }
   }
 
   /* Send a write now when we can; otherwise keep it in the offline queue. A network
@@ -148,7 +151,7 @@
       h("label", { class: "c-pick-label", for: id }, opts.label || "Scan or search a product"),
       h("div", { class: "c-pick-row" }, box, cam), list, msg);
 
-    function say(text, kind) { msg.textContent = text || ""; msg.setAttribute("data-kind", kind || ""); }
+    function say(text, kind) { msg.textContent = text ? tx(text) : ""; msg.setAttribute("data-kind", kind || ""); }
     function close() { list.hidden = true; box.setAttribute("aria-expanded", "false"); results = []; active = -1; DQ.clear(list); }
     function show(rows) {
       results = rows; active = rows.length ? 0 : -1; DQ.clear(list);
@@ -157,7 +160,7 @@
           h("button", { type: "button", class: "c-pick-opt", tabindex: -1, onpointerdown: function (e) { e.preventDefault(); },
             onclick: function () { choose(p, 1000); } },
             h("span", { class: "c-pick-name" }, p.name),
-            h("span", { class: "c-pick-meta mono" }, p.sku + (p.barcodes && p.barcodes[0] ? " · " + p.barcodes[0].code : "")))));
+            h("span", { class: "c-pick-meta mono" }, (p.sku || "") + (p.barcodes && p.barcodes[0] ? " · " + p.barcodes[0].code : "")))));
       });
       list.hidden = !rows.length;
       box.setAttribute("aria-expanded", rows.length ? "true" : "false");
@@ -178,18 +181,18 @@
       var found = cat.search(code);
       if (found.length === 1 && !/^\d{6,}$/.test(code)) { choose(found[0], 1000); return; }
       if (found.length > 1) { box.value = code; show(found); say("Choose one of these, or keep typing."); return; }
-      if (!navigator.onLine) { say("“" + code + "” is not in the catalogue saved on this device. Search by name, or try again when the internet is back.", "risk"); return; }
-      say("Looking up " + code + "…");
+      if (!navigator.onLine) { say(tt("“{code}” is not in the catalogue saved on this device. Search by name, or try again when the internet is back.", { code: code }), "risk"); return; }
+      say(tt("Looking up {code}…", { code: code }));
       cat.lookupRemote(code).then(function (r) {
         if (r.found) { choose(r.product, r.qty_milli, { code: code }); return; }
         if (/^\d{6,}$/.test(code) || /^[A-Z0-9-]+$/i.test(code) && code.indexOf(" ") < 0 && code.length > 3) {
           return DQ.get("/api/products" + DQ.qs({ q: code, limit: 8 })).then(function (s) {
             if (s.rows.length === 1) { choose(cat.put(s.rows[0]), 1000); return; }
             if (s.rows.length) { s.rows.forEach(cat.put); box.value = code; show(s.rows); say("Choose one of these."); return; }
-            say((/^\d+$/.test(code) ? "Barcode " : "") + code + " is not in your catalogue. Check the number, or ask a manager to add the product.", "risk");
+            say(tt(/^\d+$/.test(code) ? "Barcode {code} is not in your catalogue. Check the number, or ask a manager to add the product." : "{code} is not in your catalogue. Check the number, or ask a manager to add the product.", { code: code }), "risk");
           });
         }
-        say(r.message + " Ask a manager to add it.", "risk");
+        say(tt("{message} Ask a manager to add it.", { message: tx(r.message) }), "risk");
       }, function (err) { say(err.message, "risk"); });
     }
     DQ.scan.attach(box, handle);
@@ -202,8 +205,8 @@
       var v = box.value.trim();
       if (v.length < 2 || /^\d{6,}$/.test(v)) { close(); return; }
       var rows = cat.search(v);
-      if (rows.length || !navigator.onLine) { show(rows); if (!rows.length) say("No product matches “" + v + "”."); else say(""); return; }
-      DQ.get("/api/products" + DQ.qs({ q: v, limit: 8 })).then(function (s) { if (box.value.trim() === v) { show(s.rows); say(s.rows.length ? "" : "No product matches “" + v + "”."); } }, function () {});
+      if (rows.length || !navigator.onLine) { show(rows); if (!rows.length) say(tt("No product matches “{q}”.", { q: v })); else say(""); return; }
+      DQ.get("/api/products" + DQ.qs({ q: v, limit: 8 })).then(function (s) { if (box.value.trim() === v) { show(s.rows); say(s.rows.length ? "" : tt("No product matches “{q}”.", { q: v })); } }, function () {});
     }, 180));
     box.addEventListener("blur", function () { setTimeout(function () { if (document.activeElement !== box) { list.hidden = true; box.setAttribute("aria-expanded", "false"); } }, 150); });
     cat.load().catch(function () { /* the picker still searches the server */ });
@@ -261,7 +264,7 @@
     var storeId = DQ.store();
     if (!storeId) return noStore(main);
     var approvals = DQ.can("stock.approve_diff", storeId) ? h("a", { class: "btn btn-ghost", href: "#/count/approvals" }, "Differences to approve") : null;
-    main.appendChild(ui.page("Count", { sub: "Count what is on the shelf in " + storeName(storeId) + ". Small differences post by themselves; large ones wait for a manager.", actions: approvals }));
+    main.appendChild(ui.page("Count", { sub: tt("Count what is on the shelf in {store}. Small differences post by themselves; large ones wait for a manager.", { store: storeName(storeId) }), actions: approvals }));
 
     var kind = ui.select([{ value: "cycle", label: "Cycle count: what is due, most valuable first" }, { value: "full", label: "Full count: every product" }, { value: "opening", label: "Opening count: first stock for a new store" }], "cycle");
     var blind = h("input", { type: "checkbox", id: "c-blind", class: "c-check" });
@@ -270,15 +273,15 @@
     var key = DQ.key("count");
     var startBtn = ui.button("Start the count", start);
     function start() {
-      if (!navigator.onLine) { err.textContent = "Starting a count needs the internet for a moment. Counting itself works offline once it has started."; err.hidden = false; return; }
-      err.hidden = true; startBtn.disabled = true; startBtn.textContent = "Starting…";
+      if (!navigator.onLine) { err.textContent = tt("Starting a count needs the internet for a moment. Counting itself works offline once it has started."); err.hidden = false; return; }
+      err.hidden = true; startBtn.disabled = true; startBtn.textContent = tt("Starting…");
       var k = kind.value;
       var ids = Promise.resolve([]);
       if (k !== "cycle") ids = cat.load(true).then(function (rows) { return rows.filter(function (p) { return p.status !== "discontinued"; }).map(function (p) { return p.id; }); });
       ids.then(function (pids) {
         return DQ.post("/api/counts", { store_id: storeId, kind: k, blind: blind.checked, name: name.value.trim() || null, product_ids: pids, key: key });
       }).then(function (s) { lsSet(ck("count." + s.id), s); DQ.go("#/count/" + s.id); }, function (e) {
-        startBtn.disabled = false; startBtn.textContent = "Start the count"; err.textContent = e.message; err.hidden = false;
+        startBtn.disabled = false; startBtn.textContent = tt("Start the count"); err.textContent = e.message; err.hidden = false;
       });
     }
     main.appendChild(card("Start a count", h("div", { class: "c-form" },
@@ -296,21 +299,21 @@
       if (open.length) {
         body.appendChild(card("Counts in progress", h("div", { class: "c-list" }, open.map(function (c) {
           return h("a", { class: "c-list-item", href: "#/count/" + c.id },
-            h("span", { class: "c-li-main" }, h("strong", null, c.name || KIND[c.kind]), h("span", { class: "text-2" }, " · started " + T.dt(c.created_at))),
+            h("span", { class: "c-li-main" }, h("strong", null, c.name || KIND[c.kind]), h("span", { class: "text-2" }, " · " + tt("started {when}", { when: T.dt(c.created_at) }))),
             h("span", { class: "c-li-side" }, c.blind ? ui.badge("Blind", "data") : null, ui.badge(COUNT_STATUS[c.status][0], COUNT_STATUS[c.status][1]),
-              h("span", { class: "mono" }, c.lines + " counted"), c.waiting ? ui.badge(c.waiting + " to approve", "attention") : null));
+              h("span", { class: "mono" }, tt("{n} counted", { n: fmt.num(c.lines) })), c.waiting ? ui.badge(tt("{n} to approve", { n: fmt.num(c.waiting) }), "attention") : null));
         }))));
       }
       var dueRows = due.rows.slice(0, 60);
-      body.appendChild(card("Due for counting (" + fmt.num(due.total) + ")", due.total ? h("div", null,
+      body.appendChild(card(tt("Due for counting ({n})", { n: fmt.num(due.total) }), due.total ? h("div", null,
         h("p", { class: "text-2 c-note" }, "Class A products sell the most and are counted most often. A cycle count takes this list."),
         ui.table([
-          { key: "abc_class", label: "Class", render: function (x) { return ui.badge("Class " + x.abc_class, x.abc_class === "A" ? "data" : "neutral"); } },
+          { key: "abc_class", label: "Class", render: function (x) { return ui.badge(tt("Class {abc}", { abc: x.abc_class }), x.abc_class === "A" ? "data" : "neutral"); } },
           { key: "name", label: "Product", render: function (x) { return h("span", null, x.name, h("br"), h("span", { class: "text-3 mono" }, x.sku)); } },
           { key: "last_counted_at", label: "Last counted", render: function (x) { return x.last_counted_at ? T.ago(x.last_counted_at) : "Never"; } },
           { key: "value_paise", label: "Value at cost", kind: "money" }
         ], dueRows, { caption: "Products due for counting" }),
-        due.total > dueRows.length ? h("p", { class: "text-3 c-note" }, "And " + fmt.num(due.total - dueRows.length) + " more.") : null)
+        due.total > dueRows.length ? h("p", { class: "text-3 c-note" }, tt("And {n} more.", { n: fmt.num(due.total - dueRows.length) })) : null)
         : ui.empty({ title: "Nothing is due for counting", text: "Every product was counted recently enough. A full count is still possible above." })));
       var done = counts.filter(function (c) { return c.status === "closed"; });
       body.appendChild(card("Recent counts", ui.table([
@@ -326,7 +329,7 @@
   DQ.route("#/count/approvals", { title: "Count differences", can: "stock.approve_diff", render: function (main, params, query, alive) {
     var storeId = DQ.store();
     if (!storeId) return noStore(main);
-    main.appendChild(ui.page("Count differences to approve", { sub: "Large differences and disagreeing counts in " + storeName(storeId) + ". Every decision needs a reason.", actions: h("a", { class: "btn btn-ghost", href: "#/count" }, "Back to Count") }));
+    main.appendChild(ui.page("Count differences to approve", { sub: tt("Large differences and disagreeing counts in {store}. Every decision needs a reason.", { store: storeName(storeId) }), actions: h("a", { class: "btn btn-ghost", href: "#/count" }, "Back to Count") }));
     var body = h("div", null, ui.skeleton(5));
     main.appendChild(body);
     function load() {
@@ -342,14 +345,14 @@
           var applied = all.filter(function (o) { return o.status === "posted" || o.status === "confirmed"; });
           var people = {}; all.concat(lines).forEach(function (o) { people[o.counted_by || "Someone"] = 1; });
           body.appendChild(card(first.name, h("div", { class: "c-approve" },
-            h("p", { class: "text-2" }, first.sku + (conflict ? " · " + Object.keys(people).length + " people counted this differently. Pick the right count, or have it counted again." : " · The difference is above the automatic limit.")),
-            conflict && all.length ? h("ul", { class: "c-all-counts", "aria-label": "Every count of " + first.name },
+            h("p", { class: "text-2" }, first.sku + " · " + (conflict ? tt("{n} people counted this differently. Pick the right count, or have it counted again.", { n: Object.keys(people).length }) : tt("The difference is above the automatic limit."))),
+            conflict && all.length ? h("ul", { class: "c-all-counts", "aria-label": tt("Every count of {name}", { name: first.name }) },
               all.map(function (o) {
-                return h("li", null, h("span", { class: "mono" }, qty(o.counted_milli, first.unit)), " by " + (o.counted_by || "someone") + ", " + T.time(o.counted_at),
+                return h("li", null, h("span", { class: "mono" }, qty(o.counted_milli, first.unit)), " " + tt("by {who}, {time}", { who: o.counted_by || tt("someone"), time: T.time(o.counted_at) }),
                   o.status === "posted" || o.status === "confirmed" ? h("span", { class: "text-3" }, " · already in stock") : null);
               })) : null,
             applied.length ? h("p", { class: "text-3" }, "A count already in stock stays unless you pick another one.") : null,
-            conflict ? h("div", { class: "row" }, ui.button("Count it again", function () { decide(first, "recount"); }, "ghost", { "aria-label": "Set these counts aside and count " + first.name + " again" })) : null,
+            conflict ? h("div", { class: "row" }, ui.button("Count it again", function () { decide(first, "recount"); }, "ghost", { "aria-label": tt("Set these counts aside and count {name} again", { name: first.name }) })) : null,
             lines.map(function (l) {
               var diff = l.difference_milli;
               return h("div", { class: "c-approve-line" },
@@ -357,8 +360,8 @@
                   h("div", null, h("dt", null, "Counted"), h("dd", { class: "mono" }, qty(l.counted_milli, l.unit))),
                   h("div", null, h("dt", null, "System expected"), h("dd", { class: "mono" }, qty(l.system_milli, l.unit))),
                   h("div", null, h("dt", null, "Difference"), h("dd", { class: "mono", "data-kind": diff < 0 ? "risk" : "attention" }, (diff > 0 ? "+" : diff < 0 ? "−" : "") + qty(Math.abs(diff), l.unit) + " (" + money(l.difference_value_paise) + ")")),
-                  h("div", null, h("dt", null, "Counted by"), h("dd", null, (l.counted_by || "Someone") + ", " + T.dt(l.counted_at)))),
-                l.note ? h("p", { class: "text-2" }, "Note: " + l.note) : null,
+                  h("div", null, h("dt", null, "Counted by"), h("dd", null, (l.counted_by || tt("Someone")) + ", " + T.dt(l.counted_at)))),
+                l.note ? h("p", { class: "text-2" }, tt("Note: {note}", { note: l.note })) : null,
                 h("div", { class: "row" },
                   l.status === "conflict" ? ui.button("Pick this count", function () { decide(l, "pick"); }) : ui.button("Approve the difference", function () { decide(l, "approve"); }),
                   ui.button("Reject, count again", function () { decide(l, "reject"); }, "ghost")));
@@ -367,14 +370,15 @@
       });
     }
     function decide(l, action) {
-      var t = { approve: ["Approve this difference?", "The stock of " + l.name + " changes to " + qty(l.counted_milli, l.unit) + ".", "Approve"],
-        pick: ["Pick this count?", "This count of " + qty(l.counted_milli, l.unit) + " stands and the other is set aside.", "Pick this count"],
-        reject: ["Reject this count?", "Nothing posts. Someone should count " + l.name + " again.", "Reject"],
-        recount: ["Count " + l.name + " again?", "Every waiting count of " + l.name + " is set aside and nothing posts. It stays on the list of products to count.", "Set aside and recount"] }[action];
+      var v = { name: l.name, qty: qty(l.counted_milli, l.unit) };
+      var t = { approve: ["Approve this difference?", tt("The stock of {name} changes to {qty}.", v), "Approve"],
+        pick: ["Pick this count?", tt("This count of {qty} stands and the other is set aside.", v), "Pick this count"],
+        reject: ["Reject this count?", tt("Nothing posts. Someone should count {name} again.", v), "Reject"],
+        recount: [tt("Count {name} again?", v), tt("Every waiting count of {name} is set aside and nothing posts. It stays on the list of products to count.", v), "Set aside and recount"] }[action];
       DQ.confirm({ title: t[0], message: t[1], reason: true, reasonLabel: "Why? For example: recounted, found stock in the back room", confirmLabel: t[2], danger: action === "reject" || action === "recount" }).then(function (r) {
         if (!r.ok) return;
         DQ.post("/api/counts/lines/" + l.line_id + "/decide", { action: action, reason: r.reason }).then(function (res) {
-          DQ.toast(l.name + ": " + (action === "reject" || action === "recount" ? "set aside. Count it again." : res.message));
+          DQ.toast(action === "reject" || action === "recount" ? tt("{name}: set aside. Count it again.", { name: l.name }) : l.name + ": " + tx(res.message));
           load();
         }, function (e) { DQ.toast(e.message, { kind: "risk" }); });
       });
@@ -414,7 +418,7 @@
       var blindNote = s.blind ? ui.badge("Blind count", "data") : null;
       submitBtn = ui.button("Submit the count", submit, "primary");
       headBox = h("div");
-      main.appendChild(ui.page(s.name || KIND[s.kind], { sub: storeName(s.store_id) + " · started " + T.dt(s.created_at),
+      main.appendChild(ui.page(s.name || KIND[s.kind], { sub: storeName(s.store_id) + " · " + tt("started {when}", { when: T.dt(s.created_at) }),
         actions: [h("a", { class: "btn btn-ghost", href: "#/count" }, "All counts"), s.status === "open" ? submitBtn : null] }));
       main.appendChild(headBox);
       var closed = s.status !== "open";
@@ -451,14 +455,14 @@
       var waitingHere = pending().filter(function (x) { return x.state !== "refused"; }).length;
       headBox.appendChild(h("div", { class: "c-banner-row" },
         ui.badge(st[0], st[1]), s.blind ? ui.badge("Blind count: expected numbers are hidden", "data") : null,
-        s.waiting ? ui.badge(s.waiting + " difference" + (s.waiting > 1 ? "s" : "") + " wait for a manager", "attention") : null,
-        waitingHere ? ui.badge(waitingHere + " line" + (waitingHere > 1 ? "s" : "") + " saved on this device, waiting to send", "attention") : null));
+        s.waiting ? ui.badge(ttn(s.waiting, "{n} difference waits for a manager", "{n} differences wait for a manager"), "attention") : null,
+        waitingHere ? ui.badge(ttn(waitingHere, "{n} line saved on this device, waiting to send", "{n} lines saved on this device, waiting to send"), "attention") : null));
       if (submitBtn) {
         submitBtn.disabled = waitingHere > 0;
-        submitBtn.title = waitingHere ? "Wait until every line has been sent." : "";
+        submitBtn.title = waitingHere ? tt("Wait until every line has been sent.") : "";
       }
       if (s.status === "submitted") headBox.appendChild(msgBox("attention", "Submitted. It closes when a manager has decided the differences that wait."));
-      if (s.status === "closed") headBox.appendChild(msgBox("ok", "This count is closed" + (s.closed_at ? " since " + T.dt(s.closed_at) : "") + ". Start a new count to count again."));
+      if (s.status === "closed") headBox.appendChild(msgBox("ok", s.closed_at ? tt("This count is closed since {when}. Start a new count to count again.", { when: T.dt(s.closed_at) }) : tt("This count is closed. Start a new count to count again.")));
     }
     function select(p, q) {
       selected = p;
@@ -472,7 +476,7 @@
       qtyIn.value = String((cur + q) / 1000);
       qtyIn.dispatchEvent(new Event("input"));
       lastMsg = null;
-      paintResult(msgBox("ok", selected.name + ": now " + qty(cur + q, selected.unit) + ". Scan again to add one more, or record."));
+      paintResult(msgBox("ok", tt("{name}: now {qty}. Scan again to add one more, or record.", { name: selected.name, qty: qty(cur + q, selected.unit) })));
     }
     function paintSelected() {
       if (!selBox) return;
@@ -483,10 +487,10 @@
       }
       var already = (s.lines || []).filter(function (l) { return l.product_id === selected.id && l.status !== "superseded"; }).length;
       selBox.appendChild(h("div", { class: "c-sel-head" },
-        h("div", null, h("p", { class: "c-sel-name" }, selected.name), h("p", { class: "text-3 mono" }, selected.sku + " · counted in " + unitWord(selected.unit))),
+        h("div", null, h("p", { class: "c-sel-name" }, selected.name), h("p", { class: "text-3 mono" }, (selected.sku || "") + " · " + tt("counted in {unit}", { unit: unitWord(selected.unit) }))),
         h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () { selected = null; paintSelected(); pick.focus(); } }, "Change")));
-      if (already) selBox.appendChild(h("p", { class: "text-2" }, "Already counted " + already + " time" + (already > 1 ? "s" : "") + " in this count. A new count from you replaces your earlier one."));
-      selBox.appendChild(ui.field("How many are on the shelf (" + unitWord(selected.unit) + ")", qtyIn));
+      if (already) selBox.appendChild(h("p", { class: "text-2" }, ttn(already, "Already counted {n} time in this count. A new count from you replaces your earlier one.", "Already counted {n} times in this count. A new count from you replaces your earlier one.")));
+      selBox.appendChild(ui.field(tt("How many are on the shelf ({unit})", { unit: unitWord(selected.unit) }), qtyIn));
       selBox.appendChild(numpad(qtyIn, { decimal: selected.unit !== "each" }));
       selBox.appendChild(recordBtn);
     }
@@ -499,24 +503,24 @@
       var p = selected, entry = { key: DQ.key("cl"), product_id: p.id, name: p.name, unit: p.unit, counted_milli: m, counted_at: new Date().toISOString(), state: "waiting" };
       var list = local(); list.push(entry); saveLocal(list);
       selected = null; qtyIn.value = ""; paintSelected();
-      paintResult(msgBox("busy", p.name + ": " + qty(m, p.unit) + " recorded. Sending…"));
+      paintResult(msgBox("busy", tt("{name}: {qty} recorded. Sending…", { name: p.name, qty: qty(m, p.unit) })));
       pick.focus();
       send("Count of " + p.name, "POST", "/api/counts/" + id + "/lines", { product_id: p.id, counted_milli: m, counted_at: entry.counted_at, key: entry.key }).then(function (r) {
         if (!alive()) return;
         if (r.queued) {
-          paintResult(msgBox("attention", p.name + ": " + qty(m, p.unit) + " saved on this device. It is sent when the internet is back."));
+          paintResult(msgBox("attention", tt("{name}: {qty} saved on this device. It is sent when the internet is back.", { name: p.name, qty: qty(m, p.unit) })));
           startPoll();
         } else {
           saveLocal(local().filter(function (x) { return x.key !== entry.key; }));
           var st = LINE_STATUS[r.data.status] || ["", "ok"];
-          var detail = r.data.difference_milli !== undefined && !s.blind && r.data.difference_milli !== 0 ? " Difference " + (r.data.difference_milli > 0 ? "+" : "−") + qty(Math.abs(r.data.difference_milli), p.unit) + "." : "";
-          paintResult(msgBox(st[1] === "ok" ? "ok" : st[1], p.name + ": " + qty(m, p.unit) + ". " + r.data.message + detail));
+          var detail = r.data.difference_milli !== undefined && !s.blind && r.data.difference_milli !== 0 ? " " + tt("Difference {qty}.", { qty: (r.data.difference_milli > 0 ? "+" : "−") + qty(Math.abs(r.data.difference_milli), p.unit) }) : "";
+          paintResult(msgBox(st[1] === "ok" ? "ok" : st[1], p.name + ": " + qty(m, p.unit) + ". " + tx(r.data.message) + detail));
           refresh();
         }
         paintHead(); paintLists();
       }, function (e) {
         var l2 = local(); l2.forEach(function (x) { if (x.key === entry.key) { x.state = "refused"; x.error = e.message; } }); saveLocal(l2);
-        paintResult(msgBox("risk", p.name + " was not saved: " + e.message));
+        paintResult(msgBox("risk", tt("{name} was not saved: {why}", { name: p.name, why: e.message })));
         paintHead(); paintLists();
       });
     }
@@ -536,7 +540,7 @@
       var todo = (s.still_to_count || []).filter(function (t) { return !localIds[t.product_id]; });
       DQ.clear(todoBox);
       if (s.kind === "cycle" || todo.length || (s.still_to_count || []).length) {
-        todoBox.appendChild(card((s.status === "open" ? "Still to count (" : "Not counted (") + todo.length + ")", todo.length ? h("ul", { class: "c-todo" }, todo.slice(0, 200).map(function (t) {
+        todoBox.appendChild(card(tt(s.status === "open" ? "Still to count ({n})" : "Not counted ({n})", { n: fmt.num(todo.length) }), todo.length ? h("ul", { class: "c-todo" }, todo.slice(0, 200).map(function (t) {
           return h("li", null, s.status === "open" ? h("button", { type: "button", class: "c-todo-btn", onclick: function () {
             select(cat.byId(t.product_id) || { id: t.product_id, name: t.name, sku: t.sku, unit: t.unit }, 0);
           } }, h("span", null, t.name), h("span", { class: "text-3 mono" }, t.sku)) : h("span", null, t.name + " · " + t.sku));
@@ -549,21 +553,21 @@
         return h("li", { class: "c-line" },
           h("div", { class: "c-line-main" }, h("strong", null, x.name), h("span", { class: "mono c-line-qty" }, qty(x.counted_milli, x.unit))),
           h("div", { class: "c-line-sub" }, x.state === "refused" ? ui.badge("Not saved", "risk") : ui.badge("Waiting to send", "attention"),
-            h("span", { class: "text-2" }, x.state === "refused" ? x.error + " " : "Saved on this device. ", T.time(x.counted_at)),
+            h("span", { class: "text-2" }, x.state === "refused" ? tx(x.error) + " " : tt("Saved on this device.") + " ", T.time(x.counted_at)),
             x.state === "refused" ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () { saveLocal(local().filter(function (y) { return y.key !== x.key; })); paintHead(); paintLists(); } }, "Dismiss") : null));
       }).concat(rows.map(function (l) {
         var st = LINE_STATUS[l.status] || [l.status, "neutral", ""];
         return h("li", { class: "c-line" },
           h("div", { class: "c-line-main" }, h("strong", null, l.name), h("span", { class: "mono c-line-qty" }, qty(l.counted_milli, l.unit))),
           h("div", { class: "c-line-sub" }, ui.badge(st[0], st[1]),
-            h("span", { class: "text-2" }, st[2] + " " + (l.counted_by || "") + ", " + T.time(l.counted_at)),
-            showExp && l.system_milli !== undefined ? h("span", { class: "mono text-2" }, "Expected " + qty(l.system_milli, l.unit) + (l.difference_milli ? ", difference " + (l.difference_milli > 0 ? "+" : "−") + qty(Math.abs(l.difference_milli), l.unit) : "")) : null));
+            h("span", { class: "text-2" }, (st[2] ? tt(st[2]) + " " : "") + (l.counted_by || "") + ", " + T.time(l.counted_at)),
+            showExp && l.system_milli !== undefined ? h("span", { class: "mono text-2" }, l.difference_milli ? tt("Expected {qty}, difference {diff}", { qty: qty(l.system_milli, l.unit), diff: (l.difference_milli > 0 ? "+" : "−") + qty(Math.abs(l.difference_milli), l.unit) }) : tt("Expected {qty}", { qty: qty(l.system_milli, l.unit) })) : null));
       }));
-      linesBox.appendChild(card("Counted (" + items.length + ")", items.length ? h("ul", { class: "c-lines" }, items) : h("p", { class: "text-2" }, "Nothing counted yet. Each line you record appears here with its result.")));
+      linesBox.appendChild(card(tt("Counted ({n})", { n: fmt.num(items.length) }), items.length ? h("ul", { class: "c-lines" }, items) : h("p", { class: "text-2" }, "Nothing counted yet. Each line you record appears here with its result.")));
     }
     function submit() {
       var left = (s.still_to_count || []).length;
-      DQ.confirm({ title: "Submit the count?", message: (left ? left + " product" + (left > 1 ? "s are" : " is") + " still not counted and will be left as they are. " : "") + "After submitting, nobody can add lines. Differences waiting for a manager still need a decision.", confirmLabel: "Submit the count" }).then(function (r) {
+      DQ.confirm({ title: "Submit the count?", message: (left ? ttn(left, "{n} product is still not counted and will be left as it is.", "{n} products are still not counted and will be left as they are.") + " " : "") + tt("After submitting, nobody can add lines. Differences waiting for a manager still need a decision."), confirmLabel: "Submit the count" }).then(function (r) {
         if (!r.ok) return;
         DQ.post("/api/counts/" + id + "/submit").then(function (d) { s = d; lsSet(cacheKey, d); DQ.toast(d.status === "closed" ? "The count is closed." : "Submitted. A manager decides the differences that wait."); if (alive()) build(); }, function (e) { DQ.toast(e.message, { kind: "risk" }); });
       });
@@ -587,7 +591,7 @@
     var storeId = DQ.store();
     if (!storeId) return noStore(main);
     var tab = query.tab === "credits" ? "credits" : "orders";
-    main.appendChild(ui.page("Receive", { sub: "Book in deliveries for " + storeName(storeId) + ". Good units go to stock; damaged or wrong ones are kept aside for supplier credit.",
+    main.appendChild(ui.page("Receive", { sub: tt("Book in deliveries for {store}. Good units go to stock; damaged or wrong ones are kept aside for supplier credit.", { store: storeName(storeId) }),
       actions: h("a", { class: "btn btn-primary", href: "#/receive/new" }, "Receive without an order") }));
     main.appendChild(ui.tabs([{ value: "orders", label: "Open orders" }, { value: "credits", label: "Supplier credits" }], tab, function (v) { DQ.go("#/receive" + (v === "credits" ? "?tab=credits" : "")); }));
     var body = h("div", null, ui.skeleton(5));
@@ -601,9 +605,9 @@
         body.appendChild(h("div", { class: "c-list" }, orders.map(function (o) {
           var due = o.lines.filter(function (l) { return l.due_milli > 0; }).length;
           return h("a", { class: "c-list-item", href: "#/receive/order/" + o.id },
-            h("span", { class: "c-li-main" }, h("strong", null, o.number + " · " + (o.supplier || "No supplier")),
-              h("span", { class: "text-2" }, " · " + o.lines.length + " products, " + money(o.total_paise) + (o.expected_date ? " · expected " + T.date(o.expected_date) : ""))),
-            h("span", { class: "c-li-side" }, ui.badge(cap(o.status), o.status === "partly_received" ? "attention" : "data"), h("span", { class: "text-2" }, due + " still due")));
+            h("span", { class: "c-li-main" }, h("strong", null, o.number + " · " + (o.supplier || tt("No supplier"))),
+              h("span", { class: "text-2" }, " · " + ttn(o.lines.length, "{n} product, {value}", "{n} products, {value}", { value: money(o.total_paise) }) + (o.expected_date ? " · " + tt("expected {date}", { date: T.date(o.expected_date) }) : ""))),
+            h("span", { class: "c-li-side" }, ui.badge(cap(o.status), o.status === "partly_received" ? "attention" : "data"), h("span", { class: "text-2" }, tt("{n} still due", { n: fmt.num(due) }))));
         })));
       });
     }
@@ -614,10 +618,10 @@
       DQ.clear(body);
       var canCredit = DQ.can("orders.create", storeId);
       var total = rows.reduce(function (a, x) { return a + x.value_paise; }, 0);
-      if (rows.length) body.appendChild(h("p", { class: "text-2 c-note" }, rows.length + " rejected line" + (rows.length > 1 ? "s" : "") + " worth " + money(total) + " at cost " + (rows.length > 1 ? "wait" : "waits") + " for a supplier credit note."));
+      if (rows.length) body.appendChild(h("p", { class: "text-2 c-note" }, ttn(rows.length, "{n} rejected line worth {value} at cost waits for a supplier credit note.", "{n} rejected lines worth {value} at cost wait for a supplier credit note.", { value: money(total) })));
       body.appendChild(ui.table([
         { key: "received_on", label: "Received", render: function (x) { return T.date(x.received_on); } },
-        { key: "supplier_id", label: "Supplier", render: function (x) { return sup[x.supplier_id] || "No supplier"; } },
+        { key: "supplier_id", label: "Supplier", render: function (x) { return sup[x.supplier_id] || tt("No supplier"); } },
         { key: "invoice_number", label: "Invoice" },
         { key: "name", label: "Product", render: function (x) { return h("span", null, x.name, h("br"), h("span", { class: "text-3 mono" }, x.sku)); } },
         { key: "units_milli", label: "Units", kind: "qty" },
@@ -626,10 +630,10 @@
         { key: "line_id", label: "", render: function (x) {
           return canCredit ? ui.button("Credit received", function (e) {
             var btn = e.currentTarget;
-            DQ.confirm({ title: "Mark the credit as received?", message: "The supplier has given credit for " + qty(x.units_milli) + " " + x.name + " (" + money(x.value_paise) + "). It leaves this list.", confirmLabel: "Credit received" }).then(function (c) {
+            DQ.confirm({ title: "Mark the credit as received?", message: tt("The supplier has given credit for {qty} {name} ({value}). It leaves this list.", { qty: qty(x.units_milli), name: x.name, value: money(x.value_paise) }), confirmLabel: "Credit received" }).then(function (c) {
               if (!c.ok) return;
               btn.disabled = true;
-              DQ.post("/api/deliveries/lines/" + x.line_id + "/credited").then(function () { DQ.toast("Credit recorded for " + x.name + "."); DQ.render(); }, function (err) { btn.disabled = false; DQ.toast(err.message, { kind: "risk" }); });
+              DQ.post("/api/deliveries/lines/" + x.line_id + "/credited").then(function () { DQ.toast(tt("Credit recorded for {name}.", { name: x.name })); DQ.render(); }, function (err) { btn.disabled = false; DQ.toast(err.message, { kind: "risk" }); });
             });
           }, "ghost", { class: "btn btn-ghost btn-sm" }) : null;
         } }
@@ -651,8 +655,8 @@
     var saveBtn = ui.button("Save the delivery", save, "primary");
     var pick = picker({ label: "Scan or search an item in the delivery", onPick: function (p, q) { addRow(p, q); } });
 
-    main.appendChild(ui.page(order ? "Receive " + order.number : "Receive without an order", {
-      sub: order ? (order.supplier || "No supplier") + " · " + storeName(storeId) + (order.expected_date ? " · expected " + T.date(order.expected_date) : "") : storeName(storeId) + ". Use this when a delivery came without a purchase order.",
+    main.appendChild(ui.page(order ? tt("Receive {number}", { number: order.number }) : "Receive without an order", {
+      sub: order ? (order.supplier || tt("No supplier")) + " · " + storeName(storeId) + (order.expected_date ? " · " + tt("expected {date}", { date: T.date(order.expected_date) }) : "") : tt("{store}. Use this when a delivery came without a purchase order.", { store: storeName(storeId) }),
       actions: h("a", { class: "btn btn-ghost", href: "#/receive" }, "Back") }));
 
     var head = h("div", { class: "grid-2" }, ui.field("Supplier invoice number", invoice));
@@ -698,12 +702,12 @@
       var perish = full.perishable;
       r.el = h("article", { class: "card c-recv-line" },
         h("div", { class: "c-card-head" },
-          h("div", null, h("h3", { class: "title-3" }, full.name), h("p", { class: "text-3 mono" }, (full.sku || "") + (perish ? " · perishable: expiry needed" : ""))),
-          ol ? h("p", { class: "mono text-2 c-due" }, "Ordered " + qty(ol.qty_milli, ol.unit) + (ol.received_milli ? ", received " + qty(ol.received_milli, ol.unit) : "") + ", still due " + qty(ol.due_milli, ol.unit))
-            : h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Remove " + full.name, onclick: function () { rows = rows.filter(function (x) { return x !== r; }); r.el.remove(); } }, "Remove")),
+          h("div", null, h("h3", { class: "title-3" }, full.name), h("p", { class: "text-3 mono" }, (full.sku || "") + (perish ? " · " + tt("perishable: expiry needed") : ""))),
+          ol ? h("p", { class: "mono text-2 c-due" }, ol.received_milli ? tt("Ordered {ordered}, received {received}, still due {due}", { ordered: qty(ol.qty_milli, ol.unit), received: qty(ol.received_milli, ol.unit), due: qty(ol.due_milli, ol.unit) }) : tt("Ordered {ordered}, still due {due}", { ordered: qty(ol.qty_milli, ol.unit), due: qty(ol.due_milli, ol.unit) }))
+            : h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": tt("Remove {name}", { name: full.name }), onclick: function () { rows = rows.filter(function (x) { return x !== r; }); r.el.remove(); } }, "Remove")),
         h("div", { class: "c-recv-grid" },
           ui.field("Good units received", r.rec), ui.field("Rejected units", r.bad), reasonField,
-          ui.field("Unit cost (₹)", r.cost), ui.field("Batch", r.batch), ui.field("Expiry" + (perish ? " (required)" : ""), r.expiry)));
+          ui.field("Unit cost (₹)", r.cost), ui.field("Batch", r.batch), ui.field(perish ? "Expiry (required)" : "Expiry", r.expiry)));
       rows.push(r);
       listBox.appendChild(r.el);
       if (!ol) pick.focus();
@@ -726,36 +730,36 @@
         var pr = qtyProblem(good, r.product, true) || qtyProblem(bad, r.product, true);
         if (pr) { setErr(r.rec, pr); problems.push(r.product.name + ": " + pr); return; }
         var cost = r.cost.value.trim() ? fmt.toPaise(r.cost.value) : null;
-        if (r.cost.value.trim() && (cost === null || cost < 0)) { setErr(r.cost, "Enter the cost in rupees, like 42.50."); problems.push(r.product.name + ": the cost is not a number."); return; }
-        if (r.product.perishable && good && !r.expiry.value) { setErr(r.expiry, "Enter the expiry date."); problems.push(r.product.name + " is perishable: enter its expiry date."); return; }
+        if (r.cost.value.trim() && (cost === null || cost < 0)) { setErr(r.cost, "Enter the cost in rupees, like 42.50."); problems.push(tt("{name}: the cost is not a number.", { name: r.product.name })); return; }
+        if (r.product.perishable && good && !r.expiry.value) { setErr(r.expiry, "Enter the expiry date."); problems.push(tt("{name} is perishable: enter its expiry date.", { name: r.product.name })); return; }
         lines.push({ product_id: r.product.id, received_milli: good, damaged_milli: bad, reject_reason: bad ? r.reason.value : null,
           unit_cost_paise: cost, batch: r.batch.value.trim() || null, expiry: r.expiry.value || null });
       });
       if (problems.length) { err.textContent = problems.join(" "); err.hidden = false; return; }
-      if (!lines.length) { err.textContent = "Enter how many arrived for at least one item."; err.hidden = false; return; }
+      if (!lines.length) { err.textContent = tt("Enter how many arrived for at least one item."); err.hidden = false; return; }
       var body = { store_id: storeId, po_id: order ? order.id : null, supplier_id: supplierSel && supplierSel.value ? supplierSel.value : null,
         invoice_number: invoice.value.trim() || null, lines: lines, close_short: closeShort.checked, note: note.value.trim() || null, key: key };
-      saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      saveBtn.disabled = true; saveBtn.textContent = tt("Saving…");
       send("Delivery" + (order ? " for " + order.number : "") + (body.invoice_number ? ", invoice " + body.invoice_number : ""), "POST", "/api/deliveries", body).then(function (r) {
         if (!alive()) return;
-        saveBtn.textContent = "Saved";
+        saveBtn.textContent = tt("Saved");
         DQ.clear(result);
         if (r.queued) {
           result.appendChild(msgBox("attention", "Saved on this device. The delivery is sent once the internet is back, and stock updates then."));
         } else {
           var good = lines.reduce(function (a, l) { return a + l.received_milli; }, 0), bad = lines.reduce(function (a, l) { return a + l.damaged_milli; }, 0);
-          result.appendChild(msgBox("ok", (r.data.duplicate ? "This delivery was already saved. Nothing changed. " : "Saved. ") + qty(good) + " good units went to stock" + (bad ? "; " + qty(bad) + " rejected units wait for supplier credit." : ".")));
+          result.appendChild(msgBox("ok", tt(r.data.duplicate ? "This delivery was already saved. Nothing changed." : "Saved.") + " " + (bad ? tt("{good} good units went to stock; {bad} rejected units wait for supplier credit.", { good: qty(good), bad: qty(bad) }) : tt("{good} good units went to stock.", { good: qty(good) }))));
           var o = r.data.order;
           if (o) {
             var still = o.lines.filter(function (l) { return l.due_milli > 0; });
             result.appendChild(h("div", { class: "c-result" },
-              h("p", null, h("strong", null, o.number + " is now " + (o.status === "received" ? (o.closed_short ? "closed short" : "fully received") : words(o.status)) + ".")),
+              h("p", null, h("strong", null, tt("{number} is now {state}.", { number: o.number, state: tt(o.status === "received" ? (o.closed_short ? "closed short" : "fully received") : words(o.status)) }))),
               still.length ? h("div", null, h("p", { class: "text-2" }, "Still due:"), h("ul", { class: "c-due-list" }, still.map(function (l) { return h("li", null, l.name + ": " + qty(l.due_milli, l.unit)); }))) : null));
           }
         }
         result.appendChild(h("div", { class: "row" }, h("a", { class: "btn btn-primary", href: "#/receive" }, "Done"), h("a", { class: "btn btn-ghost", href: "#/receive/new" }, "Receive another delivery")));
       }, function (e) {
-        saveBtn.disabled = false; saveBtn.textContent = "Save the delivery";
+        saveBtn.disabled = false; saveBtn.textContent = tt("Save the delivery");
         err.textContent = e.message; err.hidden = false;
       });
     }
@@ -782,7 +786,7 @@
   DQ.route("#/transfers", { title: "Transfers", nav: "Transfers", can: "stock.transfer", render: function (main, params, query, alive) {
     var storeId = DQ.store();
     if (!storeId) return noStore(main);
-    main.appendChild(ui.page("Transfers", { sub: "Stock moving between " + storeName(storeId) + " and your other stores. What does not arrive is recorded as a transfer loss.",
+    main.appendChild(ui.page("Transfers", { sub: tt("Stock moving between {store} and your other stores. What does not arrive is recorded as a transfer loss.", { store: storeName(storeId) }),
       actions: DQ.stores().length > 1 ? h("a", { class: "btn btn-primary", href: "#/transfers/new" }, "Send stock to another store") : null }));
     var body = h("div", { class: "c-stack" }, ui.skeleton(5));
     main.appendChild(body);
@@ -796,13 +800,13 @@
         var lost = t.lines.reduce(function (a, l) { return a + (l.lost_milli || 0); }, 0);
         var inbound = t.to_store_id === storeId;
         return h("a", { class: "c-list-item", href: "#/transfers/" + t.id },
-          h("span", { class: "c-li-main" }, h("strong", null, inbound ? "From " + storeName(t.from_store_id) : "To " + storeName(t.to_store_id)),
-            h("span", { class: "text-2" }, " · " + t.lines.length + " product" + (t.lines.length > 1 ? "s" : "") + " · sent " + T.dt(t.created_at))),
-          h("span", { class: "c-li-side" }, t.status === "in_transit" ? ui.badge(inbound ? "Arriving: confirm what came" : "On the way", inbound ? "attention" : "data") : ui.badge("Received " + T.date(t.received_at), "ok"),
-            lost ? ui.badge("Loss " + qty(lost), "risk") : null));
+          h("span", { class: "c-li-main" }, h("strong", null, inbound ? tt("From {store}", { store: storeName(t.from_store_id) }) : tt("To {store}", { store: storeName(t.to_store_id) })),
+            h("span", { class: "text-2" }, " · " + ttn(t.lines.length, "{n} product", "{n} products") + " · " + tt("sent {when}", { when: T.dt(t.created_at) }))),
+          h("span", { class: "c-li-side" }, t.status === "in_transit" ? ui.badge(inbound ? "Arriving: confirm what came" : "On the way", inbound ? "attention" : "data") : ui.badge(tt("Received {date}", { date: T.date(t.received_at) }), "ok"),
+            lost ? ui.badge(tt("Loss {qty}", { qty: qty(lost) }), "risk") : null));
       }
-      body.appendChild(card("Coming in (" + incoming.length + ")", incoming.length ? h("div", { class: "c-list" }, incoming.map(row)) : h("p", { class: "text-2" }, "Nothing is on its way to this store.")));
-      body.appendChild(card("Sent, on the way (" + outgoing.length + ")", outgoing.length ? h("div", { class: "c-list" }, outgoing.map(row)) : h("p", { class: "text-2" }, "Nothing sent from this store is on the way.")));
+      body.appendChild(card(tt("Coming in ({n})", { n: fmt.num(incoming.length) }), incoming.length ? h("div", { class: "c-list" }, incoming.map(row)) : h("p", { class: "text-2" }, "Nothing is on its way to this store.")));
+      body.appendChild(card(tt("Sent, on the way ({n})", { n: fmt.num(outgoing.length) }), outgoing.length ? h("div", { class: "c-list" }, outgoing.map(row)) : h("p", { class: "text-2" }, "Nothing sent from this store is on the way.")));
       body.appendChild(card("Received", done.length ? h("div", { class: "c-list" }, done.map(row)) : ui.empty({ title: "No transfers yet", text: "Send stock to another store when one has too much and the other too little.", action: DQ.stores().length > 1 ? { label: "Send stock", href: "#/transfers/new" } : null })));
     });
   } });
@@ -811,7 +815,7 @@
     var storeId = DQ.store();
     if (!storeId) return noStore(main);
     var others = DQ.stores().filter(function (s) { return s.id !== storeId; });
-    main.appendChild(ui.page("Send stock from " + storeName(storeId), { sub: "Stock leaves this store now and arrives when the other store confirms it.", actions: h("a", { class: "btn btn-ghost", href: "#/transfers" }, "Back") }));
+    main.appendChild(ui.page(tt("Send stock from {store}", { store: storeName(storeId) }), { sub: "Stock leaves this store now and arrives when the other store confirms it.", actions: h("a", { class: "btn btn-ghost", href: "#/transfers" }, "Back") }));
     if (!others.length) { main.appendChild(ui.empty({ title: "There is no other store to send to", text: "Add a second store in Settings first.", action: { label: "Go to Settings", href: "#/settings" } })); return; }
     var to = ui.select(others.map(function (s) { return { value: s.id, label: s.name }; }), others[0].id);
     var note = ui.input({ maxlength: 300, placeholder: "Optional, for example the driver's name" });
@@ -823,10 +827,10 @@
     var pick = picker({ label: "Scan or search what you are sending", onPick: function (p, q) {
       var r = rows.filter(function (x) { return x.p.id === p.id; })[0];
       if (r) { r.q.value = String(((fmt.toMilli(r.q.value) || 0) + q) / 1000); pick.focus(); return; }
-      r = { p: p, q: ui.input({ inputmode: "decimal", class: "input c-num-input", value: String(q / 1000), "aria-label": "Quantity of " + p.name }) };
-      r.el = h("li", { class: "c-edit-line" }, h("div", { class: "c-li-main" }, h("strong", null, p.name), h("span", { class: "text-3 mono" }, " " + p.sku + " · " + unitWord(p.unit))),
+      r = { p: p, q: ui.input({ inputmode: "decimal", class: "input c-num-input", value: String(q / 1000), "aria-label": tt("Quantity of {name}", { name: p.name }) }) };
+      r.el = h("li", { class: "c-edit-line" }, h("div", { class: "c-li-main" }, h("strong", null, p.name), h("span", { class: "text-3 mono" }, " " + (p.sku || "") + " · " + unitWord(p.unit))),
         h("div", { class: "c-edit-ctl" }, r.q, h("p", { class: "field-error", id: "", hidden: true }),
-          h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Remove " + p.name, onclick: function () { rows = rows.filter(function (x) { return x !== r; }); r.el.remove(); } }, "Remove")));
+          h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": tt("Remove {name}", { name: p.name }), onclick: function () { rows = rows.filter(function (x) { return x !== r; }); r.el.remove(); } }, "Remove")));
       r.q.id = "c-trf-" + p.id; r.el.querySelector(".field-error").id = r.q.id + "-err";
       rows.push(r); listBox.appendChild(r.el); pick.focus();
     } });
@@ -840,15 +844,15 @@
         setErr(r.q, pr); if (pr && !bad) bad = r.p.name + ": " + pr;
         return { product_id: r.p.id, qty_milli: m };
       });
-      if (!lines.length) { err.textContent = "Add at least one item to send."; err.hidden = false; return; }
+      if (!lines.length) { err.textContent = tt("Add at least one item to send."); err.hidden = false; return; }
       if (bad) { err.textContent = bad; err.hidden = false; return; }
-      DQ.confirm({ title: "Send to " + storeName(to.value) + "?", message: lines.length + (lines.length > 1 ? " products leave" : " product leaves") + " the stock of " + storeName(storeId) + " now. " + storeName(to.value) + " confirms what arrives.", confirmLabel: "Send the stock" }).then(function (c) {
+      DQ.confirm({ title: tt("Send to {store}?", { store: storeName(to.value) }), message: ttn(lines.length, "{n} product leaves the stock of {from} now. {to} confirms what arrives.", "{n} products leave the stock of {from} now. {to} confirms what arrives.", { from: storeName(storeId), to: storeName(to.value) }), confirmLabel: "Send the stock" }).then(function (c) {
         if (!c.ok) return;
         sendBtn.disabled = true;
         send("Transfer to " + storeName(to.value), "POST", "/api/transfers", { from_store_id: storeId, to_store_id: to.value, lines: lines, note: note.value.trim() || null, key: key }).then(function (r) {
           if (!alive()) return;
           DQ.clear(result);
-          result.appendChild(msgBox(r.queued ? "attention" : "ok", r.queued ? "Saved on this device. The transfer is sent once the internet is back." : (r.data.duplicate ? "This transfer was already sent. Nothing changed." : "Sent. It shows as on the way until " + storeName(to.value) + " confirms it.")));
+          result.appendChild(msgBox(r.queued ? "attention" : "ok", r.queued ? "Saved on this device. The transfer is sent once the internet is back." : (r.data.duplicate ? "This transfer was already sent. Nothing changed." : tt("Sent. It shows as on the way until {store} confirms it.", { store: storeName(to.value) }))));
           result.appendChild(h("div", { class: "row" }, h("a", { class: "btn btn-primary", href: "#/transfers" }, "Done")));
         }, function (e) { sendBtn.disabled = false; err.textContent = e.message; err.hidden = false; });
       });
@@ -863,8 +867,8 @@
       DQ.clear(main);
       var unit = function (pid) { var p = cat.byId(pid); return p ? p.unit : "each"; };
       var canReceive = t.status === "in_transit" && DQ.can("stock.transfer", t.to_store_id);
-      main.appendChild(ui.page("Transfer from " + storeName(t.from_store_id) + " to " + storeName(t.to_store_id), {
-        sub: "Sent " + T.dt(t.created_at) + (t.received_at ? " · received " + T.dt(t.received_at) : "") + (t.note ? " · " + t.note : ""),
+      main.appendChild(ui.page(tt("Transfer from {from} to {to}", { from: storeName(t.from_store_id), to: storeName(t.to_store_id) }), {
+        sub: tt("Sent {when}", { when: T.dt(t.created_at) }) + (t.received_at ? " · " + tt("received {when}", { when: T.dt(t.received_at) }) : "") + (t.note ? " · " + t.note : ""),
         actions: h("a", { class: "btn btn-ghost", href: "#/transfers" }, "Back") }));
       var key = DQ.key("trfin");
       var inputs = {};
@@ -872,7 +876,7 @@
         { key: "name", label: "Product", render: function (l) { return h("span", null, l.name, h("br"), h("span", { class: "text-3 mono" }, l.sku)); } },
         { key: "sent_milli", label: "Sent", kind: "qty", unit: function (l) { return unit(l.product_id); } }];
       if (canReceive) cols.push({ key: "x", label: "Arrived", kind: "num", render: function (l) {
-        var i = ui.input({ inputmode: "decimal", class: "input c-num-input", value: String(l.sent_milli / 1000), "aria-label": "Arrived of " + l.name, id: "c-arr-" + l.product_id });
+        var i = ui.input({ inputmode: "decimal", class: "input c-num-input", value: String(l.sent_milli / 1000), "aria-label": tt("Arrived of {name}", { name: l.name }), id: "c-arr-" + l.product_id });
         inputs[l.product_id] = { input: i, line: l };
         return i;
       } });
@@ -886,23 +890,23 @@
           var lines = [], lost = [], bad = null;
           Object.keys(inputs).forEach(function (pid) {
             var x = inputs[pid], m = fmt.toMilli(x.input.value);
-            if (m === null || m < 0 || m > x.line.sent_milli) { bad = x.line.name + ": enter between 0 and " + qty(x.line.sent_milli, unit(pid)) + "."; return; }
+            if (m === null || m < 0 || m > x.line.sent_milli) { bad = tt("{name}: enter between 0 and {qty}.", { name: x.line.name, qty: qty(x.line.sent_milli, unit(pid)) }); return; }
             lines.push({ product_id: pid, qty_milli: m });
             if (m < x.line.sent_milli) lost.push(x.line.name + " " + qty(x.line.sent_milli - m, unit(pid)));
           });
           if (bad) { err.textContent = bad; err.hidden = false; return; }
-          DQ.confirm({ title: "Confirm what arrived?", message: lost.length ? "Short: " + lost.join(", ") + ". The shortfall is recorded as a transfer loss and cannot be received later." : "Everything sent arrived. It goes into the stock of " + storeName(t.to_store_id) + ".", confirmLabel: "Confirm" }).then(function (c) {
+          DQ.confirm({ title: "Confirm what arrived?", message: lost.length ? tt("Short: {list}. The shortfall is recorded as a transfer loss and cannot be received later.", { list: lost.join(", ") }) : tt("Everything sent arrived. It goes into the stock of {store}.", { store: storeName(t.to_store_id) }), confirmLabel: "Confirm" }).then(function (c) {
             if (!c.ok) return;
             btn.disabled = true;
             DQ.post("/api/transfers/" + t.id + "/receive", { lines: lines, key: key }).then(function (res) {
-              DQ.toast(res.losses && res.losses.length ? "Received. Loss recorded: " + res.losses.map(function (l) { return l.name + " " + qty(l.lost_milli) + " (" + money(l.value_paise) + ")"; }).join(", ") : "Received. Everything arrived.", { kind: res.losses && res.losses.length ? "attention" : "ok" });
+              DQ.toast(res.losses && res.losses.length ? tt("Received. Loss recorded: {list}", { list: res.losses.map(function (l) { return l.name + " " + qty(l.lost_milli) + " (" + money(l.value_paise) + ")"; }).join(", ") }) : tt("Received. Everything arrived."), { kind: res.losses && res.losses.length ? "attention" : "ok" });
               DQ.render();
             }, function (e) { btn.disabled = false; err.textContent = e.message; err.hidden = false; });
           });
         });
         main.appendChild(card(null, h("div", { class: "c-form" }, h("p", { class: "text-2" }, "Change any number that differs from what was sent, then confirm."), err, h("div", { class: "row" }, btn), result)));
       } else if (t.status === "in_transit") {
-        main.appendChild(msgBox("attention", "On the way. " + storeName(t.to_store_id) + " confirms what arrives."));
+        main.appendChild(msgBox("attention", tt("On the way. {store} confirms what arrives.", { store: storeName(t.to_store_id) })));
       }
     });
   } });
@@ -920,14 +924,14 @@
         URL.revokeObjectURL(url);
         resolve(c.toDataURL("image/jpeg", 0.8));
       };
-      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file could not be read as a photo. Take the photo again.")); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error(tt("That file could not be read as a photo. Take the photo again."))); };
       img.src = url;
     });
   }
   DQ.route("#/wastage", { title: "Wastage", nav: "Wastage", can: "stock.wastage", render: function (main, params, query, alive) {
     var storeId = DQ.store();
     if (!storeId) return noStore(main);
-    main.appendChild(ui.page("Wastage", { sub: "Write off stock that cannot be sold in " + storeName(storeId) + ". It leaves stock at cost and never counts as demand." }));
+    main.appendChild(ui.page("Wastage", { sub: tt("Write off stock that cannot be sold in {store}. It leaves stock at cost and never counts as demand.", { store: storeName(storeId) }) }));
     var product = null, photo = null, key = DQ.key("waste");
     var prodBox = h("div", { class: "c-selected" });
     var q = ui.input({ inputmode: "decimal", autocomplete: "off", class: "input c-big-input", id: "c-waste-qty" });
@@ -947,12 +951,12 @@
     function paintProduct() {
       DQ.clear(prodBox);
       if (!product) { prodBox.appendChild(h("p", { class: "text-2 c-hint" }, "Scan or search the product first.")); return; }
-      prodBox.appendChild(h("div", { class: "c-sel-head" }, h("div", null, h("p", { class: "c-sel-name" }, product.name), h("p", { class: "text-3 mono" }, product.sku + " · " + unitWord(product.unit) + (product.cost_paise !== null && product.cost_paise !== undefined ? " · cost " + money(product.cost_paise) : ""))),
+      prodBox.appendChild(h("div", { class: "c-sel-head" }, h("div", null, h("p", { class: "c-sel-name" }, product.name), h("p", { class: "text-3 mono" }, (product.sku || "") + " · " + unitWord(product.unit) + (product.cost_paise !== null && product.cost_paise !== undefined ? " · " + tt("cost {value}", { value: money(product.cost_paise) }) : ""))),
         h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () { product = null; paintProduct(); paintValue(); pick.focus(); } }, "Change")));
     }
     function paintValue() {
       var m = fmt.toMilli(q.value);
-      value.textContent = product && m > 0 && product.cost_paise ? "Value at cost: about " + money(Math.floor(m * product.cost_paise / 1000)) : "";
+      value.textContent = product && m > 0 && product.cost_paise ? tt("Value at cost: about {value}", { value: money(Math.floor(m * product.cost_paise / 1000)) }) : "";
     }
     q.addEventListener("input", function () { setErr(q, null); paintValue(); });
     file.addEventListener("change", function () {
@@ -978,7 +982,7 @@
     pick.focus();
     function submit() {
       err.hidden = true;
-      if (!product) { err.textContent = "Scan or search the product first."; err.hidden = false; pick.focus(); return; }
+      if (!product) { err.textContent = tt("Scan or search the product first."); err.hidden = false; pick.focus(); return; }
       var m = fmt.toMilli(q.value), pr = qtyProblem(m, product);
       if (pr) { setErr(q, pr); q.focus(); return; }
       var r = reason();
@@ -986,7 +990,8 @@
       setErr(note, null);
       var body = { store_id: storeId, product_id: product.id, qty_milli: m, reason: r, note: note.value.trim() || null, key: key };
       if (photo) { body.photo_base64 = photo.split(",")[1]; body.photo_type = "image/jpeg"; }
-      DQ.confirm({ title: "Write off " + qty(m, product.unit) + " " + product.name + "?", message: "It leaves the stock of " + storeName(storeId) + " as " + words(r) + (value.textContent ? ". " + value.textContent : "") + ". This cannot be undone; a count corrects any mistake.", confirmLabel: "Write off", danger: true }).then(function (c) {
+      var why = tt(cap(r)).toLowerCase();
+      DQ.confirm({ title: tt("Write off {qty} {name}?", { qty: qty(m, product.unit), name: product.name }), message: tt("It leaves the stock of {store} as {reason}.", { store: storeName(storeId), reason: why }) + (value.textContent ? " " + tt("{text}.", { text: value.textContent }) : "") + " " + tt("This cannot be undone; a count corrects any mistake."), confirmLabel: "Write off", danger: true }).then(function (c) {
         if (!c.ok) return;
         btn.disabled = true;
         var go = navigator.onLine ? DQ.post("/api/wastage", body).then(function (d) { return { sent: true, data: d }; }, function (e) {
@@ -995,7 +1000,7 @@
         }) : send("Write off " + product.name, "POST", "/api/wastage", body);
         go.then(function (res) {
           btn.disabled = false;
-          DQ.toast(res.queued ? "Saved on this device. The write off is sent once the internet is back." : (res.data.duplicate ? "Already written off. Nothing changed." : "Written off: " + qty(m, product.unit) + " " + product.name + ", " + money(res.data.value_paise) + " at cost."));
+          DQ.toast(res.queued ? "Saved on this device. The write off is sent once the internet is back." : (res.data.duplicate ? "Already written off. Nothing changed." : tt("Written off: {qty} {name}, {value} at cost.", { qty: qty(m, product.unit), name: product.name, value: money(res.data.value_paise) })));
           product = null; photo = null; file.value = ""; q.value = ""; note.value = ""; key = DQ.key("waste");
           DQ.clear(preview); paintProduct(); paintValue(); pick.focus();
           loadList();
@@ -1009,15 +1014,15 @@
         DQ.clear(box);
         var total = rows.reduce(function (a, x) { return a + x.value_paise; }, 0);
         box.appendChild(card("Written off in the last 30 days", h("div", null,
-          rows.length ? h("p", { class: "text-2 c-note" }, rows.length + " write off" + (rows.length > 1 ? "s" : "") + ", " + money(total) + " at cost.") : null,
+          rows.length ? h("p", { class: "text-2 c-note" }, ttn(rows.length, "{n} write off, {value} at cost.", "{n} write offs, {value} at cost.", { value: money(total) })) : null,
           rows.length ? h("ul", { class: "c-lines" }, rows.map(function (x) {
             return h("li", { class: "c-line" },
               h("div", { class: "c-line-main" }, h("strong", null, x.name), h("span", { class: "mono c-line-qty" }, qty(x.qty_milli, x.unit))),
               h("div", { class: "c-line-sub" }, ui.badge(cap((x.reason || x.type).split(":")[0]), x.type === "damage" ? "attention" : "neutral"),
                 h("span", { class: "text-2" }, T.dt(x.at) + (x.person ? " · " + x.person : "") + " · " + money(x.value_paise)),
                 (x.reason || "").indexOf(":") > 0 ? h("span", { class: "text-2" }, x.reason.slice(x.reason.indexOf(":") + 1).trim()) : null),
-              x.photo_id ? h("a", { class: "c-thumb", href: "/api/attachments/" + x.photo_id, target: "_blank", rel: "noopener", "aria-label": "Open the photo of " + x.name },
-                h("img", { src: "/api/attachments/" + x.photo_id, alt: "Photo of " + x.name, loading: "lazy" })) : null);
+              x.photo_id ? h("a", { class: "c-thumb", href: "/api/attachments/" + x.photo_id, target: "_blank", rel: "noopener", "aria-label": tt("Open the photo of {name}", { name: x.name }) },
+                h("img", { src: "/api/attachments/" + x.photo_id, alt: tt("Photo of {name}", { name: x.name }), loading: "lazy" })) : null);
           })) : ui.empty({ title: "Nothing written off recently", text: "Expired, damaged or spoiled stock you write off appears here with its photo." }))));
       }, function (e) { var box = document.getElementById("c-waste-list"); if (box) { DQ.clear(box); box.appendChild(ui.error(e, loadList)); } });
     }
@@ -1058,13 +1063,13 @@
         var rl = till.get("refused", sid, []);
         refused.forEach(function (b) { b.error = by[b.bill_number].error; rl.push(b); });
         till.set("refused", sid, rl);
-        DQ.toast(refused.length + " bill" + (refused.length > 1 ? "s were" : " was") + " not accepted. Open Checkout to see why.", { kind: "risk" });
+        DQ.toast(ttn(refused.length, "{n} bill was not accepted. Open Checkout to see why.", "{n} bills were not accepted. Open Checkout to see why."), { kind: "risk" });
       }
       tillChanged();
       if (till.pending(sid).length && r.results.length) return syncTill(sid);
     }, function (e) {
       syncing[sid] = false;
-      if (e.status && e.status < 500 && e.status !== 401 && e.status !== 429) DQ.toast("Waiting bills could not be sent: " + e.message, { kind: "risk" });
+      if (e.status && e.status < 500 && e.status !== 401 && e.status !== 429) DQ.toast(tt("Waiting bills could not be sent: {why}", { why: e.message }), { kind: "risk" });
       tillChanged();
     });
   }
@@ -1134,13 +1139,13 @@
     function send(channel, btn) {
       err.hidden = true; ok.hidden = true;
       var digits = phone.value.replace(/\D/g, "");
-      if (digits.length < 10) { fail("Enter the customer's 10-digit mobile number."); phone.focus(); return; }
-      if (!navigator.onLine) { fail("Sending needs the internet. Print the receipt instead, or try again later."); return; }
+      if (digits.length < 10) { fail(tt("Enter the customer's 10-digit mobile number.")); phone.focus(); return; }
+      if (!navigator.onLine) { fail(tt("Sending needs the internet. Print the receipt instead, or try again later.")); return; }
       // A link has to open in a window made during the click, or the browser blocks it.
       var win = channel === "whatsapp" && !(rcptKnown && rcptKnown.whatsapp === "api") ? window.open("", "_blank") : null;
       btn.disabled = true;
       getId().then(function (id) {
-        if (!id) throw new Error("This bill has not reached the server yet. Try again in a minute.");
+        if (!id) throw new Error(tt("This bill has not reached the server yet. Try again in a minute."));
         return DQ.post("/api/checkout/bills/" + id + "/receipt", { channel: channel, phone: phone.value });
       }).then(function (r) {
         btn.disabled = false;
@@ -1149,7 +1154,7 @@
           return;
         }
         if (win) win.close();
-        ok.textContent = "Receipt sent " + (channel === "sms" ? "by text" : "on WhatsApp") + " to " + r.sent_to + ".";
+        ok.textContent = tt(channel === "sms" ? "Receipt sent by text to {to}." : "Receipt sent on WhatsApp to {to}.", { to: r.sent_to });
         ok.hidden = false;
       }, function (e) { btn.disabled = false; if (win) win.close(); fail(e.message); });
     }
@@ -1170,7 +1175,7 @@
     if (!store) return noStore(main);
     if (store.mode !== "connected") {
       main.appendChild(ui.page("Checkout"));
-      main.appendChild(ui.empty({ title: store.name + " runs standalone", text: "Its sales come from the daily sales file or totals typed on the Sales screen, so there is no till here. Switch the store to connected in Settings to sell with Checkout.", action: { label: "Go to Settings", href: "#/settings" } }));
+      main.appendChild(ui.empty({ title: tt("{store} runs standalone", { store: store.name }), text: "Its sales come from the daily sales file or totals typed on the Sales screen, so there is no till here. Switch the store to connected in Settings to sell with Checkout.", action: { label: "Go to Settings", href: "#/settings" } }));
       return;
     }
     var sid = store.id;
@@ -1194,7 +1199,7 @@
     var miscBtn = ui.button("Misc item", function () { offerMisc(null); }, "ghost");
     var holdBtn = ui.button("Hold", holdBill, "ghost");
     var voidBtn = ui.button("Void", voidBill, "ghost");
-    main.appendChild(ui.page("Checkout", { sub: h("span", null, store.name + " · bill ", numberEl), actions: [heldBtn, miscBtn, holdBtn, voidBtn] }));
+    main.appendChild(ui.page("Checkout", { sub: h("span", null, store.name + " · " + tt("bill") + " ", numberEl), actions: [heldBtn, miscBtn, holdBtn, voidBtn] }));
     var banner = h("div", { class: "c-till-banner", "aria-live": "polite" });
     main.appendChild(banner);
 
@@ -1260,8 +1265,8 @@
     }
     function unknownCode(code) {
       if (done) nextCustomer();
-      if (!navigator.onLine) { offerMisc(code, "Barcode " + code + " is not in the catalogue saved on this till. Sell it as a misc item, or ask a manager to add it."); return; }
-      var line = { id: DQ.key("ln"), loading: true, name: "Looking up " + code + "…", qty_milli: 1000, price_paise: 0, code: code };
+      if (!navigator.onLine) { offerMisc(code, tt("Barcode {code} is not in the catalogue saved on this till. Sell it as a misc item, or ask a manager to add it.", { code: code })); return; }
+      var line = { id: DQ.key("ln"), loading: true, name: tt("Looking up {code}…", { code: code }), qty_milli: 1000, price_paise: 0, code: code };
       cart.lines.push(line); paintCart(line.id);
       DQ.get("/api/checkout/scan" + DQ.qs({ code: code, store_id: sid })).then(function (r) {
         cart.lines = cart.lines.filter(function (l) { return l.id !== line.id; });
@@ -1274,7 +1279,7 @@
       }).catch(function (e) {
         cart.lines = cart.lines.filter(function (l) { return l.id !== line.id; });
         paintCart();
-        if (e.status === 0) offerMisc(code, "The server could not be reached to look up " + code + ". Sell it as a misc item, or try again.");
+        if (e.status === 0) offerMisc(code, tt("The server could not be reached to look up {code}. Sell it as a misc item, or try again.", { code: code }));
         else DQ.toast(e.message, { kind: "risk" });
       });
     }
@@ -1286,8 +1291,8 @@
         return h("form", { class: "c-form", onsubmit: function (e) {
           e.preventDefault();
           var pp = fmt.toPaise(price.value);
-          if (!desc.value.trim()) { err.textContent = "Describe the item."; err.hidden = false; desc.focus(); return; }
-          if (pp === null || pp <= 0) { err.textContent = "Type the price in rupees, like 45 or 45.50."; err.hidden = false; price.focus(); return; }
+          if (!desc.value.trim()) { err.textContent = tt("Describe the item."); err.hidden = false; desc.focus(); return; }
+          if (pp === null || pp <= 0) { err.textContent = tt("Type the price in rupees, like 45 or 45.50."); err.hidden = false; price.focus(); return; }
           close({ description: desc.value.trim(), price: pp });
         } },
           message ? h("p", { class: "text-2" }, message) : h("p", { class: "text-2" }, "For an item without a barcode in the catalogue. No product's stock changes until a manager maps it."),
@@ -1305,9 +1310,9 @@
     }
     function askPrice(line) {
       var price = ui.input({ inputmode: "decimal", class: "input c-big-input", autocomplete: "off" });
-      modal("Type the price of " + line.name, function (close) {
+      modal(tt("Type the price of {name}", { name: line.name }), function (close) {
         return h("form", { class: "c-form", onsubmit: function (e) { e.preventDefault(); var pp = fmt.toPaise(price.value); if (pp === null || pp <= 0) { price.setAttribute("aria-invalid", "true"); return; } close(pp); } },
-          h("p", { class: "text-2" }, line.name + " has no selling price in the catalogue. Type the price on the pack."),
+          h("p", { class: "text-2" }, tt("{name} has no selling price in the catalogue. Type the price on the pack.", { name: line.name })),
           ui.field("Price (₹)", price), numpad(price, {}),
           h("div", { class: "dialog-actions" }, h("button", { type: "button", class: "btn btn-ghost", onclick: function () { close(null); } }, "Remove the item"), h("button", { type: "submit", class: "btn btn-primary" }, "Use this price")));
       }).then(function (pp) {
@@ -1323,13 +1328,13 @@
     function editQty(line) {
       var i = ui.input({ inputmode: "decimal", class: "input c-big-input", value: String(line.qty_milli / 1000), autocomplete: "off" });
       var err = h("p", { class: "field-error", role: "alert", hidden: true });
-      modal("How many " + line.name + "?", function (close) {
+      modal(tt("How many {name}?", { name: line.name }), function (close) {
         return h("form", { class: "c-form", onsubmit: function (e) {
           e.preventDefault();
           var m = fmt.toMilli(i.value), pr = qtyProblem(m, { name: line.name, unit: line.unit || "each" }, true);
           if (pr) { err.textContent = pr; err.hidden = false; return; }
           close(m);
-        } }, ui.field("Quantity (" + unitWord(line.unit) + ")", i), numpad(i, { decimal: line.unit && line.unit !== "each" }), err,
+        } }, ui.field(tt("Quantity ({unit})", { unit: unitWord(line.unit) }), i), numpad(i, { decimal: line.unit && line.unit !== "each" }), err,
           h("div", { class: "dialog-actions" }, h("button", { type: "button", class: "btn btn-ghost", onclick: function () { close(null); } }, "Cancel"), h("button", { type: "submit", class: "btn btn-primary" }, "Set the quantity")));
       }).then(function (m) { if (m !== null && m !== undefined) setQty(line, m); setTimeout(focusScan, 50); });
       setTimeout(function () { i.select(); }, 30);
@@ -1338,7 +1343,7 @@
       var at = cart.lines.indexOf(line);
       if (at < 0) return;
       cart.lines.splice(at, 1); save(); paintCart(); paintPay();
-      DQ.toast("Removed " + line.name + ".", { undo: function () { cart.lines.splice(Math.min(at, cart.lines.length), 0, line); save(); paintCart(line.id); paintPay(); } });
+      DQ.toast(tt("Removed {name}.", { name: line.name }), { undo: function () { cart.lines.splice(Math.min(at, cart.lines.length), 0, line); save(); paintCart(line.id); paintPay(); } });
       focusScan();
     }
     function editPrice(line) {
@@ -1348,20 +1353,20 @@
       var reason = ui.input({ maxlength: 200, value: line.reason || "", placeholder: "For example: damaged pack, staff discount" });
       var pin = mayOverride ? null : ui.input({ type: "password", inputmode: "numeric", autocomplete: "off", maxlength: 8 });
       var err = h("p", { class: "field-error", role: "alert", hidden: true });
-      modal("Change the price of " + line.name, function (close) {
+      modal(tt("Change the price of {name}", { name: line.name }), function (close) {
         return h("form", { class: "c-form", onsubmit: function (e) {
           e.preventDefault();
           var pp = fmt.toPaise(price.value), dd = disc.value.trim() ? fmt.toPaise(disc.value) : 0;
-          if (pp === null || pp < 0) { err.textContent = "Type the price in rupees."; err.hidden = false; return; }
-          if (dd === null || dd < 0) { err.textContent = "Type the discount in rupees, or leave it empty."; err.hidden = false; return; }
-          if (dd > Math.floor(line.qty_milli * pp / 1000)) { err.textContent = "The discount is more than the line."; err.hidden = false; return; }
+          if (pp === null || pp < 0) { err.textContent = tt("Type the price in rupees."); err.hidden = false; return; }
+          if (dd === null || dd < 0) { err.textContent = tt("Type the discount in rupees, or leave it empty."); err.hidden = false; return; }
+          if (dd > Math.floor(line.qty_milli * pp / 1000)) { err.textContent = tt("The discount is more than the line."); err.hidden = false; return; }
           var lower = (listed !== null && listed !== undefined && pp < listed) || dd > 0;
-          if (lower && reason.value.trim().length < 3) { err.textContent = "Say why it is cheaper, in a few words."; err.hidden = false; reason.focus(); return; }
-          if (lower && pin && !/^\d{4,8}$/.test(pin.value)) { err.textContent = "A manager types their PIN to approve a lower price."; err.hidden = false; pin.focus(); return; }
+          if (lower && reason.value.trim().length < 3) { err.textContent = tt("Say why it is cheaper, in a few words."); err.hidden = false; reason.focus(); return; }
+          if (lower && pin && !/^\d{4,8}$/.test(pin.value)) { err.textContent = tt("A manager types their PIN to approve a lower price."); err.hidden = false; pin.focus(); return; }
           close({ price: pp, discount: dd, reason: reason.value.trim(), pin: pin ? pin.value : null, lower: lower });
         } },
-          h("p", { class: "text-2" }, listed !== null && listed !== undefined ? "The price today is " + money(listed) + " per " + (line.unit && line.unit !== "each" ? line.unit : "unit") + ". A lower price or a discount is logged with your name, the original price and the reason." : "A misc item's price can be changed freely."),
-          h("div", { class: "grid-2" }, ui.field("Price per " + (line.unit && line.unit !== "each" ? line.unit : "unit") + " (₹)", price), ui.field("Discount on this line (₹)", disc)),
+          h("p", { class: "text-2" }, listed !== null && listed !== undefined ? tt("The price today is {price} per {unit}. A lower price or a discount is logged with your name, the original price and the reason.", { price: money(listed), unit: line.unit && line.unit !== "each" ? line.unit : tt("unit") }) : "A misc item's price can be changed freely."),
+          h("div", { class: "grid-2" }, ui.field(tt("Price per {unit} (₹)", { unit: line.unit && line.unit !== "each" ? line.unit : tt("unit") }), price), ui.field("Discount on this line (₹)", disc)),
           ui.field("Reason", reason), pin ? ui.field("Manager PIN", pin, "A manager types it here. It is checked when the bill is paid.") : null, err,
           h("div", { class: "dialog-actions" },
             line.override ? h("button", { type: "button", class: "btn btn-ghost", onclick: function () { close({ reset: true }); } }, "Back to the normal price") : null,
@@ -1384,21 +1389,21 @@
       cart.lines.slice().reverse().forEach(function (l) {
         var li = h("li", { class: "c-cart-line" + (l.id === flashId ? " c-flash" : "") + (l.loading ? " c-loading" : "") },
           h("div", { class: "c-cl-name" }, h("strong", null, l.name),
-            h("span", { class: "text-3 mono" }, l.misc ? "Misc item" + (l.barcode ? " · " + l.barcode : "") : (l.sku || "") + (l.price_paise !== null && l.price_paise !== undefined ? " · " + money(l.price_paise) + (l.unit && l.unit !== "each" ? " per " + l.unit : " each") : "")),
+            h("span", { class: "text-3 mono" }, l.misc ? tt("Misc item") + (l.barcode ? " · " + l.barcode : "") : (l.sku || "") + (l.price_paise !== null && l.price_paise !== undefined ? " · " + (l.unit && l.unit !== "each" ? tt("{price} per {unit}", { price: money(l.price_paise), unit: l.unit }) : tt("{price} each", { price: money(l.price_paise) })) : "")),
             l.override ? h("span", { class: "c-override" }, ui.badge("Price changed", "attention"), " ", l.reason || "") : null),
           l.loading ? h("span", { class: "text-2" }, "Looking up…") : h("div", { class: "c-cl-ctl" },
-            h("div", { class: "c-stepper", role: "group", "aria-label": "Quantity of " + l.name },
-              h("button", { type: "button", class: "c-step", "aria-label": "One less " + l.name, onclick: function () { setQty(l, l.unit && l.unit !== "each" ? l.qty_milli - 1000 : l.qty_milli - 1000); focusScan(); } }, "−"),
-              h("button", { type: "button", class: "c-step-qty mono", "aria-label": "Quantity " + qty(l.qty_milli, l.unit) + ". Change it", onclick: function () { editQty(l); } }, qty(l.qty_milli, l.unit)),
-              h("button", { type: "button", class: "c-step", "aria-label": "One more " + l.name, onclick: function () { setQty(l, l.qty_milli + 1000); focusScan(); } }, "+")),
-            h("span", { class: "c-cl-total mono" }, money(lineTotal(l)), l.discount_paise ? h("span", { class: "text-3 c-cl-disc" }, "incl. −" + money(l.discount_paise)) : null),
+            h("div", { class: "c-stepper", role: "group", "aria-label": tt("Quantity of {name}", { name: l.name }) },
+              h("button", { type: "button", class: "c-step", "aria-label": tt("One less {name}", { name: l.name }), onclick: function () { setQty(l, l.unit && l.unit !== "each" ? l.qty_milli - 1000 : l.qty_milli - 1000); focusScan(); } }, "−"),
+              h("button", { type: "button", class: "c-step-qty mono", "aria-label": tt("Quantity {qty}. Change it", { qty: qty(l.qty_milli, l.unit) }), onclick: function () { editQty(l); } }, qty(l.qty_milli, l.unit)),
+              h("button", { type: "button", class: "c-step", "aria-label": tt("One more {name}", { name: l.name }), onclick: function () { setQty(l, l.qty_milli + 1000); focusScan(); } }, "+")),
+            h("span", { class: "c-cl-total mono" }, money(lineTotal(l)), l.discount_paise ? h("span", { class: "text-3 c-cl-disc" }, tt("incl. −{value}", { value: money(l.discount_paise) })) : null),
             h("div", { class: "c-cl-more" },
               h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () { editPrice(l); } }, "Price"),
-              h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Remove " + l.name, onclick: function () { removeLine(l); } }, "Remove"))));
+              h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": tt("Remove {name}", { name: l.name }), onclick: function () { removeLine(l); } }, "Remove"))));
         cartBox.appendChild(li);
       });
       var heldN = till.get("held", sid, []).length;
-      heldBtn.textContent = "Held bills" + (heldN ? " (" + heldN + ")" : "");
+      heldBtn.textContent = heldN ? tt("Held bills ({n})", { n: heldN }) : tt("Held bills");
       holdBtn.disabled = !cart.lines.length || !!done;
       voidBtn.disabled = !cart.lines.length || !!done;
     }
@@ -1413,7 +1418,7 @@
         cart.payments = cart.payments.filter(function (p) { return p.method !== "exchange"; });
         var use = Math.min(exch.credit, cartTotal(cart));
         if (use > 0) cart.payments.unshift({ method: "exchange", amount_paise: use });
-        payBox.appendChild(msgBox("data", "Exchange for bill " + exch.original_bill_number + ": " + money(exch.credit) + " credit from the items returned. Scan the new items."));
+        payBox.appendChild(msgBox("data", tt("Exchange for bill {number}: {value} credit from the items returned. Scan the new items.", { number: exch.original_bill_number, value: money(exch.credit) })));
         payBox.appendChild(h("div", { class: "row" }, ui.button("Cancel the exchange", function () { EXCH = exch = null; cart.payments = cart.payments.filter(function (p) { return p.method !== "exchange"; }); save(); paintPay(); }, "ghost", { class: "btn btn-ghost btn-sm" })));
       }
       var total = cartTotal(cart), paid = paidSoFar(cart), left = total - paid;
@@ -1422,12 +1427,12 @@
       payBox.appendChild(card(null, h("div", { class: "c-total" },
         h("p", { class: "c-total-label" }, "Total"),
         h("p", { class: "c-total-value mono", "aria-live": "polite" }, money(total)),
-        h("p", { class: "text-2" }, fmt.num(Math.round(count)) + " item" + (count === 1 ? "" : "s") + (discounts ? " · savings " + money(Math.round(discounts)) : "")))));
+        h("p", { class: "text-2" }, ttn(Math.round(count), "{n} item", "{n} items") + (discounts ? " · " + tt("savings {value}", { value: money(Math.round(discounts)) }) : "")))));
       if (!cart.lines.length) return;
       var body = h("div", { class: "c-form" });
       if (cart.payments.length) {
         body.appendChild(h("ul", { class: "c-pays" }, cart.payments.map(function (p, i) {
-          return h("li", null, h("span", null, (p.method === "exchange" ? "Exchange credit" : cap(p.method === "upi" ? "UPI" : p.method)) + (p.tendered_paise ? " (received " + money(p.tendered_paise) + ")" : "")), h("span", { class: "mono" }, money(p.amount_paise)),
+          return h("li", null, h("span", null, (p.method === "exchange" ? tt("Exchange credit") : methodWord(p.method)) + (p.tendered_paise ? " " + tt("(received {value})", { value: money(p.tendered_paise) }) : "")), h("span", { class: "mono" }, money(p.amount_paise)),
             p.method === "exchange" ? null : h("button", { type: "button", class: "btn btn-ghost btn-sm", "aria-label": "Remove this payment", onclick: function () { cart.payments.splice(i, 1); save(); paintPay(); } }, "Remove"));
         })));
         body.appendChild(h("p", { class: "c-left" }, "Still to pay ", h("strong", { class: "mono" }, money(left))));
@@ -1452,7 +1457,7 @@
         var paintChange = function () {
           var g = got.value.trim() ? fmt.toPaise(got.value) : left;
           if (g === null) { change.textContent = ""; return; }
-          change.textContent = g > left ? "Change to give " + money(g - left) : g < left ? "Still " + money(left - g) + " short; take the rest another way" : "Exact amount";
+          change.textContent = g > left ? tt("Change to give {value}", { value: money(g - left) }) : g < left ? tt("Still {value} short; take the rest another way", { value: money(left - g) }) : tt("Exact amount");
           change.setAttribute("data-kind", g > left ? "change" : g < left ? "short" : "exact");
         };
         got.addEventListener("input", paintChange);
@@ -1461,13 +1466,13 @@
         [1000, 5000, 10000, 20000, 50000, 200000].forEach(function (n) { var v = Math.ceil(left / n) * n; if (v > left && notes.indexOf(v) < 0 && notes.length < 5) notes.push(v); });
         var takeCash = function () {
           var g = got.value.trim() ? fmt.toPaise(got.value) : left;
-          if (g === null || g <= 0) { err.textContent = "Type the cash received in rupees."; err.hidden = false; got.focus(); return; }
+          if (g === null || g <= 0) { err.textContent = tt("Type the cash received in rupees."); err.hidden = false; got.focus(); return; }
           cart.payments.push({ method: "cash", amount_paise: Math.min(g, left), tendered_paise: g });
           save(); afterPayment();
         };
         body.appendChild(ui.field("Cash received (₹)", got));
         body.appendChild(h("div", { class: "c-notes", role: "group", "aria-label": "Quick amounts" }, notes.map(function (v, i) {
-          return h("button", { type: "button", class: "btn btn-ghost", onclick: function () { got.value = (v / 100).toFixed(2); paintChange(); } }, i === 0 ? "Exact " + money(v, { whole: v % 100 === 0 }) : money(v, { whole: true }));
+          return h("button", { type: "button", class: "btn btn-ghost", onclick: function () { got.value = (v / 100).toFixed(2); paintChange(); } }, i === 0 ? tt("Exact {value}", { value: money(v, { whole: v % 100 === 0 }) }) : money(v, { whole: true }));
         })));
         body.appendChild(change);
         body.appendChild(err);
@@ -1476,14 +1481,14 @@
       } else {
         var amt = ui.input({ inputmode: "decimal", autocomplete: "off", class: "input", value: (left / 100).toFixed(2) });
         var ref = ui.input({ maxlength: 64, autocomplete: "off", placeholder: method === "upi" ? "UPI reference, optional" : "Last 4 digits or approval code, optional" });
-        var label = method === "upi" ? "UPI" : "Card";
+        var label = method === "upi" ? "UPI payment succeeded" : "Card payment succeeded";
         body.appendChild(h("p", { class: "text-2" }, method === "upi" ? "Ask the customer to pay by UPI. Press the button only after the payment shows as successful." : "Take the card on the terminal. Press the button only after the terminal says approved."));
         body.appendChild(h("div", { class: "grid-2" }, ui.field("Amount (₹)", amt), ui.field("Reference", ref)));
         body.appendChild(err);
-        body.appendChild(ui.button(label + " payment succeeded", function () {
+        body.appendChild(ui.button(label, function () {
           var a = fmt.toPaise(amt.value);
-          if (a === null || a <= 0) { err.textContent = "Type the amount in rupees."; err.hidden = false; return; }
-          if (a > left) { err.textContent = "That is more than the " + money(left) + " still to pay."; err.hidden = false; return; }
+          if (a === null || a <= 0) { err.textContent = tt("Type the amount in rupees."); err.hidden = false; return; }
+          if (a > left) { err.textContent = tt("That is more than the {value} still to pay.", { value: money(left) }); err.hidden = false; return; }
           cart.payments.push({ method: method, amount_paise: a, reference: ref.value.trim() || null });
           save(); afterPayment();
         }, "primary", { class: "btn btn-primary btn-block c-pay-btn" }));
@@ -1497,7 +1502,7 @@
     /* An exchange goes to the server as one request (the return and the new bill are
        saved together), so it needs the internet; it is never queued on the till. */
     function completeExchange(bill) {
-      if (!navigator.onLine) { paintPay(); var e0 = document.getElementById("c-pay-err"); if (e0) { e0.textContent = "An exchange needs the internet. Try again when the till is back online, or cancel the exchange."; e0.hidden = false; } return; }
+      if (!navigator.onLine) { paintPay(); var e0 = document.getElementById("c-pay-err"); if (e0) { e0.textContent = tt("An exchange needs the internet. Try again when the till is back online, or cancel the exchange."); e0.hidden = false; } return; }
       DQ.clear(payBox); payBox.appendChild(card(null, h("p", { class: "c-total-value" }, "Completing the exchange…")));
       DQ.post("/api/checkout/exchanges", Object.assign({}, bill, {
         original_bill_number: exch.original_bill_number, refund_number: exch.refund_number,
@@ -1505,12 +1510,12 @@
         manager_pin: exch.pin })).then(function (res) {
         var back = Math.max(exch.credit - cartTotal(cart), 0);
         EXCH = exch = null;
-        DQ.toast("Exchange done." + (back ? " Hand back " + money(back) + " by " + methodName(backBy) + "." : ""));
+        DQ.toast(back ? tt("Exchange done. Hand back {value} by {method}.", { value: money(back), method: methodWord(backBy) }) : tt("Exchange done."));
         finish(bill, res.bill);
       }, function (e) {
         paintPay();
         var err = document.getElementById("c-pay-err");
-        if (err) { err.textContent = "Not done yet: " + e.message; err.hidden = false; }
+        if (err) { err.textContent = tt("Not done yet: {why}", { why: e.message }); err.hidden = false; }
       });
     }
     function complete() {
@@ -1527,8 +1532,8 @@
         if (e.status === 0 || e.status >= 500) { keepOffline(); return; }
         paintPay();
         var err = document.getElementById("c-pay-err");
-        if (err) { err.textContent = "Not paid yet: " + e.message + (e.status === 403 ? " Change the price back, or ask a manager to type their PIN under Price." : ""); err.hidden = false; }
-        if (e.status === 422 || e.status === 403) { cart.payments = []; save(); paintPay(); err = document.getElementById("c-pay-err"); if (err) { err.textContent = "Not paid yet: " + e.message + " The payments were cleared; take them again after fixing this."; err.hidden = false; } }
+        if (err) { err.textContent = tt("Not paid yet: {why}", { why: e.message }) + (e.status === 403 ? " " + tt("Change the price back, or ask a manager to type their PIN under Price.") : ""); err.hidden = false; }
+        if (e.status === 422 || e.status === 403) { cart.payments = []; save(); paintPay(); err = document.getElementById("c-pay-err"); if (err) { err.textContent = tt("Not paid yet: {why}", { why: e.message }) + " " + tt("The payments were cleared; take them again after fixing this."); err.hidden = false; } }
       });
     }
     function finish(bill, res) {
@@ -1565,9 +1570,9 @@
       var c = cart;
       c.payments = [];
       var held = till.get("held", sid, []); held.push(c); till.set("held", sid, held);
-      send("Hold bill " + c.number, "POST", "/api/checkout/hold", payloadHold(c, true)).catch(function (e) { DQ.toast("Bill " + c.number + " is held on this till only: " + e.message, { kind: "attention" }); });
+      send("Hold bill " + c.number, "POST", "/api/checkout/hold", payloadHold(c, true)).catch(function (e) { DQ.toast(tt("Bill {number} is held on this till only: {why}", { number: c.number, why: e.message }), { kind: "attention" }); });
       cart = newCart(); save(); paintCart(); paintPay();
-      if (silent !== true) DQ.toast("Bill " + c.number + " held. Recall it from Held bills.");
+      if (silent !== true) DQ.toast(tt("Bill {number} held. Recall it from Held bills.", { number: c.number }));
       focusScan();
     }
     function recall() {
@@ -1576,7 +1581,7 @@
       modal("Held bills", function (close) {
         return h("div", { class: "c-form" }, h("ul", { class: "c-list" }, held.map(function (c) {
           return h("li", null, h("button", { type: "button", class: "c-list-item c-list-btn", onclick: function () { close(c); } },
-            h("span", { class: "c-li-main" }, h("strong", { class: "mono" }, c.number), h("span", { class: "text-2" }, " · " + c.lines.length + " line" + (c.lines.length > 1 ? "s" : "") + " · started " + T.time(c.started_at))),
+            h("span", { class: "c-li-main" }, h("strong", { class: "mono" }, c.number), h("span", { class: "text-2" }, " · " + ttn(c.lines.length, "{n} line", "{n} lines") + " · " + tt("started {when}", { when: T.time(c.started_at) }))),
             h("span", { class: "c-li-side mono" }, money(cartTotal(c)))));
         })), cart.lines.length ? h("p", { class: "text-2" }, "The bill on screen is held first, so nothing is lost.") : null,
           h("div", { class: "dialog-actions" }, h("button", { type: "button", class: "btn btn-ghost", onclick: function () { close(null); } }, "Close")));
@@ -1586,17 +1591,17 @@
         if (cart.lines.length) holdBill(true);
         till.set("held", sid, till.get("held", sid, []).filter(function (x) { return x.number !== c.number; }));
         cart = c; save(); paintCart(); paintPay(); focusScan();
-        DQ.toast("Bill " + c.number + " is back on screen.");
+        DQ.toast(tt("Bill {number} is back on screen.", { number: c.number }));
       });
     }
     function voidBill() {
       if (!cart.lines.length) return;
-      DQ.confirm({ title: "Void bill " + cart.number + "?", message: "Nothing is sold and no stock changes. The void is recorded with your name and the reason.", reason: true, reasonLabel: "Why is it voided? For example: customer left", confirmLabel: "Void the bill", danger: true }).then(function (r) {
+      DQ.confirm({ title: tt("Void bill {number}?", { number: cart.number }), message: "Nothing is sold and no stock changes. The void is recorded with your name and the reason.", reason: true, reasonLabel: "Why is it voided? For example: customer left", confirmLabel: "Void the bill", danger: true }).then(function (r) {
         if (!r.ok) { focusScan(); return; }
         var c = cart;
         send("Void bill " + c.number, "POST", "/api/checkout/void", { store_id: sid, bill_number: c.number, reason: r.reason, lines: c.lines.filter(function (l) { return !l.loading; }).map(payloadLine) }).then(function () {
-          DQ.toast("Bill " + c.number + " voided.");
-        }, function (e) { DQ.toast("The void was not recorded: " + e.message, { kind: "risk" }); });
+          DQ.toast(tt("Bill {number} voided.", { number: c.number }));
+        }, function (e) { DQ.toast(tt("The void was not recorded: {why}", { why: e.message }), { kind: "risk" }); });
         cart = newCart(); save(); paintCart(); paintPay(); focusScan();
       });
     }
@@ -1607,19 +1612,19 @@
       var n = till.pending(sid).length, refused = till.get("refused", sid, []);
       if (!navigator.onLine) banner.appendChild(msgBox("attention", "Offline. Keep selling: bills are kept on this till and sent in order when the internet is back."));
       if (n) banner.appendChild(h("div", { class: "c-msg c-msg-row", "data-kind": "attention", role: "status" },
-        h("span", null, n + " bill" + (n > 1 ? "s" : "") + " waiting to send from this till."),
+        h("span", null, ttn(n, "{n} bill waiting to send from this till.", "{n} bills waiting to send from this till.")),
         navigator.onLine ? h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () { syncTill(sid); } }, "Send now") : null));
       if (refused.length) banner.appendChild(h("div", { class: "c-msg", "data-kind": "risk", role: "alert" },
-        h("p", null, h("strong", null, refused.length + " bill" + (refused.length > 1 ? "s were" : " was") + " not accepted by the server. "), "Fix the cause, then send again, or show a manager."),
+        h("p", null, h("strong", null, ttn(refused.length, "{n} bill was not accepted by the server.", "{n} bills were not accepted by the server.") + " "), "Fix the cause, then send again, or show a manager."),
         h("ul", { class: "c-refused" }, refused.map(function (b) {
           var total = b.payments.reduce(function (a, p) { return a + p.amount_paise; }, 0);
-          return h("li", null, h("span", { class: "mono" }, b.bill_number + " · " + money(total)), h("span", null, " " + (b.error || "")),
+          return h("li", null, h("span", { class: "mono" }, b.bill_number + " · " + money(total)), h("span", null, " " + tx(b.error || "")),
             h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () {
               till.set("refused", sid, till.get("refused", sid, []).filter(function (x) { return x.bill_number !== b.bill_number; }));
               delete b.error; var p = till.pending(sid); p.push(b); till.set("pending", sid, p); syncTill(sid); paintBanner();
             } }, "Send again"),
             h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: function () {
-              DQ.confirm({ title: "Remove bill " + b.bill_number + " from this till?", message: "The sale will not be recorded anywhere. Do this only after a manager has recorded it another way.", reason: true, confirmLabel: "Remove", danger: true }).then(function (r) {
+              DQ.confirm({ title: tt("Remove bill {number} from this till?", { number: b.bill_number }), message: "The sale will not be recorded anywhere. Do this only after a manager has recorded it another way.", reason: true, confirmLabel: "Remove", danger: true }).then(function (r) {
                 if (!r.ok) return;
                 till.set("refused", sid, till.get("refused", sid, []).filter(function (x) { return x.bill_number !== b.bill_number; }));
                 paintBanner();
@@ -1636,11 +1641,11 @@
 
   /* ================================================================ BILLS AND RETURNS */
   var BILL_STATE = { paid: ["Paid", "ok"], refund: ["Refund", "attention"], voided: ["Voided", "risk"], held: ["Held", "data"], open: ["Open", "data"] };
-  function methodName(m) { return m === "upi" ? "UPI" : cap(m); }
+  function methodName(m) { return methodWord(m); }
   DQ.route("#/bills", { title: "Bills and returns", nav: "Bills and returns", render: function (main, params, query, alive) {
     var store = DQ.storeObj();
     if (!store) return noStore(main);
-    main.appendChild(ui.page("Bills and returns", { sub: "Find a bill in " + store.name + " by its number, day or amount. Returns are refunded from the bill." }));
+    main.appendChild(ui.page("Bills and returns", { sub: tt("Find a bill in {store} by its number, day or amount. Returns are refunded from the bill.", { store: store.name }) }));
     var number = ui.input({ value: query.number || "", autocomplete: "off", placeholder: "Part of the number" });
     var day = ui.input({ type: "date", value: query.day !== undefined ? query.day : fmt.today(), max: fmt.today() });
     var amount = ui.input({ inputmode: "decimal", value: query.amount || "", autocomplete: "off", placeholder: "Exact total, like 250" });
@@ -1665,7 +1670,7 @@
         { key: "payments", label: "Paid by", render: function (b) { return b.payments.map(function (p) { return methodName(p.method); }).join(", ") || "—"; } },
         { key: "total_paise", label: "Total", kind: "money" }
       ], rows, { onRow: function (b) { DQ.go("#/bills/" + b.id); }, caption: "Bills found",
-        empty: { title: "No bill matches", text: store.mode === "connected" ? "Try another day, or clear the number and amount. Bills are made on Checkout." : store.name + " runs standalone, so it has no till bills. Its sales come from the daily file.", action: store.mode === "connected" ? { label: "Go to Checkout", href: "#/checkout" } : { label: "See sales", href: "#/sales" } } }));
+        empty: { title: "No bill matches", text: store.mode === "connected" ? "Try another day, or clear the number and amount. Bills are made on Checkout." : tt("{store} runs standalone, so it has no till bills. Its sales come from the daily file.", { store: store.name }), action: store.mode === "connected" ? { label: "Go to Checkout", href: "#/checkout" } : { label: "See sales", href: "#/sales" } } }));
     });
   } });
 
@@ -1676,12 +1681,12 @@
       DQ.clear(main);
       var store = storeById(b.store_id) || DQ.storeObj();
       var st = BILL_STATE[b.state] || [b.state, "neutral"];
-      main.appendChild(ui.page((b.state === "refund" ? "Refund " : "Bill ") + b.bill_number, {
-        sub: (b.paid_at ? T.dt(b.paid_at) : "Not paid") + (b.cashier ? " · " + b.cashier : "") + (b.approved_by ? " · approved by " + b.approved_by : ""),
+      main.appendChild(ui.page(tt(b.state === "refund" ? "Refund {number}" : "Bill {number}", { number: b.bill_number }), {
+        sub: (b.paid_at ? T.dt(b.paid_at) : tt("Not paid")) + (b.cashier ? " · " + b.cashier : "") + (b.approved_by ? " · " + tt("approved by {who}", { who: b.approved_by }) : ""),
         actions: h("a", { class: "btn btn-ghost", href: "#/bills" }, "Find another bill") }));
       main.appendChild(h("div", { class: "c-banner-row" }, ui.badge(st[0], st[1]), b.made_offline ? ui.badge("Made offline", "neutral") : null,
         b.refund_of ? h("a", { href: "#/bills/" + b.refund_of }, "See the original bill") : null,
-        b.void_reason ? h("span", { class: "text-2" }, "Voided: " + b.void_reason) : null, b.refund_reason ? h("span", { class: "text-2" }, "Reason: " + b.refund_reason) : null));
+        b.void_reason ? h("span", { class: "text-2" }, tt("Voided: {why}", { why: b.void_reason })) : null, b.refund_reason ? h("span", { class: "text-2" }, tt("Reason: {why}", { why: b.refund_reason })) : null));
       var left = card("Receipt", h("div", { class: "c-form" }, h("pre", { class: "c-receipt" }, b.receipt),
         h("div", { class: "row" }, ui.button("Print", function () { printText(b.receipt); }, "ghost")),
         b.state === "paid" || b.state === "refund" ? receiptActions(function () { return Promise.resolve(b.id); }) : null));
@@ -1695,7 +1700,7 @@
       if (!lines.length) return card("Return items", h("p", { class: "text-2" }, "This bill has only misc items, which cannot be returned to stock here."));
       var list = h("div", { class: "c-ref-lines" });
       lines.forEach(function (l, i) {
-        var p = cat.byId(l.product_id), name = p ? p.name : (l.description || "Product"), unit = p ? p.unit : "each";
+        var p = cat.byId(l.product_id), name = p ? p.name : (l.description || tt("Product")), unit = p ? p.unit : "each";
         var r = { line: l, unit: unit, name: name };
         r.on = h("input", { type: "checkbox", class: "c-check", id: "c-ref-on-" + i });
         r.q = ui.input({ inputmode: "decimal", class: "input c-num-input", value: String(l.qty_milli / 1000), id: "c-ref-q-" + i });
@@ -1710,7 +1715,7 @@
         if (alive() && lines.every(function (l) { return cat.byId(l.product_id); })) DQ.render();
       }, function () {});
       var reason = ui.input({ maxlength: 200, placeholder: "For example: wrong size, leaking pack" });
-      var methodSel = ui.select((b.payments.length ? b.payments.map(function (p) { return p.method; }) : ["cash"]).concat(["cash", "upi", "card"]).filter(function (m, i, a) { return a.indexOf(m) === i; }).map(function (m) { return { value: m, label: "Refund by " + methodName(m) }; }), b.payments[0] ? b.payments[0].method : "cash");
+      var methodSel = ui.select((b.payments.length ? b.payments.map(function (p) { return p.method; }) : ["cash"]).concat(["cash", "upi", "card"]).filter(function (m, i, a) { return a.indexOf(m) === i; }).map(function (m) { return { value: m, label: tt("Refund by {method}", { method: methodName(m) }) }; }), b.payments[0] ? b.payments[0].method : "cash");
       var pin = ui.input({ type: "password", inputmode: "numeric", autocomplete: "off", maxlength: 8 });
       var total = h("p", { class: "c-value", "aria-live": "polite" });
       var err = h("div", { class: "form-error", role: "alert", hidden: true });
@@ -1723,22 +1728,22 @@
           return { r: r, m: m, value: m ? Math.floor(gross * m / r.line.qty_milli) : 0 };
         });
       }
-      function paintTotal() { var c = chosen(), v = c.reduce(function (a, x) { return a + x.value; }, 0); total.textContent = c.length ? "Refund about " + money(v) : "Tick what is being returned."; btn.textContent = c.length ? "Refund " + money(v) : "Refund"; }
+      function paintTotal() { var c = chosen(), v = c.reduce(function (a, x) { return a + x.value; }, 0); total.textContent = c.length ? tt("Refund about {value}", { value: money(v) }) : tt("Tick what is being returned."); btn.textContent = c.length ? tt("Refund {value}", { value: money(v) }) : tt("Refund"); }
       /* Same checks as a refund, then on to Checkout with the credit. The credit is worked
          out the way the server does: per product, from that product's lines on the bill. */
       function checked() {
         err.hidden = true;
         var c = chosen();
-        if (!c.length) { err.textContent = "Tick at least one item being returned."; err.hidden = false; return null; }
+        if (!c.length) { err.textContent = tt("Tick at least one item being returned."); err.hidden = false; return null; }
         var bad = c.filter(function (x) { return x.m === null || x.m <= 0 || x.m > x.r.line.qty_milli || (x.r.unit === "each" && x.m % 1000); })[0];
-        if (bad) { err.textContent = bad.r.name + ": return between 1 and " + qty(bad.r.line.qty_milli, bad.r.unit) + ", in whole units where it is sold that way."; err.hidden = false; return null; }
-        if (reason.value.trim().length < 3) { err.textContent = "Give the reason for the return."; err.hidden = false; reason.focus(); return null; }
-        if (!/^\d{4,8}$/.test(pin.value)) { err.textContent = "A manager types their PIN to approve the return."; err.hidden = false; pin.focus(); return null; }
+        if (bad) { err.textContent = tt("{name}: return between 1 and {qty}, in whole units where it is sold that way.", { name: bad.r.name, qty: qty(bad.r.line.qty_milli, bad.r.unit) }); err.hidden = false; return null; }
+        if (reason.value.trim().length < 3) { err.textContent = tt("Give the reason for the return."); err.hidden = false; reason.focus(); return null; }
+        if (!/^\d{4,8}$/.test(pin.value)) { err.textContent = tt("A manager types their PIN to approve the return."); err.hidden = false; pin.focus(); return null; }
         return c;
       }
       function exchangeInstead() {
         var c = checked(); if (!c) return;
-        if (!navigator.onLine) { err.textContent = "An exchange needs the internet."; err.hidden = false; return; }
+        if (!navigator.onLine) { err.textContent = tt("An exchange needs the internet."); err.hidden = false; return; }
         var per = {};
         c.forEach(function (x) {
           var k = x.r.line.product_id + (x.r.cond.value === "1" ? ":ok" : ":dmg");
@@ -1761,18 +1766,18 @@
       function go() {
         err.hidden = true;
         var c = chosen();
-        if (!c.length) { err.textContent = "Tick at least one item being returned."; err.hidden = false; return; }
+        if (!c.length) { err.textContent = tt("Tick at least one item being returned."); err.hidden = false; return; }
         var bad = c.filter(function (x) { return x.m === null || x.m <= 0 || x.m > x.r.line.qty_milli || (x.r.unit === "each" && x.m % 1000); })[0];
-        if (bad) { err.textContent = bad.r.name + ": return between 1 and " + qty(bad.r.line.qty_milli, bad.r.unit) + ", in whole units where it is sold that way."; err.hidden = false; return; }
-        if (reason.value.trim().length < 3) { err.textContent = "Give the reason for the refund."; err.hidden = false; reason.focus(); return; }
-        if (!/^\d{4,8}$/.test(pin.value)) { err.textContent = "A manager types their PIN to approve the refund."; err.hidden = false; pin.focus(); return; }
+        if (bad) { err.textContent = tt("{name}: return between 1 and {qty}, in whole units where it is sold that way.", { name: bad.r.name, qty: qty(bad.r.line.qty_milli, bad.r.unit) }); err.hidden = false; return; }
+        if (reason.value.trim().length < 3) { err.textContent = tt("Give the reason for the refund."); err.hidden = false; reason.focus(); return; }
+        if (!/^\d{4,8}$/.test(pin.value)) { err.textContent = tt("A manager types their PIN to approve the refund."); err.hidden = false; pin.focus(); return; }
         var v = c.reduce(function (a, x) { return a + x.value; }, 0);
-        DQ.confirm({ title: "Refund " + money(v) + " by " + methodName(methodSel.value) + "?", message: "A refund cannot be undone. Resaleable items go back to stock; damaged ones are written off.", confirmLabel: "Refund", danger: true }).then(function (ok) {
+        DQ.confirm({ title: tt("Refund {value} by {method}?", { value: money(v), method: methodName(methodSel.value) }), message: "A refund cannot be undone. Resaleable items go back to stock; damaged ones are written off.", confirmLabel: "Refund", danger: true }).then(function (ok) {
           if (!ok.ok) return;
           btn.disabled = true;
           DQ.post("/api/checkout/refunds", { store_id: b.store_id, refund_number: refNo, original_bill_number: b.bill_number, reason: reason.value.trim(), method: methodSel.value, manager_pin: pin.value, device_id: DQ.deviceId(),
             lines: c.map(function (x) { return { product_id: x.r.line.product_id, qty_milli: x.m, resaleable: x.r.cond.value === "1" }; }) }).then(function (res) {
-            DQ.toast((res.duplicate ? "This refund was already made. " : "Refunded ") + money(-res.total_paise) + ". Give it back by " + methodName(methodSel.value) + ".");
+            DQ.toast(tt(res.duplicate ? "This refund was already made. {value}. Give it back by {method}." : "Refunded {value}. Give it back by {method}.", { value: money(-res.total_paise), method: methodName(methodSel.value) }));
             DQ.go("#/bills/" + res.id);
           }, function (e) { btn.disabled = false; pin.value = ""; err.textContent = e.message; err.hidden = false; });
         });
@@ -2012,9 +2017,9 @@
     var day = query.day || fmt.today();
     var dayIn = ui.input({ type: "date", value: day, max: fmt.today(), "aria-label": "Day", class: "input c-day-in" });
     dayIn.addEventListener("change", function () { if (dayIn.value) DQ.go("#/shift" + DQ.qs({ day: dayIn.value })); });
-    main.appendChild(ui.page("My shift", { sub: DQ.me.person.name + " at " + store.name + ", " + T.date(day) + ".", actions: dayIn }));
+    main.appendChild(ui.page("My shift", { sub: tt("{name} at {store}, {date}.", { name: DQ.me.person.name, store: store.name, date: T.date(day) }), actions: dayIn }));
     if (store.mode !== "connected") {
-      main.appendChild(ui.empty({ title: store.name + " does not use the till", text: "Its sales come from the daily file, so there is no shift to show." }));
+      main.appendChild(ui.empty({ title: tt("{store} does not use the till", { store: store.name }), text: "Its sales come from the daily file, so there is no shift to show." }));
       return;
     }
     var body = h("div", { class: "c-stack" }, ui.skeleton(5));
@@ -2026,12 +2031,12 @@
       if (!alive()) return;
       var z = r[0], bills = r[1], bm = z.by_method_paise || {};
       DQ.clear(body);
-      if (z.devices_waiting) body.appendChild(msgBox("risk", z.devices_waiting + " bill(s) are still waiting on a till to be sent. Keep the till online until they go."));
+      if (z.devices_waiting) body.appendChild(msgBox("risk", ttn(z.devices_waiting, "{n} bill is still waiting on a till to be sent. Keep the till online until it goes.", "{n} bills are still waiting on a till to be sent. Keep the till online until they go.")));
       body.appendChild(card("Takings", h("div", { class: "tiles c-tiles" },
-        tile("Bills", fmt.num(z.bills), z.made_offline ? z.made_offline + " made offline" : null),
-        tile("Sales", money(z.sales_paise), "GST inside " + money(z.tax_paise)),
+        tile("Bills", fmt.num(z.bills), z.made_offline ? tt("{n} made offline", { n: fmt.num(z.made_offline) }) : null),
+        tile("Sales", money(z.sales_paise), tt("GST inside {value}", { value: money(z.tax_paise) })),
         tile("Discounts", money(z.discounts_paise)),
-        tile("Refunds", money(z.refunds_paise), fmt.num(z.refunds) + " refund" + (z.refunds === 1 ? "" : "s")),
+        tile("Refunds", money(z.refunds_paise), ttn(z.refunds, "{n} refund", "{n} refunds")),
         tile("Voids", fmt.num(z.voids)),
         tile("Cash", money(bm.cash || 0)), tile("UPI", money(bm.upi || 0)), tile("Card", money(bm.card || 0)))));
       var cashIn = ui.input({ inputmode: "decimal", autocomplete: "off", class: "input c-big-input", id: "c-shift-cash" });
@@ -2040,22 +2045,22 @@
         var c = fmt.toPaise(cashIn.value);
         if (!cashIn.value.trim() || c === null) return null;
         var d = c - (bm.cash || 0);
-        return d === 0 ? "The cash matches." : (d < 0 ? "Short by " : "Over by ") + money(Math.abs(d)) + ".";
+        return d === 0 ? tt("The cash matches.") : tt(d < 0 ? "Short by {value}." : "Over by {value}.", { value: money(Math.abs(d)) });
       }
       function paint() {
         var t = diffText();
-        diffEl.textContent = t || "Count the cash you took and type it, before handing it over.";
-        if (t) diffEl.setAttribute("data-kind", t === "The cash matches." ? "ok" : "risk"); else diffEl.removeAttribute("data-kind");
+        diffEl.textContent = t || tt("Count the cash you took and type it, before handing it over.");
+        if (t) diffEl.setAttribute("data-kind", t === tt("The cash matches.") ? "ok" : "risk"); else diffEl.removeAttribute("data-kind");
       }
       cashIn.addEventListener("input", paint);
       var slip = ui.button("Print handover slip", function () {
         var line = function (a, b) { a = String(a); b = String(b); return a + " ".repeat(Math.max(1, 32 - a.length - b.length)) + b; };
         var counted = fmt.toPaise(cashIn.value);
-        printText([store.name, "Shift handover", DQ.me.person.name, T.date(day) + ", printed " + fmt.time(new Date().toISOString()), "--------------------------------",
-          line("Bills", z.bills), line("Sales", money(z.sales_paise)), line("Refunds", money(z.refunds_paise)), line("Voids", z.voids),
-          line("Cash", money(bm.cash || 0)), line("UPI", money(bm.upi || 0)), line("Card", money(bm.card || 0)), "--------------------------------",
-          line("Cash expected", money(bm.cash || 0)), line("Cash counted", counted === null ? "-" : money(counted)), diffText() || "",
-          "", "Handed to: ____________________", "Signature: ____________________"].join("\n"));
+        printText([store.name, tt("Shift handover"), DQ.me.person.name, tt("{date}, printed {time}", { date: T.date(day), time: fmt.time(new Date().toISOString()) }), "--------------------------------",
+          line(tt("Bills"), z.bills), line(tt("Sales"), money(z.sales_paise)), line(tt("Refunds"), money(z.refunds_paise)), line(tt("Voids"), z.voids),
+          line(tt("Cash"), money(bm.cash || 0)), line("UPI", money(bm.upi || 0)), line(tt("Card"), money(bm.card || 0)), "--------------------------------",
+          line(tt("Cash expected"), money(bm.cash || 0)), line(tt("Cash counted"), counted === null ? "-" : money(counted)), diffText() || "",
+          "", tt("Handed to:") + " ____________________", tt("Signature:") + " ____________________"].join("\n"));
       }, "ghost");
       body.appendChild(card("Cash to hand over", h("div", { class: "c-form" },
         h("div", { class: "c-cash" }, h("div", null, h("p", { class: "tile-label" }, "Cash expected"), h("p", { class: "c-total-value mono" }, money(bm.cash || 0))),
@@ -2063,7 +2068,7 @@
         h("p", { class: "text-2" }, "The store manager closes the day for the whole store. This is your part of it."),
         h("div", { class: "row" }, slip))));
       paint();
-      body.appendChild(card("My bills (" + bills.length + ")", ui.table([
+      body.appendChild(card(tt("My bills ({n})", { n: fmt.num(bills.length) }), ui.table([
         { key: "bill_number", label: "Bill", render: function (b) { return h("span", { class: "mono" }, b.bill_number); } },
         { key: "paid_at", label: "Time", render: function (b) { return b.paid_at ? T.time(b.paid_at) : "Not paid"; } },
         { key: "state", label: "State", render: function (b) { var st = BILL_STATE[b.state] || [b.state, "neutral"]; return ui.badge(st[0], st[1]); } },

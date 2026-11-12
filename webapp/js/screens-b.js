@@ -8,6 +8,9 @@
 (function () {
   "use strict";
   var DQ = window.DQ, h = DQ.h, fmt = DQ.fmt, ui = DQ.ui;
+  /* Translation (js/i18n.js): tt(template, vars), ttn(n, one, many, vars), tx(sentence).
+     Today and Stock are translated; the other screens here stay English for now. */
+  var tt = DQ.t, ttn = DQ.tn, tx = DQ.tx;
 
   /* ================================================================ shared bits */
   var SVGNS = "http://www.w3.org/2000/svg";
@@ -46,8 +49,8 @@
   function tTime(iso) { return iso ? fmt.time(utc(iso)) : "—"; }
   function tDate(iso) { return !iso ? "—" : iso.length <= 10 ? fmt.date(iso) : fmt.date(istDate(iso)); }
   function tDateTime(iso) { return iso ? tDate(iso) + ", " + tTime(iso) + " IST" : "—"; }
-  function fresh(label, iso) { return h("span", { class: "fresh", title: iso ? tDateTime(iso) : "" }, label + " " + tTime(iso)); }
-  function storeName() { var s = DQ.storeObj(); return s ? s.name : "No store"; }
+  function fresh(label, iso) { return h("span", { class: "fresh", title: iso ? tDateTime(iso) : "" }, tx(label) + " " + tTime(iso)); }
+  function storeName() { var s = DQ.storeObj(); return s ? s.name : tt("No store"); }
   function storeById(id) { return DQ.stores().filter(function (s) { return s.id === id; })[0] || null; }
   function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
   function plural(n, one, many) { return fmt.num(n) + " " + (n === 1 ? one : (many || one + "s")); }
@@ -88,7 +91,7 @@
   }
   function chip(text, title) { return h("span", { class: "b-chip-text", title: title || null }, text); }
   function setBusy(btn, busy, label) {
-    if (busy) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = label || "Please wait…"; }
+    if (busy) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = tt(label || "Please wait…"); }
     else { btn.disabled = false; if (btn.dataset.label) btn.textContent = btn.dataset.label; }
   }
   function apiErr(err) { return err.message + (err.problems && err.problems.length ? " " + err.problems.join("; ") : ""); }
@@ -185,11 +188,10 @@
     function X(s) { return L + (W - L - R) * s / xmax; }
     function Y(c) { return T + (H - T - B) * (1 - c / ymax); }
     var tc = expectedCost(samples, target, under, over);
-    var u = row.unit, one = u === "each" ? "a unit" : "a " + u;
-    var label = "Expected cost of being wrong for " + row.name + " at each stock level over the next " + row.risk_days +
-      " days. It is lowest near " + units(Math.round(best.s * 1000), u) + ". At the stock target of " + units(row.target_milli, u) +
-      " the expected cost is " + fmt.rupees(Math.round(tc), { whole: true }) + ". " + cap(one) + " short loses " + fmt.rupees(under) +
-      "; " + one + " left over costs " + fmt.rupees(over) + ".";
+    var u = row.unit, one = u === "each" ? tt("a unit") : tt("a {unit}", { unit: u });
+    var label = tt("Expected cost of being wrong for {name} at each stock level over the next {days} days. It is lowest near {best}. At the stock target of {target} the expected cost is {cost}. {One} short loses {under}; {one} left over costs {over}.", {
+      name: row.name, days: row.risk_days, best: units(Math.round(best.s * 1000), u), target: units(row.target_milli, u),
+      cost: fmt.rupees(Math.round(tc), { whole: true }), One: cap(one), one: one, under: fmt.rupees(under), over: fmt.rupees(over) });
     var g = sv("svg", { viewBox: "0 0 " + W + " " + H, class: "b-chart b-cost", role: "img", "aria-label": label, preserveAspectRatio: "xMidYMid meet" },
       sv("title", { text: label }),
       sv("line", { x1: L, y1: Y(0), x2: W - R, y2: Y(0), class: "b-axis" }),
@@ -199,27 +201,27 @@
       sv("text", { x: L - 6, y: Y(ymax) + 4, class: "b-tick", "text-anchor": "end", text: fmt.rupees(Math.round(ymax), { whole: true, short: true }) }),
       sv("text", { x: L, y: Y(0) + 15, class: "b-tick", "text-anchor": "start", text: "0" }),
       sv("text", { x: W - R, y: Y(0) + 15, class: "b-tick", "text-anchor": "end", text: units(Math.round(xmax * 1000), u) }),
-      sv("text", { x: L + (W - L - R) / 2, y: H - 4, class: "b-axis-label", "text-anchor": "middle", text: "Stock level for the next " + row.risk_days + " days" }),
-      sv("text", { x: 12, y: T + (H - T - B) / 2, class: "b-axis-label", "text-anchor": "middle", transform: "rotate(-90 12 " + (T + (H - T - B) / 2) + ")", text: "Expected cost" }),
+      sv("text", { x: L + (W - L - R) / 2, y: H - 4, class: "b-axis-label", "text-anchor": "middle", text: tt("Stock level for the next {days} days", { days: row.risk_days }) }),
+      sv("text", { x: 12, y: T + (H - T - B) / 2, class: "b-axis-label", "text-anchor": "middle", transform: "rotate(-90 12 " + (T + (H - T - B) / 2) + ")", text: tt("Expected cost") }),
       sv("polyline", { points: pts(curve.map(function (p) { return [X(p[0]), Y(p[1])]; })), class: "b-line-forecast" }),
       sv("line", { x1: X(target), y1: T, x2: X(target), y2: Y(0), class: "b-mark-target" }),
       sv("circle", { cx: X(target), cy: Y(tc), r: 4, class: "b-dot-target" }),
-      sv("text", { x: Math.min(X(target) + 5, W - R - 2), y: T + 10, class: "b-tick b-tick-strong", "text-anchor": X(target) > W - 90 ? "end" : "start", text: "Target " + units(row.target_milli, u) }),
+      sv("text", { x: Math.min(X(target) + 5, W - R - 2), y: T + 10, class: "b-tick b-tick-strong", "text-anchor": X(target) > W - 90 ? "end" : "start", text: tt("Target {qty}", { qty: units(row.target_milli, u) }) }),
       chosen !== null ? [
         sv("line", { x1: X(chosen), y1: T + 14, x2: X(chosen), y2: Y(0), class: "b-mark-override" }),
         sv("rect", { x: X(chosen) - 4, y: Y(expectedCost(samples, chosen, under, over)) - 4, width: 8, height: 8, class: "b-dot-override" }),
-        sv("text", { x: Math.min(X(chosen) + 5, W - R - 2), y: T + 24, class: "b-tick", "text-anchor": X(chosen) > W - 90 ? "end" : "start", text: "Yours " + units(row.decision.value_milli, u) })
+        sv("text", { x: Math.min(X(chosen) + 5, W - R - 2), y: T + 24, class: "b-tick", "text-anchor": X(chosen) > W - 90 ? "end" : "start", text: tt("Yours {qty}", { qty: units(row.decision.value_milli, u) }) })
       ] : null);
     return h("figure", { class: "b-cost-fig" }, g,
-      h("figcaption", { class: "text-3 b-caption" }, "Cost of being wrong: lowest near " + units(Math.round(best.s * 1000), u) +
-        ". " + cap(one) + " short loses " + fmt.rupees(under) + ", " + one + " left over costs " + fmt.rupees(over) + "."));
+      h("figcaption", { class: "text-3 b-caption" }, tt("Cost of being wrong: lowest near {best}. {One} short loses {under}, {one} left over costs {over}.", {
+        best: units(Math.round(best.s * 1000), u), One: cap(one), one: one, under: fmt.rupees(under), over: fmt.rupees(over) })));
   }
 
   function decisionText(d, unit) {
-    var when = d.at ? " at " + tTime(d.at) + (istDate(d.at) !== todayIst() ? " on " + tDate(d.at) : "") : "";
-    if (d.action === "approve") return "Approved" + when + ". The order uses the stock target shown.";
-    if (d.action === "skip") return "Skipped" + when + ". This product is left off this order.";
-    return "Changed to a stock target of " + units(d.value_milli, unit) + when + ". Reason: " + (REASON_LABELS[d.reason] || d.reason || "not given").toLowerCase() + (d.note ? ". Note: " + d.note : "") + ".";
+    var when = d.at ? " " + (istDate(d.at) !== todayIst() ? tt("at {time} on {date}", { time: tTime(d.at), date: tDate(d.at) }) : tt("at {time}", { time: tTime(d.at) })) : "";
+    if (d.action === "approve") return tt("Approved{when}. The order uses the stock target shown.", { when: when });
+    if (d.action === "skip") return tt("Skipped{when}. This product is left off this order.", { when: when });
+    return tt("Changed to a stock target of {qty}{when}. Reason: {reason}.", { qty: units(d.value_milli, unit), when: when, reason: tt(REASON_LABELS[d.reason] || d.reason || "not given").toLowerCase() }) + (d.note ? " " + tt("Note: {note}", { note: d.note }) : "");
   }
 
   function todayCard(row, ctx) {
@@ -228,13 +230,13 @@
       DQ.clear(card);
       var u = row.unit, d = row.decision;
       card.setAttribute("data-decided", d ? d.action : "none");
-      var cases = row.case_pack > 1 && row.suggested_milli ? plural(Math.round(row.suggested_milli / 1000 / row.case_pack), "case") + " of " + row.case_pack : null;
+      var cases = row.case_pack > 1 && row.suggested_milli ? ttn(Math.round(row.suggested_milli / 1000 / row.case_pack), "{n} case of {pack}", "{n} cases of {pack}", { pack: row.case_pack }) : null;
       card.appendChild(h("header", { class: "b-card-head" },
         h("div", null,
           h("h2", { class: "title-3" }, h("a", { href: "#/products/" + row.product_id, class: "b-plain-link" }, row.name)),
           h("p", { class: "text-3 b-card-sub" }, h("span", { class: "mono" }, row.sku), row.category ? " · " + row.category : "", row.supplier ? " · " + row.supplier : "")),
         h("div", { class: "b-card-badges" },
-          ui.badge(fmt.rupees(row.money_at_risk_paise, { whole: true }) + " at risk", "risk"),
+          ui.badge(tt("{value} at risk", { value: fmt.rupees(row.money_at_risk_paise, { whole: true }) }), "risk"),
           row.estimate ? (function () {
             // The reason says how the estimate was made: no history of its own, or only a little.
             var est = (row.reasons || []).filter(function (r) { return r && r.key === "estimate"; })[0];
@@ -244,15 +246,15 @@
           })() : null,
           d ? ui.badge(d.action === "approve" ? "Approved" : d.action === "skip" ? "Skipped" : "Changed", d.action === "change" ? "attention" : "ok") : null)));
       card.appendChild(h("dl", { class: "b-facts" },
-        fact("Forecast, next 7 days", units(row.week.mid_milli, u), { note: "likely " + units(row.week.lo_milli, u) + " to " + units(row.week.hi_milli, u), cls: "b-fact-forecast" }),
-        fact("Stock target", units(row.target_milli, u), { title: "Enough for " + row.risk_days + " days until the next delivery can arrive; covers demand " + fmt.pct(row.service_level) + " of the time (service level)", note: "for " + row.risk_days + " days", cls: "b-fact-target" }),
+        fact("Forecast, next 7 days", units(row.week.mid_milli, u), { note: tt("likely {lo} to {hi}", { lo: units(row.week.lo_milli, u), hi: units(row.week.hi_milli, u) }), cls: "b-fact-forecast" }),
+        fact("Stock target", units(row.target_milli, u), { title: tt("Enough for {days} days until the next delivery can arrive; covers demand {pct} of the time (service level)", { days: row.risk_days, pct: fmt.pct(row.service_level) }), note: tt("for {days} days", { days: row.risk_days }), cls: "b-fact-target" }),
         fact("On hand", row.stock_known ? units(row.on_hand_milli, u) : "Not known", { note: row.stock_known ? null : "count it first" }),
         fact("On order", units(row.on_order_milli, u)),
         fact("Suggested order", units(row.suggested_milli, u), { note: cases })));
       var reasons = (row.reasons || []).map(function (r) { return h("li", { class: "b-chip" }, typeof r === "string" ? r : r.text); });
       if (reasons.length) card.appendChild(h("ul", { class: "b-chips", "aria-label": "Why this needs a look" }, reasons));
       var curve = costCurve(row);
-      var meta = h("p", { class: "fresh b-card-fresh" }, "Forecast from data to " + fmt.dayShort(ctx.cutoff) + (row.history_days ? " · " + plural(row.history_days, "day") + " of sales history" : ""));
+      var meta = h("p", { class: "fresh b-card-fresh" }, tt("Forecast from data to {date}", { date: fmt.dayShort(ctx.cutoff) }) + (row.history_days ? " · " + ttn(row.history_days, "{n} day of sales history", "{n} days of sales history") : ""));
       card.appendChild(h("div", { class: "b-card-body" }, curve, meta));
       if (d) {
         card.appendChild(h("div", { class: "b-decided", role: "status" }, h("p", null, decisionText(d, u)),
@@ -271,7 +273,7 @@
       var note = h("textarea", { class: "input", rows: 2, maxlength: 500 });
       var err = h("p", { class: "field-error", role: "alert", hidden: true });
       changeBox.appendChild(h("div", { class: "grid-3 b-change-grid" },
-        ui.field("New stock target" + (u !== "each" ? " (" + u + ")" : ""), val, "The system's target is " + units(row.target_milli, u) + "."),
+        ui.field(u !== "each" ? tt("New stock target ({unit})", { unit: u }) : "New stock target", val, tt("The system's target is {qty}.", { qty: units(row.target_milli, u) })),
         ui.field("Reason", reason, "The forecast learns from it."),
         ui.field("Note (optional)", note)));
       changeBox.appendChild(err);
@@ -279,9 +281,9 @@
         ui.button("Save the change", function (e) {
           var v = fmt.toMilli(val.value);
           err.hidden = true;
-          if (v === null || v < 0) { err.textContent = "Type the stock target you want, as a number."; err.hidden = false; val.focus(); return; }
-          if (u === "each" && v % 1000) { err.textContent = row.name + " is counted in whole units."; err.hidden = false; val.focus(); return; }
-          if (!reason.value) { err.textContent = "Choose a reason, so the forecast can learn from it."; err.hidden = false; reason.focus(); return; }
+          if (v === null || v < 0) { err.textContent = tt("Type the stock target you want, as a number."); err.hidden = false; val.focus(); return; }
+          if (u === "each" && v % 1000) { err.textContent = tt("{name} is counted in whole units.", { name: row.name }); err.hidden = false; val.focus(); return; }
+          if (!reason.value) { err.textContent = tt("Choose a reason, so the forecast can learn from it."); err.hidden = false; reason.focus(); return; }
           decide(e.target, { action: "change", value_milli: v, reason: reason.value, note: note.value.trim() || null });
         }, "primary"),
         ui.button("Cancel", function () { changeBox.hidden = true; }, "ghost")));
@@ -297,16 +299,16 @@
         row.decision = { id: res.id, action: res.action, value_milli: res.value_milli, reason: body.reason || null, note: body.note || null, at: nowIso() };
         draw();
         ctx.changed();
-        var word = res.action === "approve" ? "Approved" : res.action === "skip" ? "Skipped" : "Changed the stock target for";
-        DQ.toast(word + " " + row.name + ".", { undo: function () {
+        var word = res.action === "approve" ? "Approved {name}." : res.action === "skip" ? "Skipped {name}." : "Changed the stock target for {name}.";
+        DQ.toast(tt(word, { name: row.name }), { undo: function () {
           DQ.post("/api/decisions/" + res.id + "/undo").then(function () {
             row.decision = null; draw(); ctx.changed();
-            DQ.toast("Undone. " + row.name + " is waiting for a decision again.");
-          }, function (err2) { DQ.toast("Could not undo: " + err2.message, { kind: "risk" }); });
+            DQ.toast(tt("Undone. {name} is waiting for a decision again.", { name: row.name }));
+          }, function (err2) { DQ.toast(tt("Could not undo: {why}", { why: err2.message }), { kind: "risk" }); });
         } });
       }, function (err) {
         setBusy(btn, false);
-        DQ.toast("Not saved. " + apiErr(err), { kind: "risk" });
+        DQ.toast(tt("Not saved. {why}", { why: apiErr(err) }), { kind: "risk" });
       });
     }
     draw();
@@ -322,17 +324,17 @@
       DQ.clear(main);
       var canDecide = !!t.can_decide && DQ.can("forecast.review", sid);
       var cutoff = t.run && t.run.data_cutoff;
-      var sub = h("span", null, storeName(), cutoff ? " · forecast from data to " + fmt.dayShort(cutoff) : "", " · ",
+      var sub = h("span", null, storeName(), cutoff ? " · " + tt("forecast from data to {date}", { date: fmt.dayShort(cutoff) }) : "", " · ",
         t.run ? fresh("made at", t.run.finished_at || t.run.started_at) : null);
       var summary = h("p", { class: "b-summary", role: "status" });
-      var bulkBtn = canDecide ? ui.button("Approve the small ones", bulk, "ghost", { title: "Approves every product still waiting whose money at risk is " + fmt.rupees(50000, { whole: true }) + " or less" }) : null;
+      var bulkBtn = canDecide ? ui.button("Approve the small ones", bulk, "ghost", { title: tt("Approves every product still waiting whose money at risk is {value} or less", { value: fmt.rupees(50000, { whole: true }) }) }) : null;
       main.appendChild(ui.page("Today", { sub: sub, actions: bulkBtn ? [bulkBtn] : null }));
       if (!t.run) {
         main.appendChild(ui.empty({ title: "No forecast yet", text: "Forecasts start once there are enough days of sales to learn from. The setup checklist shows what is still missing and how long it takes.", action: { label: "See what the forecast needs", href: "#/setup/forecast" } }));
         return;
       }
       if (!t.rows.length) {
-        main.appendChild(ui.empty({ title: "Nothing needs a look in " + storeName() + " today", text: "Every forecast is within its usual range and stock covers its target. Suggested orders are ready on the Orders screen.", action: { label: "Open suggested orders", href: "#/orders" } }));
+        main.appendChild(ui.empty({ title: tt("Nothing needs a look in {store} today", { store: storeName() }), text: "Every forecast is within its usual range and stock covers its target. Suggested orders are ready on the Orders screen.", action: { label: "Open suggested orders", href: "#/orders" } }));
         return;
       }
       main.appendChild(summary);
@@ -344,17 +346,17 @@
       function paint() {
         var left = t.rows.filter(function (r) { return !r.decision; });
         var small = left.filter(function (r) { return r.money_at_risk_paise <= 50000; }).length;
-        summary.textContent = left.length ? plural(left.length, "product") + " waiting for a decision, " + fmt.num(t.rows.length - left.length) + " decided. Most money at risk first." :
-          "All " + plural(t.rows.length, "product") + " decided. The suggested orders now use these decisions.";
-        if (bulkBtn) { bulkBtn.disabled = !small; bulkBtn.textContent = small ? "Approve the small ones (" + small + ")" : "No small ones left"; }
+        summary.textContent = left.length ? ttn(left.length, "{n} product waiting for a decision, {done} decided. Most money at risk first.", "{n} products waiting for a decision, {done} decided. Most money at risk first.", { done: fmt.num(t.rows.length - left.length) }) :
+          ttn(t.rows.length, "All {n} product decided. The suggested orders now use these decisions.", "All {n} products decided. The suggested orders now use these decisions.");
+        if (bulkBtn) { bulkBtn.disabled = !small; bulkBtn.textContent = small ? tt("Approve the small ones ({n})", { n: small }) : tt("No small ones left"); }
       }
       paint();
       function bulk() {
         setBusy(bulkBtn, true, "Approving…");
         DQ.post("/api/decisions/bulk-approve", { store_id: sid, max_value_paise: 50000 }).then(function (r) {
-          DQ.toast("Approved " + plural(r.approved, "product") + " with " + fmt.rupees(50000, { whole: true }) + " or less at risk.");
+          DQ.toast(ttn(r.approved, "Approved {n} product with {value} or less at risk.", "Approved {n} products with {value} or less at risk.", { value: fmt.rupees(50000, { whole: true }) }));
           if (alive()) DQ.render();
-        }, function (err) { setBusy(bulkBtn, false); DQ.toast("Not approved. " + err.message, { kind: "risk" }); });
+        }, function (err) { setBusy(bulkBtn, false); DQ.toast(tt("Not approved. {why}", { why: err.message }), { kind: "risk" }); });
       }
     }, failed(main, alive, "Today"));
   } });
@@ -380,7 +382,7 @@
         actions: [ui.button("Export to a spreadsheet", function (e) { DQ.download("/api/stock/export.csv" + DQ.qs({ store_id: sid }), e.currentTarget); }, "ghost", { title: "Downloads every product in this store as a CSV file" })]
       }));
       var q = ui.input({ type: "search", value: query.q || "", placeholder: "Name, SKU or barcode" });
-      var cat = ui.select([{ value: "", label: "All categories" }].concat(cats.map(function (c) { return { value: c.category, label: c.category + " (" + c.products + ")" }; })), query.category || "", { onchange: function () { go({ category: cat.value }); } });
+      var cat = ui.select([{ value: "", label: "All categories" }].concat(cats.map(function (c) { return { value: c.category, label: c.category + " (" + fmt.num(c.products) + ")" }; })), query.category || "", { onchange: function () { go({ category: cat.value }); } });
       var form = h("form", { class: "b-filters", role: "search", onsubmit: function (e) { e.preventDefault(); go({ q: q.value.trim() }); } },
         ui.field("Search this store's stock", q), ui.field("Category", cat),
         h("div", { class: "b-filter-btns" }, h("button", { class: "btn btn-primary", type: "submit" }, "Search"),
@@ -391,11 +393,11 @@
         h("button", { type: "button", class: "b-filter-chip", "aria-pressed": status ? "false" : "true", onclick: function () { go({ status: "" }); } }, "All ", h("span", { class: "mono" }, fmt.num(st.total))),
         STATUSES.map(function (s) {
           return h("button", { type: "button", class: "b-filter-chip", "data-kind": ui.statusKind(s), "aria-pressed": status === s ? "true" : "false", onclick: function () { go({ status: status === s ? "" : s }); } },
-            h("span", { class: "b-chip-dot", "aria-hidden": "true" }), s + " ", h("span", { class: "mono" }, fmt.num(counts[s] || 0)));
+            h("span", { class: "b-chip-dot", "aria-hidden": "true" }), tt(s) + " ", h("span", { class: "mono" }, fmt.num(counts[s] || 0)));
         })));
       var rows = status ? st.rows.filter(function (r) { return r.status === status; }) : st.rows;
       if (!st.total && !query.q && !query.category) {
-        main.appendChild(ui.empty({ title: "No products yet", text: "Upload your product list and opening stock, and every product in " + st.store.name + " shows here with its status.", action: { label: "Upload products", href: "#/imports" } }));
+        main.appendChild(ui.empty({ title: "No products yet", text: tt("Upload your product list and opening stock, and every product in {store} shows here with its status.", { store: st.store.name }), action: { label: "Upload products", href: "#/imports" } }));
         return;
       }
       if (status === "Count needed" && rows.length) main.appendChild(h("p", { class: "notice" }, "These products have no trusted stock figure, so no order is suggested for them. ", h("a", { href: "#/count" }, "Count them now"), "."));
@@ -408,14 +410,14 @@
         { key: "days_of_cover", label: "Days of cover", kind: "num", render: function (r) { return r.days_of_cover === null ? "—" : r.days_of_cover.toFixed(1); } },
         { key: "last_counted_at", label: "Last counted", kind: "date", render: function (r) { return r.last_counted_at ? tDate(r.last_counted_at) : "Never"; } },
         { key: "value_paise", label: "Value at cost", kind: "money" },
-        { key: "status", label: "Status", render: function (r) { return h("span", null, ui.badge(r.status, ui.statusKind(r.status)), r.status === "Expiring" && r.expiring_on ? h("div", { class: "text-3 b-small" }, units(r.expiring_milli, r.unit) + " by " + fmt.dayShort(r.expiring_on)) : null); } }
+        { key: "status", label: "Status", render: function (r) { return h("span", null, ui.badge(r.status, ui.statusKind(r.status)), r.status === "Expiring" && r.expiring_on ? h("div", { class: "text-3 b-small" }, tt("{qty} by {date}", { qty: units(r.expiring_milli, r.unit), date: fmt.dayShort(r.expiring_on) })) : null); } }
       ], rows, {
-        caption: "Stock in " + st.store.name,
+        caption: tt("Stock in {store}", { store: st.store.name }),
         onRow: function (r) { DQ.go("#/products/" + r.product_id); },
-        empty: { title: "Nothing matches", text: "No product in " + st.store.name + " matches these filters.", action: { label: "Show all stock", href: "#/stock" } }
+        empty: { title: "Nothing matches", text: tt("No product in {store} matches these filters.", { store: st.store.name }), action: { label: "Show all stock", href: "#/stock" } }
       }));
       var value = rows.reduce(function (a, r) { return a + (r.value_paise || 0); }, 0);
-      if (rows.length) main.appendChild(h("p", { class: "text-3 b-foot" }, "Showing " + plural(rows.length, "product") + " worth " + fmt.rupees(value, { whole: true }) + " at cost." + (st.total > st.rows.length ? " The first " + fmt.num(st.rows.length) + " of " + fmt.num(st.total) + " are listed; search to narrow." : "")));
+      if (rows.length) main.appendChild(h("p", { class: "text-3 b-foot" }, ttn(rows.length, "Showing {n} product worth {value} at cost.", "Showing {n} products worth {value} at cost.", { value: fmt.rupees(value, { whole: true }) }) + (st.total > st.rows.length ? " " + tt("The first {n} of {total} are listed; search to narrow.", { n: fmt.num(st.rows.length), total: fmt.num(st.total) }) : "")));
     }, failed(main, alive, "Stock"));
   } });
 

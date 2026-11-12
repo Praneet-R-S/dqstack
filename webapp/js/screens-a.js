@@ -4,6 +4,9 @@
 (function () {
   "use strict";
   var DQ = window.DQ, h = DQ.h, fmt = DQ.fmt, ui = DQ.ui;
+  /* Translation (js/i18n.js): tt(template, vars), ttn(n, one, many, vars), tx(sentence).
+     Home and Alerts are translated; the manager and owner screens here are English. */
+  var tt = DQ.t, ttn = DQ.tn, tx = DQ.tx;
 
   /* ================================================================ helpers */
 
@@ -16,7 +19,7 @@
   function ist(iso) { return new Date(Date.parse(utc(iso)) + 330 * 60000).toISOString(); }
   function when(iso) { if (!iso) return "—"; var s = ist(iso); return fmt.date(s.slice(0, 10)) + ", " + s.slice(11, 16) + " IST"; }
   function clock(iso) { return iso ? ist(iso).slice(11, 16) : "—"; }
-  function ago(iso) { return iso ? fmt.ago(utc(iso)) : "never"; }
+  function ago(iso) { return iso ? fmt.ago(utc(iso)) : tt("never"); }
   function todayIST() { return ist(new Date().toISOString()).slice(0, 10); }
   function addDays(day, n) { var d = new Date(day + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
   function daysFrom(a, b) { return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000); }
@@ -25,12 +28,12 @@
   function settle(p) {
     return p.then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, error: e }; });
   }
-  function asOf(iso) { return h("span", { class: "fresh", title: when(iso) }, "as of " + clock(iso) + " IST"); }
+  function asOf(iso) { return h("span", { class: "fresh", title: when(iso) }, tt("as of {time} IST", { time: clock(iso) })); }
   function isAdmin() { return DQ.can("company.settings"); }
   function role() { return DQ.me && DQ.me.person ? DQ.me.person.role : null; }
   function storeName(id, list) {
     var s = (list || DQ.stores()).filter(function (x) { return x.id === id; })[0];
-    return s ? s.name : "Another store";
+    return s ? s.name : tt("Another store");
   }
   /* Menu highlight for sub pages (#/settings/stores lights up Settings). */
   function markNav(pattern) {
@@ -69,7 +72,7 @@
   function copyBox(label, text) {
     var input = ui.input({ readonly: true, value: text });
     var btn = ui.button("Copy", function () {
-      function done() { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 2000); }
+      function done() { btn.textContent = tt("Copied"); setTimeout(function () { btn.textContent = tt("Copy"); }, 2000); }
       if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, fallback);
       else fallback();
       function fallback() {
@@ -116,11 +119,11 @@
       var bad = Array.prototype.filter.call(f.querySelectorAll("[required]"), function (i) { return !i.disabled && !String(i.value).trim(); });
       if (bad.length) {
         var lab = f.querySelector('label[for="' + bad[0].id + '"]');
-        err.textContent = "Fill in " + (lab ? lab.textContent.toLowerCase() : "every box") + ".";
+        err.textContent = lab ? tt("Fill in {what}.", { what: lab.textContent.toLowerCase() }) : tt("Fill in every box.");
         err.hidden = false; bad[0].focus(); return;
       }
       var old = btn.textContent;
-      btn.disabled = true; btn.textContent = opts.busyLabel || "Saving…"; err.hidden = true;
+      btn.disabled = true; btn.textContent = tt(opts.busyLabel || "Saving…"); err.hidden = true;
       Promise.resolve().then(onSubmit).then(function () {
         btn.disabled = false; btn.textContent = old;
       }, function (e2) {
@@ -133,7 +136,7 @@
   }
   function busy(btn, label, promise) {
     var old = btn.textContent;
-    btn.disabled = true; btn.textContent = label;
+    btn.disabled = true; btn.textContent = tx(label);
     return promise.then(function (v) { btn.disabled = false; btn.textContent = old; return v; },
       function (e) { btn.disabled = false; btn.textContent = old; DQ.toast(e.message, { kind: "risk" }); throw e; });
   }
@@ -176,21 +179,21 @@
   /* Forecast accuracy in a shop owner's words. */
   function inTen(x) {
     var n = Math.round(10 * x);
-    return n >= 10 && x < 0.995 ? Math.round(100 * x) + " times in 100" : n + " times in 10";
+    return n >= 10 && x < 0.995 ? tt("{n} times in 100", { n: Math.round(100 * x) }) : tt("{n} times in 10", { n: n });
   }
   function accuracyLines(bt) {
     if (!bt) return [];
     var head = [];
-    if (bt.wape !== null && bt.wape !== undefined) head.push("Off by " + Math.round(100 * bt.wape) + "% on average over the last " + plural(bt.weeks || 0, "week"));
-    if (bt.inside_range !== null && bt.inside_range !== undefined) head.push("inside its range " + inTen(bt.inside_range));
+    if (bt.wape !== null && bt.wape !== undefined) head.push(ttn(bt.weeks || 0, "Off by {pct}% on average over the last {n} week", "Off by {pct}% on average over the last {n} weeks", { pct: Math.round(100 * bt.wape) }));
+    if (bt.inside_range !== null && bt.inside_range !== undefined) head.push(tt("inside its range {times}", { times: inTen(bt.inside_range) }));
     var out = [];
-    if (head.length) out.push(cap(head.join("; ")) + ".");
+    if (head.length) out.push(tt("{text}.", { text: cap(head.join("; ")) }));
     if (typeof bt.better_than_naive_pct === "number") {
       out.push(bt.better_than_naive_pct > 0 ?
-        Math.round(bt.better_than_naive_pct) + "% closer than simply repeating recent sales." :
-        "Not yet closer than simply repeating recent sales; it improves as more history arrives.");
+        tt("{pct}% closer than simply repeating recent sales.", { pct: Math.round(bt.better_than_naive_pct) }) :
+        tt("Not yet closer than simply repeating recent sales; it improves as more history arrives."));
     }
-    if (typeof bt.fill_rate === "number") out.push("Following its advice, shelves would have met " + Math.round(100 * bt.fill_rate) + "% of what customers wanted.");
+    if (typeof bt.fill_rate === "number") out.push(tt("Following its advice, shelves would have met {pct}% of what customers wanted.", { pct: Math.round(100 * bt.fill_rate) }));
     return out;
   }
   function accuracyBlock(bt, noHead) {
@@ -199,8 +202,7 @@
     return h("div", { class: "a-accuracy" },
       noHead ? null : h("h3", { class: "title-3" }, "How accurate it has been"),
       h("ul", { class: "a-plain" }, lines.map(function (l) { return h("li", null, l); })),
-      h("p", { class: "field-help" }, "Tested on your own last " + plural(bt.weeks || 0, "week") +
-        " of sales, which it had not seen while learning. The range is the low to high estimate shown with each forecast."));
+      h("p", { class: "field-help" }, ttn(bt.weeks || 0, "Tested on your own last {n} week of sales, which it had not seen while learning. The range is the low to high estimate shown with each forecast.", "Tested on your own last {n} weeks of sales, which it had not seen while learning. The range is the low to high estimate shown with each forecast.")));
   }
 
   /* ================================================================ Home */
@@ -209,9 +211,9 @@
     var next = s.steps.filter(function (x) { return x.state === "todo" || x.state === "in_progress"; })[0];
     return h("section", { class: "card a-banner", "aria-labelledby": "a-setup-h" },
       h("div", { class: "a-banner-text" },
-        h("h2", { id: "a-setup-h", class: "title-3" }, "Setup: " + s.done + " of " + s.total + " steps done"),
+        h("h2", { id: "a-setup-h", class: "title-3" }, tt("Setup: {done} of {total} steps done", { done: s.done, total: s.total })),
         progress(s.done, s.total, "Setup progress"),
-        next ? h("p", { class: "text-2" }, "Next: " + next.title + (next.minutes ? ", about " + next.minutes + " min." : ".")) : null),
+        next ? h("p", { class: "text-2" }, next.minutes ? tt("Next: {step}, about {n} min.", { step: tx(next.title), n: next.minutes }) : tt("Next: {step}.", { step: tx(next.title) })) : null),
       h("div", { class: "row" },
         h("a", { class: "btn btn-primary", href: next ? stepRoute(next.route) : "#/setup" }, "Continue setup"),
         h("a", { class: "btn btn-ghost", href: "#/setup" }, "See the checklist")));
@@ -223,29 +225,29 @@
     var st = res.value, cur = st.current, latest = st.latest, kids = [];
     var running = latest && (latest.status === "queued" || latest.status === "running");
     if (!cur) {
-      if (latest && latest.status === "failed") kids.push(notice("risk", "The last forecast attempt did not finish: " + (latest.message || "no reason given") + "."));
+      if (latest && latest.status === "failed") kids.push(notice("risk", tt("The last forecast attempt did not finish: {why}.", { why: latest.message || tt("no reason given") })));
       if (running) {
         kids.push(h("p", null, "The first forecast is being made now. It usually takes a few minutes; come back to this page to see it."));
         kids.push(h("a", { class: "btn btn-ghost", href: admin ? "#/setup/forecast" : "#/home" }, "See progress"));
       } else if (st.days_needed > 0) {
-        kids.push(h("p", null, st.needs || ("Forecasts start after 2 weeks of daily sales. " + plural(st.history_days, "day") +
-          " of sales are loaded so far; " + plural(st.days_needed, "more day") + " needed.")));
+        kids.push(h("p", null, st.needs || tt("Forecasts start after 2 weeks of daily sales. {have} of sales are loaded so far; {need} needed.", {
+          have: ttn(st.history_days, "{n} day", "{n} days"), need: ttn(st.days_needed, "{n} more day", "{n} more days") })));
         if (DQ.can("imports.upload")) kids.push(h("a", { class: "btn btn-primary", href: "#/imports/new/sales_history" }, "Load sales history"));
       } else {
-        kids.push(h("p", null, "There is enough sales history to start. " + (admin ?
+        kids.push(h("p", null, tt("There is enough sales history to start.") + " " + tt(admin ?
           "Start the first forecast; it takes a few minutes and you are emailed when it is ready." :
           "An Owner or Admin starts the first forecast.")));
         if (admin) kids.push(h("a", { class: "btn btn-primary", href: "#/setup/forecast" }, "Start the first forecast"));
       }
       return sectionCard("No forecast yet", kids, { cls: "a-forecast" });
     }
-    kids.push(h("p", { class: "a-big" }, "Forecast from data to " + fmt.dayShort(cur.data_cutoff)));
-    kids.push(h("p", { class: "text-2" }, "Made " + when(cur.finished_at) + ", " + ago(cur.finished_at) + "."));
-    if (st.stale) kids.push(notice("attention", "This forecast is more than 36 hours old, so it does not know about the latest sales. " +
-      (admin ? "Check why last night's run did not finish." : "Your Owner or Admin has been told.")));
+    kids.push(h("p", { class: "a-big" }, tt("Forecast from data to {date}", { date: fmt.dayShort(cur.data_cutoff) })));
+    kids.push(h("p", { class: "text-2" }, tt("Made {when}, {ago}.", { when: when(cur.finished_at), ago: ago(cur.finished_at) })));
+    if (st.stale) kids.push(notice("attention", tt("This forecast is more than 36 hours old, so it does not know about the latest sales.") + " " +
+      tt(admin ? "Check why last night's run did not finish." : "Your Owner or Admin has been told.")));
     if (latest && latest.id !== cur.id) {
       if (latest.status === "failed") kids.push(notice("risk", [
-        "Last night's forecast did not run: " + (latest.message || "no reason given") + " The numbers shown are from the forecast made " + when(cur.finished_at) + ". ",
+        tt("Last night's forecast did not run: {why} The numbers shown are from the forecast made {when}.", { why: latest.message || tt("no reason given"), when: when(cur.finished_at) }) + " ",
         admin ? h("a", { href: "#/model" }, "See what happened") : null]));
       else if (running) kids.push(notice("data", "A newer forecast is being made now. This page shows the current one until it is ready."));
     }
@@ -259,7 +261,7 @@
       h("div", { class: "tile-value" }, value),
       note ? h("div", { class: "tile-note" }, note) : null);
   }
-  function failTile(label, err, href) { return tile(label, "—", "Could not load: " + err.message, href, null); }
+  function failTile(label, err, href) { return tile(label, "—", tt("Could not load: {why}", { why: err.message }), href, null); }
 
   function homeTiles(r, store) {
     var out = [], today = todayIST();
@@ -269,7 +271,7 @@
         var t = r.today.value;
         if (!t.run) out.push(tile("Decisions waiting today", "—", "No forecast yet, so nothing to decide.", "#/today"));
         else out.push(tile("Decisions waiting today", fmt.num(t.to_review),
-          t.to_review ? "From the forecast to " + fmt.dayShort(t.run.data_cutoff) + "." : "All decided for today.",
+          t.to_review ? tt("From the forecast to {date}.", { date: fmt.dayShort(t.run.data_cutoff) }) : "All decided for today.",
           "#/today", t.to_review ? "attention" : "ok"));
       }
     }
@@ -278,7 +280,7 @@
       else {
         var d = r.drafts.value, total = d.reduce(function (a, o) { return a + (o.total_paise || 0); }, 0);
         out.push(tile("Orders to approve", fmt.num(d.length),
-          d.length ? "Draft orders worth " + fmt.rupees(total, { short: true, whole: true }) + "." : "No draft orders waiting.",
+          d.length ? tt("Draft orders worth {value}.", { value: fmt.rupees(total, { short: true, whole: true }) }) : "No draft orders waiting.",
           "#/orders?status=draft", d.length ? "attention" : "ok"));
       }
     }
@@ -288,13 +290,13 @@
         var sc = r.stock.value.status_counts || {};
         var out_ = sc.Out || 0, low = sc.Low || 0, cnt = sc["Count needed"] || 0, exp = sc.Expiring || 0;
         var parts = [];
-        if (out_) parts.push(out_ + " out");
-        if (low) parts.push(low + " low");
-        if (cnt) parts.push(cnt + " to count");
-        if (exp) parts.push(exp + " expiring");
+        if (out_) parts.push(tt("{n} out", { n: fmt.num(out_) }));
+        if (low) parts.push(tt("{n} low", { n: fmt.num(low) }));
+        if (cnt) parts.push(tt("{n} to count", { n: fmt.num(cnt) }));
+        if (exp) parts.push(tt("{n} expiring", { n: fmt.num(exp) }));
         var n = out_ + low + cnt + exp;
         out.push(tile("Stock to look at", fmt.num(n),
-          [parts.length ? cap(parts.join(", ")) + ". " : "Everything is in range. ", asOf(r.stock.value.as_of)],
+          [parts.length ? tt("{text}.", { text: cap(parts.join(", ")) }) + " " : tt("Everything is in range.") + " ", asOf(r.stock.value.as_of)],
           n ? "#/stock" : "#/stock", out_ || cnt ? "risk" : n ? "attention" : "ok"));
       }
     }
@@ -302,7 +304,7 @@
       if (!r.alerts.ok) out.push(failTile("Open alerts", r.alerts.error, "#/alerts"));
       else {
         var a = r.alerts.value;
-        out.push(tile("Open alerts", fmt.num(a.open), a.risk ? plural(a.risk, "urgent alert") + "." : a.open ? "None urgent." : "Nothing needs attention.",
+        out.push(tile("Open alerts", fmt.num(a.open), a.risk ? ttn(a.risk, "{n} urgent alert.", "{n} urgent alerts.") : a.open ? "None urgent." : "Nothing needs attention.",
           "#/alerts", a.risk ? "risk" : a.open ? "attention" : "ok"));
       }
     }
@@ -317,12 +319,12 @@
         var list = r.incoming.value;
         var late = list.filter(function (o) { return o.expected_date && o.expected_date < today; }).length;
         var next = list.map(function (o) { return o.expected_date; }).filter(function (x) { return x && x >= today; }).sort()[0];
-        var note = late ? plural(late, "order") + " overdue." : next ? "Next expected " + (next === today ? "today" : fmt.dayShort(next)) + "." :
+        var note = late ? ttn(late, "{n} order overdue.", "{n} orders overdue.") : next ? tt("Next expected {when}.", { when: next === today ? tt("today") : fmt.dayShort(next) }) :
           list.length ? "No delivery date given." : "Nothing on the way.";
         out.push(tile("Deliveries expected", fmt.num(list.length), note, "#/receive", late ? "attention" : null));
       }
     }
-    return h("section", { "aria-label": "Where things stand at " + store.name, class: "tiles a-tiles" }, out);
+    return h("section", { "aria-label": tt("Where things stand at {store}", { store: store.name }), class: "tiles a-tiles" }, out);
   }
 
   function freshnessCard(r, store) {
@@ -331,25 +333,25 @@
     var cut = st && st.current ? st.current.data_cutoff : null;
     if (cut) {
       var yesterday = addDays(todayIST(), -1), gap = daysFrom(cut, yesterday);
-      items.push(h("li", null, "Sales in the forecast run to " + fmt.date(cut) + (gap <= 0 ? " (yesterday)." : ".")));
+      items.push(h("li", null, tt(gap <= 0 ? "Sales in the forecast run to {date} (yesterday)." : "Sales in the forecast run to {date}.", { date: fmt.date(cut) })));
       if (gap > 0) {
         items.push(h("li", null, notice("attention", [
-          plural(gap, "day") + " of sales after " + fmt.dayShort(cut) + " are not in the forecast yet. Suggestions are less reliable until they are. ",
+          ttn(gap, "{n} day of sales after {date} is not in the forecast yet. Suggestions are less reliable until it is.", "{n} days of sales after {date} are not in the forecast yet. Suggestions are less reliable until they are.", { date: fmt.dayShort(cut) }) + " ",
           store.mode === "connected" ? h("a", { href: "#/sales" }, "Check the sales") :
             DQ.can("imports.upload") ? h("a", { href: "#/imports/new/daily_sales" }, "Upload the day's sales") : null])));
       }
     } else if (st) {
-      items.push(h("li", null, plural(st.history_days || 0, "day") + " of sales history loaded."));
+      items.push(h("li", null, ttn(st.history_days || 0, "{n} day of sales history loaded.", "{n} days of sales history loaded.")));
     }
-    if (r.stock && r.stock.ok) items.push(h("li", null, "Stock figures for " + store.name + " are live, read " + clock(r.stock.value.as_of) + " IST."));
-    if (st && st.model) items.push(h("li", null, "Model " + st.model.version + " learned from sales to " + fmt.date(st.model.data_cutoff) + "."));
+    if (r.stock && r.stock.ok) items.push(h("li", null, tt("Stock figures for {store} are live, read {time} IST.", { store: store.name, time: clock(r.stock.value.as_of) })));
+    if (st && st.model) items.push(h("li", null, tt("Model {version} learned from sales to {date}.", { version: st.model.version, date: fmt.date(st.model.data_cutoff) })));
     if (!items.length) return null;
     return sectionCard("How fresh the numbers are", h("ul", { class: "a-plain" }, items));
   }
 
   DQ.route("#/home", { title: "Home", nav: "Home", render: function (main, params, query, alive) {
     var store = DQ.storeObj(), admin = isAdmin();
-    main.appendChild(ui.page("Home", { sub: store ? "Where things stand at " + store.name + " today." : "Where things stand today." }));
+    main.appendChild(ui.page("Home", { sub: store ? tt("Where things stand at {store} today.", { store: store.name }) : "Where things stand today." }));
     var body = h("div", { class: "stack" }, ui.skeleton(6));
     main.appendChild(body);
     var sid = store && store.id;
@@ -1599,18 +1601,18 @@
             bumpBell(-1);
             if (show === "open") { li.remove(); if (!body.querySelector(".a-alert")) load(); }
             else { a.resolved = true; li.replaceWith(alertItem(a)); }
-            DQ.toast("Marked done: " + a.label + ".", { undo: function () {
-              DQ.post("/api/alerts/" + a.id + "/reopen").then(function () { bumpBell(1); load(); DQ.toast("Opened again: " + a.label + "."); },
-                function (err) { DQ.toast("Could not undo: " + err.message, { kind: "risk" }); });
+            DQ.toast(tt("Marked done: {what}.", { what: tx(a.label) }), { undo: function () {
+              DQ.post("/api/alerts/" + a.id + "/reopen").then(function () { bumpBell(1); load(); DQ.toast(tt("Opened again: {what}.", { what: tx(a.label) })); },
+                function (err) { DQ.toast(tt("Could not undo: {why}", { why: err.message }), { kind: "risk" }); });
             } });
           }, swallow);
-        }, "ghost", { class: "btn btn-ghost btn-sm", "aria-label": "Mark done: " + a.label });
+        }, "ghost", { class: "btn btn-ghost btn-sm", "aria-label": tt("Mark done: {what}", { what: tx(a.label) }) });
         acts.appendChild(done);
       }
       li.appendChild(h("div", { class: "a-item-main" },
         h("div", { class: "a-item-title" }, a.resolved ? ui.badge("Done", "neutral") : ui.badge(sev[0], sev[1]), h("h3", { class: "title-3" }, a.label)),
         h("p", null, a.message),
-        h("p", { class: "field-help" }, (a.store_id ? storeName(a.store_id) + " · " : "") + "Raised " + when(a.created_at) + ", " + ago(a.created_at))));
+        h("p", { class: "field-help" }, (a.store_id ? storeName(a.store_id) + " · " : "") + tt("Raised {when}, {ago}", { when: when(a.created_at), ago: ago(a.created_at) }))));
       li.appendChild(acts);
       return li;
     }
@@ -1628,7 +1630,9 @@
         if (!alive()) return;
         DQ.clear(body);
         var hasEmail = !!(DQ.me.person && DQ.me.person.email);
-        var email = checkbox("Email me alerts", s.email, hasEmail ? "Sent to " + DQ.me.person.email + "." : "Your account has no email address, so alerts stay in the app.");
+        body.appendChild(sectionCard("Language", DQ.langSwitch ? DQ.langSwitch({ compact: true, onChange: function () { DQ.render(); } }) : null,
+          { sub: "The language DQ-Stack uses for you. It is saved to your account, so every till and phone you sign in on uses it." }));
+        var email = checkbox("Email me alerts", s.email, hasEmail ? tt("Sent to {email}.", { email: DQ.me.person.email }) : "Your account has no email address, so alerts stay in the app.");
         if (!hasEmail) email.input.disabled = true;
         var wa = checkbox("WhatsApp me alerts", s.whatsapp, s.whatsapp_note);
         if (s.whatsapp_available === false) wa.input.disabled = true;

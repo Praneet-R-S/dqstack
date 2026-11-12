@@ -210,3 +210,33 @@ a.tile:hover { background: var(--bg-raised); }
 .code-input { font-size: 22px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
 .link-btn { padding: 0; border: 0; background: none; color: var(--ui-accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .link-btn:disabled { opacity: .55; cursor: default; text-decoration: none; }
+
+/* ---------------------------------------------------------------- languages
+   js/i18n.js sets <html lang>. Geist has no Devanagari, so Hindi falls through to Noto
+   Sans Devanagari (loaded only when Hindi is chosen), then the system's own. Devanagari
+   needs more line height for its matras; numbers stay Latin in Geist Mono. */
+:root:lang(hi) {
+  --font-ui: "Geist", "Noto Sans Devanagari", "Nirmala UI", "Mangal", system-ui, sans-serif;
+  --font-num: "Geist Mono", "Noto Sans Devanagari", "Nirmala UI", ui-monospace, monospace;
+}
+:root:lang(hi) body { line-height: 1.6; }
+:root:lang(hi) .title-1 { line-height: 1.35; letter-spacing: 0; }
+:root:lang(hi) .title-2, :root:lang(hi) .title-3 { line-height: 1.45; }
+.auth-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.lang-switch { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.lang-label { margin-right: 6px; font-size: 13px; color: var(--text-secondary); }
+.lang-btn {
+  min-height: var(--tap); min-width: var(--tap); padding: 0 12px; border-radius: var(--r-input);
+  border: 1px solid var(--border-subtle); background: none; color: var(--text-secondary); font: 500 14px var(--font-ui); cursor: pointer;
+}
+.lang-btn[aria-pressed="true"] { border-color: var(--border-strong); background: var(--bg-raised); color: var(--text-primary); }
+.lang-btn:lang(hi) { font-family: "Noto Sans Devanagari", "Nirmala UI", "Mangal", var(--font-ui); }
+.account-menu .lang-switch { display: flex; margin: 0 4px 6px; }
+.account-menu .lang-switch .lang-btn { display: inline-flex; align-items: center; justify-content: center; width: auto; flex: 1; text-align: center; padding: 0 10px; }
+/* A phone's top bar: longer Hindi status text ("सेव नहीं हुआ: ...") pushed the account
+   button off a 375px screen past the store picker's 180px minimum. The picker gives way. */
+@media (max-width: 480px) {
+  .top-store { min-width: 0; flex: 0 1 auto; }
+  .store-switch { min-width: 0; max-width: 100%; }
+  .topbar .save-status { min-width: 4ch; flex-shrink: 4; }
+}

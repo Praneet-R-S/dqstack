@@ -6,7 +6,7 @@
    loads last and starts the app. */
 (function () {
   "use strict";
-  var DQ = window.DQ, h = DQ.h;
+  var DQ = window.DQ, h = DQ.h, t = DQ.t, tx = DQ.tx;
 
   var GROUPS = [
     { label: null, items: ["#/home", "#/setup", "#/today"] },
@@ -92,7 +92,8 @@
     var me = DQ.me.person;
     var menuBtn = h("button", { class: "account", type: "button", "aria-haspopup": "true", "aria-expanded": "false" }, initials(me.name));
     var menu = h("div", { class: "account-menu", hidden: true },
-      h("p", { class: "account-who" }, h("strong", null, me.name), h("br"), roleName(me.role) + " · " + DQ.me.company.name),
+      h("p", { class: "account-who" }, h("strong", null, me.name), h("br"), tx(roleName(me.role)) + " · " + DQ.me.company.name),
+      langSwitch({ compact: true }),
       h("a", { href: "#/alerts/settings" }, "My alert settings"),
       h("a", { href: "/privacy.html" }, "Privacy"),
       h("button", { type: "button", onclick: signOut }, "Sign out"));
@@ -151,7 +152,9 @@
       DQ.paintSave();
       refreshBell();
     }
-    document.title = (m.route.title || "DQ-Stack") + " · DQ-Stack";
+    document.title = tx(m.route.title || "DQ-Stack") + " · DQ-Stack";
+    var skip = document.querySelector(".skip-link");
+    if (skip) skip.textContent = t("Skip to the main content");
     try {
       var out = m.route.render(main, m.params, m.query, function () { return my === token; });
       if (out && out.catch) out.catch(function (err) { if (my === token) { DQ.clear(main); main.appendChild(DQ.ui.error(err, render)); } });
@@ -176,6 +179,48 @@
     DQ.post("/api/auth/logout").then(function () { DQ.me = null; location.hash = "#/signin"; }, function () { DQ.me = null; location.hash = "#/signin"; });
   }
 
+  /* ---------------------------------------------------------------- language */
+  /* The language is the person's own choice: picked on the sign-in page (kept on this
+     device, and saved to the account by the sign-in that follows within 30 minutes) or
+     in the account menu and My alert settings (saved to the account at once). Signing in
+     switches to the language saved on the account. Language names are written in their
+     own script and never translated. */
+  var PENDING = "dq.lang.pending";
+  function saveLanguage(code) {
+    if (!DQ.me || !DQ.me.person) {
+      try { localStorage.setItem(PENDING, String(Date.now())); } catch (e) { /* private window */ }
+      return Promise.resolve();
+    }
+    DQ.me.person.language = code;
+    return DQ.api("PUT", "/api/auth/language", { language: code }, { quiet: true }).then(null, function (e) {
+      DQ.toast(t("Your language is used on this device, but it was not saved to your account: {why}", { why: e.message }), { kind: "attention" });
+    });
+  }
+  function adoptLanguage(me) {
+    var mine = me && me.person && me.person.language, pending = 0;
+    try { pending = +localStorage.getItem(PENDING) || 0; localStorage.removeItem(PENDING); } catch (e) { /* ignore */ }
+    if (!mine) return;
+    if (pending && Date.now() - pending < 30 * 60000) {
+      if (mine !== DQ.i18n.lang()) saveLanguage(DQ.i18n.lang());
+    } else if (mine !== DQ.i18n.lang() && DQ.i18n.supported(mine)) DQ.i18n.set(mine);
+  }
+  function langSwitch(opts) {
+    opts = opts || {};
+    var cur = DQ.i18n.lang();
+    return h("div", { class: "lang-switch" + (opts.compact ? " lang-compact" : ""), role: "group", "aria-label": "Language" },
+      opts.compact ? null : h("span", { class: "lang-label", "aria-hidden": "true" }, "Language"),
+      DQ.i18n.langs().map(function (l) {
+        return h("button", { type: "button", class: "lang-btn", lang: l.code, "aria-pressed": l.code === cur ? "true" : "false",
+          onclick: function () {
+            if (l.code === DQ.i18n.lang()) return;
+            DQ.i18n.set(l.code);
+            saveLanguage(l.code);
+            if (opts.onChange) opts.onChange(l.code); else render();
+          } }, document.createTextNode(l.name));
+      }));
+  }
+  DQ.langSwitch = langSwitch;
+
   /* ---------------------------------------------------------------- fallback screens */
   DQ.route("#/not-found", { title: "Not found", render: function (main) {
     main.appendChild(DQ.ui.empty({ title: "That page does not exist", text: "The address may be mistyped, or the page has moved.", action: { label: "Go to Home", href: "#/home" } }));
@@ -187,7 +232,9 @@
   /* ---------------------------------------------------------------- sign in and friends */
   function authCard(title, sub, body) {
     return h("section", { class: "auth-card" },
-      h("a", { class: "brand", href: "/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "DQ-Stack"),
+      h("div", { class: "auth-top" },
+        h("a", { class: "brand", href: "/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "DQ-Stack"),
+        langSwitch({ compact: true })),
       h("h1", { class: "title-1" }, title), sub ? h("p", { class: "text-2" }, sub) : null, body);
   }
   function form(fields, submitLabel, onSubmit, extra) {
@@ -197,17 +244,17 @@
     f.addEventListener("submit", function (e) {
       e.preventDefault();
       var bad = Array.prototype.filter.call(f.querySelectorAll("[required]"), function (i) { return !i.value.trim(); });
-      if (bad.length) { err.textContent = "Fill in every box."; err.hidden = false; bad[0].focus(); return; }
-      btn.disabled = true; btn.textContent = "Please wait…"; err.hidden = true;
-      onSubmit().then(function () { btn.disabled = false; btn.textContent = submitLabel; }, function (e2) {
-        btn.disabled = false; btn.textContent = submitLabel;
+      if (bad.length) { err.textContent = t("Fill in every box."); err.hidden = false; bad[0].focus(); return; }
+      btn.disabled = true; btn.textContent = t("Please wait…"); err.hidden = true;
+      onSubmit().then(function () { btn.disabled = false; btn.textContent = tx(submitLabel); }, function (e2) {
+        btn.disabled = false; btn.textContent = tx(submitLabel);
         err.textContent = e2.message + (e2.problems && e2.problems.length ? " " + e2.problems.join("; ") : "");
         err.hidden = false;
       });
     });
     return f;
   }
-  function afterSignIn(me) { DQ.me = me; location.hash = "#/home"; }
+  function afterSignIn(me) { DQ.me = me; adoptLanguage(me); location.hash = "#/home"; }
 
   /* What the server offers besides a password: Google, Microsoft, reset by text.
      Asked once per page load; a failure just means no extra buttons. */
@@ -248,7 +295,7 @@
     resend.addEventListener("click", function () {
       resend.disabled = true;
       DQ.post("/api/auth/login/code/resend", { ticket: ticket }, { quiet: true, allow401: true }).then(function (x) {
-        sent.textContent = x.message; code.value = ""; code.focus();
+        sent.textContent = tx(x.message); code.value = ""; code.focus();
         setTimeout(function () { resend.disabled = false; }, 30000);
       }, function (e) { sent.textContent = e.message; resend.disabled = false; });
     });
@@ -299,7 +346,7 @@
       DQ.ui.field("Password", pw, "At least 10 characters.")
     ], "Create the company", function () {
       return DQ.post("/api/auth/signup", { company_name: co.value.trim(), name: name.value.trim(), email: email.value.trim(), password: pw.value }, { quiet: true }).then(function (me) { DQ.me = me; location.hash = "#/setup"; });
-    }, h("p", { class: "auth-links" }, "By creating a company you accept the ", h("a", { href: "/terms.html" }, "terms"), " and ", h("a", { href: "/privacy.html" }, "privacy notice"), ". ", h("a", { href: "#/signin" }, "Sign in instead")))));
+    }, h("p", { class: "auth-links" }, "By creating a company you accept the terms and the privacy notice.", " ", h("a", { href: "/terms.html" }, "Terms"), " · ", h("a", { href: "/privacy.html" }, "Privacy notice"), " · ", h("a", { href: "#/signin" }, "Sign in instead")))));
     co.focus();
   } });
 
@@ -309,7 +356,7 @@
     var done = h("p", { class: "notice", hidden: true });
     var byPhone = h("span", { hidden: true }, " · ", h("a", { href: "#/forgot?by=phone" }, "Get a code by text message instead"));
     main.appendChild(authCard("Forgot your password?", "We email a link to choose a new one. An Admin can also send you one.", form([DQ.ui.field("Email or phone", login), done], "Send the link", function () {
-      return DQ.post("/api/auth/password/forgot", { login: login.value.trim() }, { quiet: true }).then(function (r) { done.textContent = r.message; done.hidden = false; });
+      return DQ.post("/api/auth/password/forgot", { login: login.value.trim() }, { quiet: true }).then(function (r) { done.textContent = tx(r.message); done.hidden = false; });
     }, h("p", { class: "auth-links" }, h("a", { href: "#/signin" }, "Back to sign in"), byPhone))));
     providers().then(function (pv) { if (pv.phone_reset) byPhone.hidden = false; });
   } });
@@ -336,7 +383,7 @@
       resend.addEventListener("click", function () {
         resend.disabled = true;
         send().then(function (r) {
-          sent.textContent = r.message; code.value = ""; code.focus();
+          sent.textContent = tx(r.message); code.value = ""; code.focus();
           setTimeout(function () { resend.disabled = false; }, 30000);
         }, function (e) { sent.textContent = e.message; resend.disabled = false; });
       });
@@ -363,7 +410,7 @@
     return DQ.get("/api/auth/invitation/" + encodeURIComponent(p.token), { allow401: true }).then(function (inv) {
       DQ.clear(main);
       var pw = DQ.ui.input({ type: "password", required: true, autocomplete: "new-password", minlength: 10 });
-      main.appendChild(authCard("Join " + inv.company, "Hello " + inv.name + ". You are invited as " + roleName(inv.role) + ". Choose a password to start.", form([DQ.ui.field("Password", pw, "At least 10 characters.")], "Join", function () {
+      main.appendChild(authCard(t("Join {company}", { company: inv.company }), t("Hello {name}. You are invited as {role}. Choose a password to start.", { name: inv.name, role: tx(roleName(inv.role)) }), form([DQ.ui.field("Password", pw, "At least 10 characters.")], "Join", function () {
         return DQ.post("/api/auth/invitation/accept", { token: p.token, password: pw.value }, { quiet: true }).then(afterSignIn);
       })));
     }, function (err) {
@@ -379,6 +426,6 @@
     if (menu && !menu.hidden && !e.target.closest(".account-wrap")) menu.hidden = true;
   });
   setInterval(refreshBell, 60000);
-  DQ.get("/api/auth/me", { allow401: true }).then(function (me) { DQ.me = me; render(); DQ.queue.flush(); },
+  DQ.get("/api/auth/me", { allow401: true }).then(function (me) { DQ.me = me; adoptLanguage(me); render(); DQ.queue.flush(); },
     function () { DQ.me = null; render(); });
 })();
