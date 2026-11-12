@@ -49,7 +49,61 @@ def site_page(name: str, status: int = 200) -> HTMLResponse:
         tags = (f'  <link rel="canonical" href="{url}">\n'
                 f'  <meta property="og:url" content="{url}">\n')
         html = html.replace("</head>", tags + "</head>", 1)
-    return HTMLResponse(html, status_code=status)
+    resp = HTMLResponse(html, status_code=status)
+    resp.headers["Content-Security-Policy"] = csp("site", inline_script_hashes(html))
+    return resp
+
+
+# Content-Security-Policy, one per area. No area allows inline script except the public
+# pages' own small inline scripts, each allowed by its hash; styles may be inline
+# (style attributes set by the screens), fonts come from Google Fonts, and the planner
+# loads DuckDB-WASM from jsDelivr into a worker made from a blob.
+_FONTS_CSS, _FONTS = "https://fonts.googleapis.com", "https://fonts.gstatic.com"
+_JSDELIVR = "https://cdn.jsdelivr.net"
+_BASE = ("default-src 'self'", f"style-src 'self' 'unsafe-inline' {_FONTS_CSS}",
+         f"font-src 'self' {_FONTS} data:", "img-src 'self' data: blob:",
+         "object-src 'none'", "base-uri 'self'", "form-action 'self'",
+         "frame-ancestors 'none'")
+_SCRIPT = {
+    "site": ("script-src 'self'{hashes}", "connect-src 'self'"),
+    "app": ("script-src 'self'", "connect-src 'self'", "worker-src 'self' blob:",
+            "media-src 'self' blob:"),
+    "planner": (f"script-src 'self' {_JSDELIVR} 'wasm-unsafe-eval'",
+                f"connect-src 'self' {_JSDELIVR}", "worker-src 'self' blob:"),
+    "api": ("default-src 'none'", "frame-ancestors 'none'"),
+}
+
+
+def csp(area: str, hashes: tuple[str, ...] = ()) -> str:
+    if area == "api":
+        return "; ".join(_SCRIPT["api"])
+    extra = "".join(f" '{h}'" for h in hashes)
+    return "; ".join([*_BASE, *(p.format(hashes=extra) for p in _SCRIPT[area])])
+
+
+def inline_script_hashes(html: str) -> tuple[str, ...]:
+    """sha256 sources for a page's inline executable scripts (not JSON-LD data)."""
+    import base64
+    import hashlib
+    import re
+    out = []
+    for attrs, body in re.findall(r"<script(\s[^>]*)?>(.*?)</script>", html, re.S):
+        attrs = attrs or ""
+        if "src=" in attrs or "application/ld+json" in attrs:
+            continue
+        digest = hashlib.sha256(body.encode("utf-8")).digest()
+        out.append("sha256-" + base64.b64encode(digest).decode("ascii"))
+    return tuple(out)
+
+
+def _csp_area(path: str) -> str:
+    if path.startswith("/api/"):
+        return "api"
+    if path.startswith("/planner"):
+        return "planner"
+    if path.startswith(("/app", "/platform")):
+        return "app"
+    return "site"
 
 
 class SecurityHeaders(BaseHTTPMiddleware):
@@ -64,6 +118,8 @@ class SecurityHeaders(BaseHTTPMiddleware):
             resp.headers.setdefault("Strict-Transport-Security",
                                     "max-age=31536000; includeSubDomains")
         path = request.url.path
+        # A page that set its own (site_page, with its inline scripts' hashes) keeps it.
+        resp.headers.setdefault("Content-Security-Policy", csp(_csp_area(path)))
         if path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
         elif path.startswith(("/app", "/planner", "/platform")) or path.endswith((".html", ".js", ".css"))                 or path == "/":
@@ -140,6 +196,26 @@ def create_app() -> FastAPI:
 
     # ---- static surfaces
     if UI.exists():
+        # The planner's SQL console (DuckDB-WASM) reads the demo's series as Arrow.
+        # dqstack.serve has this endpoint; served from here too, or the planner at
+        # /planner had no data for its in-browser queries. Built from the same bundle
+        # the page reads, once per bundle file.
+        arrow_cache: dict = {}
+
+        @app.get("/planner/series.arrow", include_in_schema=False)
+        def planner_series_arrow():
+            from fastapi.responses import Response
+            from ..config import UI_DATA
+            bundle = UI_DATA / "bundle.json"
+            if not bundle.exists():
+                raise HTTPException(404, "The planner's demo data has not been exported.")
+            key = bundle.stat().st_mtime_ns
+            if arrow_cache.get("key") != key:
+                from ..serve import series_table_arrow, to_ipc
+                arrow_cache.update(key=key, body=to_ipc(series_table_arrow(bundle)))
+            return Response(arrow_cache["body"],
+                            media_type="application/vnd.apache.arrow.stream")
+
         app.mount("/planner", StaticFiles(directory=UI, html=True), name="planner")
     if APP_UI.exists():
         @app.get("/platform", include_in_schema=False)
@@ -173,7 +249,8 @@ def _mount_later_routers(app: FastAPI) -> None:
     """Routers for later build steps register here as they are added."""
     import importlib
     for name in ("setup", "calendar", "catalogue", "imports", "stock", "floor", "sales", "today",
-                 "orders", "checkout", "pos", "forecast", "alerts", "reports", "platform"):
+                 "orders", "checkout", "pos", "forecast", "alerts", "reports", "platform",
+                 "connectors"):
         try:
             mod = importlib.import_module(f".routes.{name}", package=__package__)
         except ModuleNotFoundError as e:

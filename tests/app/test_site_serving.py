@@ -42,3 +42,35 @@ def test_app_files_are_revalidated_so_updates_reach_every_device(client):
         assert r.status_code == 200, path
         assert r.headers.get("cache-control") == "no-cache", path
     assert client.get("/api/health").headers.get("cache-control") == "no-store"
+
+
+def _policy(resp) -> dict[str, str]:
+    raw = resp.headers["Content-Security-Policy"]
+    return {d.split()[0]: d for d in (p.strip() for p in raw.split(";")) if d}
+
+
+def test_every_area_has_a_content_security_policy(client):
+    """No inline script anywhere except the public pages' own, each allowed by its
+    hash; the planner alone may load DuckDB-WASM from jsDelivr; nothing may frame us."""
+    import base64
+    import hashlib
+    import re
+    for path in ("/", "/privacy.html", "/terms.html", "/no-such-page"):
+        r = client.get(path)
+        p = _policy(r)
+        assert "'unsafe-inline'" not in p["script-src"] and "jsdelivr" not in p["script-src"]
+        bodies = [b for a, b in re.findall(r"<script(\s[^>]*)?>(.*?)</script>", r.text, re.S)
+                  if not a or ("src=" not in a and "ld+json" not in a)]
+        assert bodies, path
+        for b in bodies:                          # the page's own inline scripts still run
+            h = base64.b64encode(hashlib.sha256(b.encode()).digest()).decode()
+            assert f"'sha256-{h}'" in p["script-src"], path
+    app = _policy(client.get("/app/"))
+    assert app["script-src"] == "script-src 'self'" and app["connect-src"] == "connect-src 'self'"
+    planner = _policy(client.get("/planner/"))
+    assert "https://cdn.jsdelivr.net" in planner["script-src"]
+    assert "'wasm-unsafe-eval'" in planner["script-src"] and "blob:" in planner["worker-src"]
+    api = _policy(client.get("/api/health"))
+    assert api["default-src"] == "default-src 'none'"
+    for p in (app, planner, api):
+        assert p["frame-ancestors"] == "frame-ancestors 'none'"
