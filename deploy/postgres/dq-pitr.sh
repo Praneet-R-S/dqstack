@@ -46,6 +46,12 @@ storage_env() {
     STORAGE=s3
   elif [ -n "${WALG_FILE_PREFIX:-}" ]; then
     STORAGE=file
+    # WAL-G's folder storage needs its root to exist; the walg volume starts empty.
+    # (Found by running the restore drill: without this no base backup was ever taken.)
+    if [ ! -d "$WALG_FILE_PREFIX" ]; then
+      mkdir -p -m 0700 "$WALG_FILE_PREFIX" 2>/dev/null \
+        || die "cannot create the backup folder $WALG_FILE_PREFIX (is the walg volume mounted and owned by postgres?)"
+    fi
   else
     STORAGE=none
   fi

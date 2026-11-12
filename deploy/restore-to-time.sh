@@ -75,7 +75,8 @@ MAXCONN="$(env_value DQ_PG_MAX_CONNECTIONS)"; MAXCONN="${MAXCONN:-200}"
 current_volume() {
   local v
   v=$(grep -E '^DQ_PGDATA_VOLUME=' .env | tail -1 | cut -d= -f2- || true)
-  echo "${v:-${PROJECT}_pgdata}"
+  # docker-compose.yml's own default, which does not follow the project name.
+  echo "${v:-dqstack_pgdata}"
 }
 
 walg_mount() {
