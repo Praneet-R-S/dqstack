@@ -1,359 +1,450 @@
+<div align="center">
+
 # DQ-Stack
 
-Probabilistic demand forecasting and inventory decision platform. A seven-stage
-batch ML pipeline, an economics-gated decision layer, and one production-grade
-planner portal.
+**Store operations and demand forecasting for Indian retail chains.**
 
-The thesis it implements, in one sentence: **a forecasting system should be
-promoted on the money its decisions make, not on the accuracy of its point
-forecasts** — and the pipeline is built so that claim can be tested rather than
-asserted.
+Every night DQ-Stack forecasts every product in every store, sets each one's stock
+target from what it actually costs to run out or to be left over, and has the
+morning's orders ready for a manager to approve.
 
-```bash
-python -m dqstack.pipeline --export
+[![CI](https://github.com/Praneet-R-S/dqstack/actions/workflows/ci.yml/badge.svg)](https://github.com/Praneet-R-S/dqstack/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.140-009688?logo=fastapi&logoColor=white)
+![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white)
+![Languages](https://img.shields.io/badge/languages-English%20%2B%20Hindi-8B5CF6)
+
+<img src="docs/screenshots/today.webp" alt="The Today screen: products waiting for a decision, most money at risk first, each with its forecast, range, stock target, suggested order and cost curve." width="100%">
+
+</div>
+
+---
+
+## Contents
+
+- [Why it exists](#why-it-exists)
+- [What it does](#what-it-does)
+- [A day with DQ-Stack](#a-day-with-dq-stack)
+- [Screens](#screens)
+- [How the forecast works](#how-the-forecast-works)
+- [Quick start](#quick-start)
+- [Roles](#roles)
+- [Deploying](#deploying)
+- [Configuration](#configuration)
+- [Security](#security)
+- [Tests and CI](#tests-and-ci)
+- [Project layout](#project-layout)
+- [Before the first paying client](#before-the-first-paying-client)
+- [Documentation](#documentation)
+
+---
+
+## Why it exists
+
+Most stores order by habit and a single rule such as "keep 95% in stock on everything".
+That rule overstocks cheap, slow, perishable items and understocks the profitable ones.
+Both cost money: one in waste and cash tied up on the shelf, the other in missed sales.
+
+DQ-Stack replaces the rule with arithmetic, product by product:
+
+```
+stock target  =  the point on the forecast's range where
+                 cost of one unit short  ×  P(short)  =  cost of one unit left over  ×  P(left over)
 ```
 
-One command runs all seven stages, writes the decision ledger and every results
-table to `artifacts/`, and emits the UI data bundle. Then open
-[ui/index.html](ui/index.html) directly in a browser — no server needed.
+A unit short costs its lost margin. A unit left over costs holding, markdown and
+spoilage. So a high-margin item is stocked deep and a low-margin perishable is stocked
+lean, and the screen says why. On the demo company, targets set this way earned
+**₹2.19 lakh against ₹1.25 lakh** for a flat 95% rule over the same four weeks of sales.
 
-## The store application
+---
 
-The same engine also runs inside a multi-company store-operations app for Indian
-retailers: stores, people and roles, imports, a stock ledger, counting, receiving,
-transfers, wastage, sales files, Checkout, a POS connector, the nightly forecast from
-each company's own data, Today's review, suggested orders, purchase orders, alerts and
-reports. Built to the product specification's twelve steps; see CONTEXT.md C17 for
-what each step proves and what is not done yet.
+## What it does
+
+DQ-Stack is one application with several apps inside it: a back office, a till, a phone
+app for the shop floor, and an operator portal. Each company's data is kept separate.
+
+### Stores, people and setup
+- **Many companies on one server.** Every query is filtered by company on the server, so asking for another company's record by id answers "not found".
+- **Stores, people and seven roles**, from Owner to Cashier, each checked on the server for every action.
+- **A setup checklist** that takes a new company from sign-up to its first forecast.
+- **Imports from Excel or CSV**: products, stores, suppliers, prices, a festival calendar, sales history, daily sales files and opening stock.
+  - Every row is checked first. Uploading the same file again changes nothing, and any import can be undone.
+
+### Stock
+- **An append-only stock ledger.** On-hand stock is always the sum of its movements. Database triggers stop the history from being rewritten, even by the application itself.
+- **Counting.**
+  - Cycle counts pick what is due, most valuable first. Blind counts hide the expected number.
+  - Small differences post by themselves; large ones wait for a manager.
+  - When two people count the same product, their counts are compared with each other, not with the system figure.
+- **Receiving** against purchase orders. A partial delivery leaves the order open.
+- **Transfers** between stores, **wastage** with reasons, and expiry tracking by batch.
+- **Works offline.** Counts, deliveries and bills are saved on the device and sent once, in order, when the connection returns.
+
+### Selling
+- **Checkout**, a till in the browser.
+  - Scan with a barcode scanner or the phone's camera, or search by name.
+  - Hold and recall bills, add a misc item, void lines.
+  - Take payment in cash, UPI or card, with GST worked out on the receipt.
+- **Bills and returns**: refunds, plus exchanges as a single transaction.
+- **My shift** shows a cashier their own takings. **Day close** reconciles the drawer.
+- **A POS API** for existing tills, with API keys per store. Each bill is stored once even if it is sent twice.
+- **A nightly SFTP file drop** for stores that export a sales file instead.
+
+### Forecasting and ordering
+- **The Today screen** lists only the forecasts worth a human look, most money at risk first.
+  - Each one shows the forecast, its likely range, the stock target and the cost curve behind it.
+  - Approve, change or skip each one, or approve all the small ones in one click.
+- **Suggested orders** grouped by supplier.
+  - They follow the supplier's lead time, order days, minimum order value and case size.
+  - They become draft purchase orders, are approved, and are sent by email or WhatsApp.
+- **The Forecasts screen** lists every product's forecast and range for the next 28 days, with a spreadsheet download.
+- **Model performance**, in plain words: how far off the forecast has been and how often sales fell inside its range.
+  - It also shows what ordering by the forecast would have earned.
+  - A new model replaces the old one only if it would have earned more margin on the same recent weeks.
+- **New stores and new products** get a first estimate after two weeks of sales.
+  - They borrow from similar stores and products until they have eight weeks of their own.
+- **Festivals** a company has not seen before get a national pattern, marked as lower confidence.
+
+### Alerts and reports
+- **Twenty kinds of alert**, each raised once per condition, in the app, by email or on WhatsApp.
+  - They include out of stock, expiring stock, a count waiting for approval, an overdue delivery, missing sales, a failed nightly forecast and a drop in accuracy.
+- **Fourteen reports**, each downloadable as Excel, PDF or CSV, or all in one workbook:
+  - sales, sales by category, best and worst sellers
+  - stock value, stock turn, slow and dead stock
+  - shrinkage, wastage, count compliance
+  - forecast accuracy, supplier performance, lost sales
+  - profit comparison, and an accounting summary
+- **An owner's weekly summary and monthly report**, emailed with every report attached.
+
+### Connections
+- **Tally**: export masters and GST-ready sales and purchase vouchers, and import stock items and the day book.
+- **Zoho Inventory**: a read-only sync of items, invoices and sales orders, nightly or on demand.
+- **WhatsApp Business and SMS** for purchase orders, alerts and receipts. When not configured, they fall back to shareable links.
+- **Sign-in options**:
+  - an optional one-time code after the password, by text or email
+  - password reset by phone
+  - Google and Microsoft sign-in for existing staff
+
+### For store staff
+- **Hindi** on every screen a cashier or store worker uses. Each person picks their own language.
+- **Phone-first floor screens.** Counting, receiving, transfers and wastage are built to be used one-handed on a phone in an aisle.
+
+### For the operator
+- **A platform portal** for whoever runs the service.
+  - Create companies and invite their owners.
+  - Support access only through a temporary, logged, read-only grant.
+  - Export and delete a company's data under India's DPDP Act, the data protection law.
+
+---
+
+## A day with DQ-Stack
+
+```
+ 22:00  Stores close. Sales arrive all day: from Checkout, the POS API, an uploaded
+        file, the SFTP drop, or Zoho.
+        │
+ night  The scheduler checks the data, forecasts every product in every store for
+        the next 28 days, and sets each stock target.
+        │       If the night's run fails, yesterday's forecast stays, with its age shown,
+        │       and the Admin is alerted.
+        ▼
+ morning  Today:  the store manager reviews the few forecasts worth a look.
+        │
+        ▼
+        Orders:   the purchaser turns suggestions into purchase orders, rounded to
+        │         case sizes and supplier minimums, and sends them.
+        ▼
+        Receive:  the delivery is checked in on a phone; stock goes up in the ledger.
+        │
+        ▼
+        Count:    a few products are counted each day, most valuable first; any
+                  difference is explained or approved.
+```
+
+---
+
+## Screens
+
+| | |
+|---|---|
+| <img src="docs/screenshots/home.webp" alt="Home: setup progress, how accurate the forecast has been, and tiles for decisions, orders, stock, alerts, counts and deliveries."> | <img src="docs/screenshots/forecasts.webp" alt="Forecasts: every product's next 7 and 28 days with its likely range, stock target, on hand, suggested order and the reason."> |
+| **Home.** Where the store stands today, and how accurate the forecast has been in plain words. | **Forecasts.** Every product's forecast with its range and the reason behind its order. |
+| <img src="docs/screenshots/orders.webp" alt="Orders: suggestions grouped by supplier, with the supplier minimum, case rounding and the reason for each line."> | <img src="docs/screenshots/model.webp" alt="Model performance: the model in use, how it did when tested, and profit against a flat 95% service level."> |
+| **Orders.** Suggestions grouped by supplier, rounded to whole cases, checked against the minimum. | **Model performance.** What the forecast would have earned, and why a new model was or was not used. |
+
+<p align="center">
+  <img src="docs/screenshots/count-phone.webp" alt="Count on a phone: start a cycle count or a blind count, and see counts in progress." width="300"><br>
+  <b>Count, on a phone.</b> Small differences post by themselves; large ones wait for a manager.
+</p>
+
+---
+
+## How the forecast works
+
+The engine runs every night for each company, on that company's own sales.
+
+| Stage | What it does |
+|---|---|
+| **0&nbsp;Check** | Declared schemas, row counts and totals. A failed check stops the run instead of training on bad data. |
+| **1&nbsp;Diagnose** | Classes each product by how often and how steadily it sells, and scores the health of its data. Finds sold-out days, so a stockout is not learned as "nobody wanted it". |
+| **2&nbsp;Features** | Lags, rolling figures, calendar, festivals, prices and promotions. Each is computed only from data before the forecast date, so the future cannot leak in. |
+| **3&nbsp;Forecast** | Six families of methods, from classic statistical methods for slow sellers to LightGBM and a neural network for steady ones. |
+| **4&nbsp;Combine** | Learns, product by product, how much to trust each method, instead of picking one winner. |
+| **5&nbsp;Reconcile** | Makes store, category and company totals add up exactly. |
+| **6&nbsp;Calibrate** | Checks that an "80% range" really holds 80% of outcomes, and corrects it where it does not. |
+| **7&nbsp;Decide** | Turns each range into a stock target from the product's own costs. Then it simulates the orders, so the forecast is judged on the money it makes, not only on its accuracy. |
+
+Every stage after Stage 3 works with a full range of outcomes, never a single number,
+because a stock target is a decision about risk.
+
+**Scale.** Above 20,000 product-store series a company is split by category and trained
+in parallel. The first forecast trains in a few minutes; each night after that refreshes
+it in seconds without retraining.
+
+The full method, the evidence behind each choice and its known limits:
+**[docs/FORECASTING.md](docs/FORECASTING.md)**.
+
+---
+
+## Quick start
+
+You need **Python 3.12**. Docker is not needed to try it.
+
+```bash
+git clone https://github.com/Praneet-R-S/dqstack.git
+cd dqstack
+python -m venv .venv
+```
+
+Activate the environment: `.venv\Scripts\activate` on Windows, `source .venv/bin/activate` on macOS and Linux. Then:
 
 ```bash
 pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
-python -m dqstack.app.manage seed-demo --email you@example.com   # a demo company
-python -m dqstack.app                                            # http://127.0.0.1:8130
 ```
 
-`/app` is the store app, `/` the public site, `/planner` this planner, `/platform` the
-vendor's portal, `/api/docs` the API. Deploying: [deploy/README.md](deploy/README.md).
-Security status: [docs/SECURITY.md](docs/SECURITY.md). Tests: `python -m pytest`.
+Make a demo company. It asks for one password for every demo account, then trains a
+first forecast (a few minutes):
 
----
-
-## The flow
-
-```
-  RAW SALES + PRICES + CALENDAR + EVENTS
-              |
-   [0] INGEST      declared schema, row counts, fingerprints, totals
-              |    a failed blocking check STOPS THE RUN
-              v
-   [1] DIAGNOSE    ADI/CV² planning class, data-health score,
-              |    censoring detection, PELT regime segmentation
-              v
-   [2] FEATURIZE   lags, rolling stats, calendar, price ratios,
-              |    hierarchy encodings, Fourier terms — 149 features
-              v
-   [3] FORECAST    statistical | LGBM-Tweedie | LGBM-quantile |
-              |    NHITS | zero-shot prior | cohort lifecycle
-              v
-   [4] COMBINE     FFORMA meta-learner → per-series weight vector
-              v
-   [5] RECONCILE   MinT across 12 hierarchy levels + temporal
-              v
-   [6] CALIBRATE   split conformal, stratified by class × horizon
-              v
-   [7] DECIDE      critical fractile → order-up-to → simulator
-                   → decision ledger → realised economics
-                          |
-                          └──→ FVA per stage, promotion gate on margin
+```bash
+python -m dqstack.app.manage seed-demo --email you@example.com
 ```
 
-**Stages 3 through 7 all speak in predictive distributions.** Nothing downstream
-of Stage 3 ever sees a point forecast. That single interface contract is what
-allows the decision layer, the calibration layer and the economic evaluation to
-exist at all.
+Start the server:
 
----
-
-## Why each stage is there
-
-**Stage 0 — a gate, not a warning.** Training on quietly corrupted data produces
-a forecast that looks fine and is wrong, and nobody finds out for weeks. A failed
-blocking check raises `QualityGateFailure` and the run stops.
-
-**Stage 1 — the stage that matters most.** Feeding stockout zeros into training
-teaches the model to under-forecast precisely the items that sell out, which
-causes more stockouts. The loop is self-reinforcing and **invisible in accuracy
-metrics** — a model that under-forecasts a censored series scores *well* against
-the censored actuals it helped produce. Only the economics, or ground truth,
-exposes it.
-
-Two censoring signals. *Structural*: no price record for a store-week means the
-item was not carried, so those zeros are not demand signal at all and are masked
-rather than fed in as zeros. *Probabilistic*: item carried, price present, zero
-sold, and this series rarely sells zero on a comparable weekday — flagged with a
-confidence score.
-
-**Stage 2 — leakage made structurally impossible.** The panel is held as dense
-`(n_series, n_days)` matrices and every feature for origin `O` is computed from
-the slice `[:, :O+1]`. There is no code path by which a post-origin value can
-enter a feature, because post-origin columns are never in scope. `tests/test_leakage.py`
-additionally destroys all data after the origin and asserts no feature value
-changes.
-
-**Stage 3 — six families, each earning its place.** Croston-family methods
-genuinely beat gradient boosting on sparse intermittent series. Tweedie deviance
-fits zero-inflated non-negative counts, which is exactly what retail unit sales
-are — and is what won M5. Direct multi-horizon estimation, never recursive,
-because error compounds over 28 days.
-
-**Stage 4 — combine, do not select.** Selection is a hard argmax over noisy
-validation estimates: if two candidates are within noise it discards one entirely,
-and it picks differently on a resample. The meta-learner is trained on the real
-FFORMA objective — minimise `Σ pₖ·Lₖ` — not on classifying which model won,
-because being wrong between two near-equal candidates costs almost nothing while
-being wrong between a good and a terrible one costs a lot.
-
-**Stage 5 — coherence by construction.** MinT dominates bottom-up and top-down at
-aggregate levels because it uses the full error covariance rather than assuming a
-direction of aggregation. Temporal reconciliation makes "the weekly plan disagrees
-with the quarterly plan" structurally impossible rather than a recurring meeting.
-
-**Stage 6 — load-bearing, not cosmetic.** Stage 7 reads a quantile off this
-distribution to set inventory. **If the P90 is not really the P90, your service
-level is not what you think it is.** Stratified by planning class and horizon,
-because one global adjustment would over-widen smooth series and under-widen
-lumpy ones.
-
-**Stage 7 — the link to money.** The target service quantile is the critical
-fractile:
-
-```
-target quantile = underage / (underage + overage)
-underage        = lost gross margin per unit
-overage         = holding cost over the risk period + markdown + spoilage risk
+```bash
+python -m dqstack.app
 ```
 
-This replaces the industry habit of a blanket 95% service level on everything. A
-low-margin, high-holding-cost item *should* be planned much lower than a
-high-margin one, and the formula says so precisely. It is also the mechanism by
-which better calibration converts into better economics — the causal chain the
-whole argument rests on.
+Open **http://127.0.0.1:8130/app/** and sign in with the email and password you just gave.
 
----
+The demo is **Sharma Supermarkets**:
+- two stores: Pune runs Checkout, and Kochi uploads a daily sales file
+- 30 products from two suppliers
+- about 11 months of synthetic sales, with festival lifts
+- a team of five, one person for each role
 
-## Results
+The team's sign-ins are written to `data/demo-login.txt`, which git ignores.
 
-Every number below is written by the pipeline into `artifacts/metrics.json` and
-rendered in the UI's Pipeline and Evidence views. See `artifacts/` for the full
-tables.
+To run the nightly schedule as well:
 
-| Artifact | What it answers |
+```bash
+python -m dqstack.app.worker
+```
+
+| Address | What is there |
 |---|---|
-| `leaderboard.csv` | Which candidate wins on WSPL and WRMSSE |
-| `fva_ladder.csv` | Does each stage add value, or destroy it |
-| `fva_by_class.csv` | Where the value lands, per planning class |
-| `coverage_table.csv` | Nominal vs empirical coverage, before and after conformal |
-| `economics.csv` | Realised margin per configuration |
-| `decision_ledger.parquet` | One row per item-location-period: quantile forecast, order, outcome, every cost component |
-| `ensemble_weights_by_class.csv` | What the meta-learner chose, and where |
+| `/app/` | The application: back office, Checkout and the floor screens |
+| `/platform` | The operator's portal |
+| `/planner/` | The planner workspace: the forecasting engine's own evidence, for analysts |
+| `/api/docs` | The API, documented and callable |
+| `/` | The public website |
 
-Two findings are the point of the exercise:
-
-1. **The ensemble weights land where the forecasting literature says they should,
-   without anyone writing a rule.** The Croston family and temporal aggregation
-   earn their weight on intermittent and lumpy series; gradient boosting takes
-   smooth ones; the seasonal-naive anchor gets ~0.00, which is the correct
-   treatment of a benchmark.
-
-2. **Accuracy and economics do not rank configurations identically.** The
-   `accuracy_vs_economics` block reports the Spearman correlation and every
-   concrete rank inversion — a configuration that is more accurate on WRMSSE yet
-   earns less realised margin. If the two rankings agreed, this system could be
-   promoted on WRMSSE and the thesis would have nothing to argue.
+Development uses SQLite in `data/`. Production refuses to start on anything but PostgreSQL.
 
 ---
 
-## Data
+## Roles
 
-No real M5 data is used, and that is a deliberate choice rather than a
-compromise.
+Checked on the server for every request. "Own" means only in the stores a person is assigned to.
 
-The M5 competition files record **sales**, never **demand**. Every zero is
-ambiguous: nobody wanted it, the store did not stock it, or it sold out at 11am.
-That ambiguity is the entire subject of Stage 1, and it *cannot be scored* on M5
-because the ground truth does not exist in the file.
+| | Owner | Admin | Store manager | Purchaser | Stock clerk | Cashier | Viewer |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Company settings, people | ✓ | ✓ | | | | | |
+| Billing | ✓ | | | | | | |
+| Imports | ✓ | ✓ | own | | | | |
+| Review forecasts (Today) | ✓ | ✓ | own | own | | | |
+| Create orders, manage suppliers | ✓ | ✓ | | own | | | |
+| Approve orders and count differences | ✓ | ✓ | own | | | | |
+| Receive deliveries | ✓ | ✓ | own | own | own | | |
+| Count, transfer, wastage | ✓ | ✓ | own | | own | | |
+| Checkout | ✓ | ✓ | own | | | own | |
+| Refunds, day close | ✓ | ✓ | own | | | | |
+| Reports | ✓ | ✓ | own | own | | | own |
+| Tally and Zoho connections | ✓ | ✓ | | | | | |
 
-`dqstack/data/generate.py` emits an M5-shaped panel — 1,000 item-location series
-× 1,100 days, three states, ten stores, seven departments — with both:
-
-- `latent_demand` — what customers wanted (never visible to the pipeline)
-- `sales` — what the till recorded (the only input models get)
-
-plus `was_carried` and `was_censored`. Stage 1's censoring detector is therefore
-evaluable with **precision and recall against truth**, which is a stronger result
-than anything obtainable from the public competition data.
-
-The dynamics reproduce what matters in M5: day-of-week and annual seasonality,
-SNAP benefit-day lifts on foods, holiday closures and event lifts, weekly price
-records with promotional depth and elasticity, level shifts, assortment gaps
-aligned to store-weeks, launch ramps, terminal decline, and stockout episodes
-correlated with demand pressure. The calendar and price plan extend 28 days past
-the last sales date, because holidays and promotions are genuinely known ahead of
-time — and without them there is nothing to forecast onto.
-
-Swapping in real M5 is a change to Stage 0 only: point `dqstack/ingest.py` at the
-real files and delete the ground-truth columns. Everything downstream is
-unchanged, except that the Stage 1 precision/recall table becomes unmeasurable.
+A cashier's account opens the till and nothing else.
 
 ---
 
-## The interface
+## Deploying
 
-One portal, four screens, following the specification's 12-week cut. Built to be
-an instrument someone stares at for six hours a day, which overturns most
-conventions of modern web design.
+One server runs everything with Docker Compose:
 
-- **Density is a feature.** Three persisted density modes; ~48 rows at 1440px in
-  dense mode. Whitespace here is a tax the user pays in scroll distance.
-- **Canvas, not DOM.** Above roughly ten thousand visible cells the browser cannot
-  lay out that many elements at frame rate. The grid and both charts are canvas.
-- **Every hue means exactly one thing**, and nothing is encoded by colour alone —
-  direction gets a glyph, magnitude gets a number.
-- **Keyboard beats mouse.** Spreadsheet conventions wholesale: arrows, `J`/`K`,
-  `Enter`, `Esc`, `⌘K`, `⌘↵`. These users came from Excel and are fast in it.
-- **Explanation is adjacent to the number**, never in a separate "insights" tab,
-  because a separate tab does not get read.
+| Service | Job |
+|---|---|
+| `db` | PostgreSQL 16 |
+| `migrate` | Applies database migrations on every start, then exits |
+| `app` | The web application and API |
+| `worker` | The scheduler: nightly forecasts, alerts, connector syncs, summaries |
+| `caddy` | HTTPS with automatic certificates |
+| `pitr` | Continuous backup with WAL-G: restore to any minute in the last 7 days |
+| `backup` | A second, independent nightly dump, kept 30 days |
+| `sftp` | Optional: the nightly sales file drop |
 
-**The signature element** is the in-cell uncertainty micro-fan: a small canvas
-glyph behind every weekly numeral rendering that week's predictive interval as a
-tapered band, vertical extent mapping to the P10–P90 spread and opacity mapping
-to confidence. Paired with it, a 3px **confidence gutter** at the left edge of
-every row, coloured by data-health score. Together they answer "where is the risk,
-and can I trust this number" across fifty rows with no interaction at all.
+Run these on the server:
 
-The **override control shows economic impact before commit** — the direct
-interface expression of the thesis. The number shown is the expected newsvendor
-cost of the override evaluated against the model's own predictive distribution:
-what the change costs *if the forecast is right*. It cannot be what the change
-costs if the planner is right, because nobody knows that yet, and presenting it
-otherwise would be the dishonest version of that number.
+```bash
+git clone https://github.com/Praneet-R-S/dqstack.git && cd dqstack
+cp .env.example .env                        # fill in: domain, secret key, passwords, email, backups
+docker compose up -d --build
+docker compose run --rm app manage check    # every line should read OK
+docker compose run --rm app manage create-platform-admin --email you@yourcompany.in --name "Operations"
+```
 
-Typography note: the specification asks for Inter on the strength of its tabular
-figures. Instrument Sans carries the UI here and **every numeral is set in
-JetBrains Mono** — a monospace face is tabular by construction, so column
-alignment is guaranteed rather than dependent on a font-feature setting surviving
-every code path. Instrument Serif appears only on the executive-register surfaces,
-where it encodes a mode change from *scanning* to *reading and deciding*.
+To update after a push:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+A server with 4 CPUs and 16 GB of memory is sized for 100 stores per company and 200
+tills sending sales at once. The step-by-step guide, including backups, restores, scale,
+WhatsApp, SMS, single sign-on, SFTP and the connectors, is
+**[deploy/README.md](deploy/README.md)**.
 
 ---
 
-## Layout
+## Configuration
+
+All settings come from the environment (`.env`). [`.env.example`](.env.example) explains each one.
+
+| Setting | Purpose |
+|---|---|
+| `DQ_ENV` | `development`, `staging` or `production` |
+| `DQ_SECRET_KEY` | Signs sessions and encrypts stored connector credentials. Generate it with `python -m dqstack.app.config` |
+| `DQ_DOMAIN`, `DQ_PUBLIC_URL` | Where people reach the service |
+| `POSTGRES_PASSWORD`, `DQ_OWNER_PASSWORD`, `DQ_APP_PASSWORD` | Three different database passwords |
+| `DQ_SMTP_*`, `DQ_MAIL_FROM` | Email for invitations, resets, alerts and orders |
+| `DQ_WHATSAPP_*`, `DQ_SMS_*` | Optional messaging |
+| `DQ_GOOGLE_*`, `DQ_MICROSOFT_*` | Optional single sign-on |
+| `WALG_*`, `AWS_*` | Where backups go, and their encryption key |
+
+Production refuses to start with an unsafe setting: the default secret, SQLite, cookies
+without HTTPS, or an address that is not `https`. `manage check` says which one is wrong.
+
+---
+
+## Security
+
+- **Passwords** are hashed with Argon2id. Five failed sign-ins lock an account for 15 minutes.
+- **Sessions** expire, and only a hash of each session token is stored.
+- **Every change needs a CSRF token**, and every role is checked on the server.
+- **The activity log and the stock ledger are append-only**, enforced by database triggers.
+  - The application connects as a role that does not own the tables, so it cannot switch the triggers off.
+- **A strict Content-Security-Policy on every page**, plus security headers and rate limits on sign-in, resets and the POS API. Error pages never show a stack trace.
+- **Connector credentials** are encrypted at rest. They are never sent to the browser or included in exports.
+- **Backups** are encrypted before they leave the server. The restore drill runs in CI on every push.
+
+Status against every target, with what is not yet done: **[docs/SECURITY.md](docs/SECURITY.md)**.
+
+---
+
+## Tests and CI
+
+```bash
+python -m pytest
+```
+
+More than 500 tests cover the engine, the application and the website. Each step of the
+product specification has its own "done when" test. Some examples:
+- an import of 5,000 rows with 20 bad ones imports 4,980, and uploading it again changes nothing
+- on-hand stock equals the sum of 10,000 random movements
+- 1,000 sales sent twice reduce stock once
+- a user of one company cannot read another company's records by changing ids
+
+GitHub Actions runs on every push:
+
+| Job | What it proves |
+|---|---|
+| `tests` | The whole suite on SQLite |
+| `postgres` | The application suite again on PostgreSQL 16. The migrations are applied to an empty database and checked against the models |
+| `image` | The production Docker image builds and starts |
+| `smoke` | The forecasting pipeline end to end, with its invariants |
+| `pitr-drill` | Writes rows, kills the database, restores to a chosen time, and fails unless exactly the right rows come back |
+| `scale` | 100 stores × 10,000 products and 200 tills at once. It fails on any error, or if the 95th percentile response time is over 2 seconds |
+
+To run the application tests on PostgreSQL locally, set `DQ_APP_TESTS_ON_POSTGRES=1`
+and `DQ_TEST_POSTGRES_URL`. On Windows, use `127.0.0.1` in that URL, not `localhost`.
+
+---
+
+## Project layout
 
 ```
 dqstack/
-  config.py        every threshold and ablation switch in one place
-  schemas.py       Stage 0 declared schemas, fingerprints, quality gate
-  ingest.py        Stage 0 runner; builds the analysis panel
-  diagnose.py      Stage 1 classes, health, censoring, PELT
-  features.py      Stage 2 dense-matrix featurisation, split plan
-  models/
-    dist.py        the predictive-distribution contract (NB lift, sanitise)
-    statistical.py seasonal naive, ETS, Croston/SBA, TSB, ADIDA
-    gbm.py         LightGBM Tweedie + quantile heads, TreeSHAP attribution
-    neural.py      NHITS
-    foundation.py  the zero-shot slot
-    lifecycle.py   cohort launch curves
-  combine.py       Stage 4 FFORMA
-  reconcile.py     Stage 5 MinT + temporal
-  calibrate.py     Stage 6 split conformal / CQR
-  decide.py        Stage 7 fractile, simulator, ledger
-  evaluate.py      WRMSSE, WSPL, coverage, FVA, accuracy-vs-economics
-  pipeline.py      the orchestrator
-  export.py        UI data bundle
-tests/
-  test_leakage.py    origin invariance, purged splits, mask integrity
-  test_simulator.py  conservation, no negative stock, closed form, monotonicity
-  test_contracts.py  stage-boundary promises
+  app/               the application server (FastAPI, SQLAlchemy 2, Alembic)
+    routes/          the API, one module per area
+    forecast/        runs the engine for each company: tiers, new products, festivals, sharding
+    connectors/      Tally and Zoho Inventory
+    imports/         spreadsheet imports: checks, repeat safety, undo
+    migrations/      database revisions
+    ledger.py        the append-only stock ledger
+    checkout.py      the till
+    ordering.py      suggested orders and purchase orders
+    alerts.py        the twenty alerts
+    reports.py       the fourteen reports, as Excel, PDF and CSV
+    worker.py        the nightly scheduler
+  pipeline.py        the forecasting engine's seven stages (diagnose.py, features.py, …)
+  live.py            saves a trained model and forecasts from it nightly
+webapp/              the application's front end (plain JavaScript, no build step)
 ui/                  the planner workspace
-artifacts/           results tables, ledger, metrics.json
-```
-
-Run the tests with:
-
-```bash
-python -m pytest tests/ -q
+deploy/              Caddy, PostgreSQL with WAL-G, backups, restores, SFTP
+tests/               engine tests; tests/app/ for the application
+docs/                security status, the forecasting method, a 20-page reference PDF
 ```
 
 ---
 
-## Honest limitations
+## Before the first paying client
 
-Stated plainly, because a specification this size invites overclaiming.
+These are built, but have not yet been tried in the real world:
 
-**The foundation-model slot is a stand-in.** Chronos-2 / TimesFM / Moirai
-checkpoints are multi-gigabyte downloads unavailable in this environment. Rather
-than stub the slot or fabricate a result, `models/foundation.py` fills it with a
-model satisfying the same contract — *forecasts a series it has never seen, using
-no lagged history of that series* — implemented as a covariate-only global
-LightGBM with every lag, rolling statistic and series-specific encoding
-explicitly forbidden. It is API-compatible with a batched Chronos call. What must
-**not** be claimed is that this measures foundation-model performance. It measures
-the value of the slot, not the value of Chronos.
+- **A pilot in two stores for four weeks.** It is the last step of the product specification.
+- **Live trials** of WhatsApp, SMS, Google and Microsoft sign-in, Zoho and TallyPrime against real accounts.
+- **Reviews:**
+  - the privacy notice and terms, by a lawyer
+  - Checkout's receipts as GST invoices, by a chartered accountant
+  - the Hindi text, by a native speaker
+- **An accessibility audit** with screen readers.
+- **The scale test** repeated on the real server, not only on GitHub's runners.
 
-**MinT shrinkage is heavy at this scale.** The hierarchy has ~1,554 nodes and the
-residual sample is smaller than that, so the Schäfer–Strimmer intensity is
-substantial and MinT(shrink) sits closer to MinT(WLS) than to full MinT. The
-intensity is reported in `metrics.json` rather than hidden.
+---
 
-**Spoilage is an excess-cover approximation.** True FIFO unit-age tracking needs a
-per-series queue and cannot be vectorised; the simulator instead expires only
-stock beyond what can be sold within its shelf life. A flat `1/shelf_life` daily
-decay — the obvious shortcut — destroys most of a perishable's inventory
-regardless of turnover and makes waste dominate the ledger.
+## Documentation
 
-**Conformal coverage assumes exchangeability**, which is violated under regime
-change — precisely when correct intervals matter most. Mitigated with a rolling
-calibration window and continuous coverage monitoring, not by assuming the
-guarantee holds forever.
+| Document | For |
+|---|---|
+| [deploy/README.md](deploy/README.md) | Running it in production, step by step |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security and reliability, target by target |
+| [docs/FORECASTING.md](docs/FORECASTING.md) | The forecasting method and its evidence |
+| [docs/DQ-Stack-Reference.pdf](docs/DQ-Stack-Reference.pdf) | A 20-page reference for the planner workspace |
+| [CONTEXT.md](CONTEXT.md) | The engineering log: decisions, defects found and fixed, traps |
 
-**Lower-tail coverage is not achievable on zero-inflated demand, and Stage 6 does
-not pretend otherwise.** When 43% of actuals are exactly zero and the predicted
-low quantile is also zero, `P(y <= q)` is bounded below by `P(y = 0)`, so a nominal
-0.05 target is arithmetically out of reach. The calibrator validates each offset on
-a held-out half and declines to adjust levels where adjustment does not help,
-which is why the reported adjustment table shows the lower levels as
-"declined: no out-of-sample gain" rather than silently shifting mass upward to
-chase a number it cannot hit. The median is never shifted at all — CQR
-conformalises interval bounds, not the point forecast.
+---
 
-**The censoring mask uses whole-sample weekday zero-rates.** `P(zero | weekday)`
-is estimated over each series' full history rather than as of each origin, so the
-mask that defines the training target carries a small amount of foresight. Fixing
-it properly means recomputing masks per origin, which is 42 rebuilds of a
-1,000 × 1,128 panel. What leaks is a stationary property of the series, not a
-target value, and the static diagnostic *features* — the larger and more direct
-leak — are now computed per origin block. This is the one known residual.
-
-**The backtest rolls the evaluation origin, not retraining.** Models are fitted
-once on the training block and evaluated at eight purged origins. That measures
-how a fixed system behaves as the origin moves, which is the question the
-combination-versus-selection claim needs. It does not measure the value of weekly
-retraining, and the results must not be read as if it did.
-
-**Eight paired origins is a small sample.** The paired comparisons report Wilcoxon
-and exact sign tests, and with eight observations neither reaches conventional
-significance unless the effect is large. Where the direction is consistent but the
-test is underpowered, that is what the summary says — "consistent direction,
-underpowered" is the honest reading, not "no effect".
-
-**Overrides are not persisted.** There is no write path to a system of record
-here, so commits are announced and cleared. The impact estimate is real; the
-durable override ledger is not built.
-
-**Five portals are not built**, and this is framed as scope rather than omission:
-the executive, data-health, model-operations, admin and mobile portals require
-production conditions that public or synthetic data cannot exercise — there are no
-real planners generating overrides, no live feeds to monitor, no negotiated cost
-parameters to configure. The Pipeline, Evidence and Decisions views cover the
-observability those portals would provide for the one thing that *can* be
-demonstrated here: the pipeline's own behaviour.
+<div align="center">
+<sub>Built for Indian retail: rupees, lakhs, GST, UPI, festivals, Hindi, and hosting in an Indian cloud region.</sub><br>
+<sub>No licence has been chosen yet, so all rights are reserved.</sub>
+</div>
