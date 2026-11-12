@@ -500,7 +500,7 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
     # leaving that forecast uncalibrated (worse at 4 of 4 quick-run backtest
     # origins, better at 5 of 8 in the full run, by 0.1%).
     own_orders_cal = cfg.enable_reconciliation and not cfg.reconcile.for_decisions
-    cy, cq_list, cq_orders, cq_single, cpc, chg = [], [], [], [], [], []
+    cy, cq_list, cq_orders, cq_single, cpc, chg, corg = [], [], [], [], [], [], []
     for O in conf_origins:
         y = np.stack([P.y[:, O + h] for h in horizons], axis=1)
         _, qs = candidate_quantiles(vintages["conformal"], O, horizons, tr)
@@ -514,19 +514,25 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         cq_list.append(cqq.reshape(-1, len(QUANTILES)))
         cpc.append(np.repeat(pc, len(horizons)))
         chg.append(np.tile(hg_arr, len(pc)))
+        corg.append(np.full(y.size, O))
     cy_a = np.concatenate(cy)
     cq_a = np.concatenate(cq_list)
     cpc_a = np.concatenate(cpc)
     chg_a = np.concatenate(chg)
+    # Each row's origin, so the levels above the median are validated forward in
+    # time, on the latest conformal origin (calibrate.py, rule 4).
+    corg_a = np.concatenate(corg)
     conformal = cal_mod.ConformalCalibrator().fit(
-        cy_a, cq_a, cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg
+        cy_a, cq_a, cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg, origin=corg_a
     )
     conformal_orders = cal_mod.ConformalCalibrator().fit(
-        cy_a, np.concatenate(cq_orders), cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg
+        cy_a, np.concatenate(cq_orders), cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg,
+        origin=corg_a,
     ) if own_orders_cal else conformal
     # The single best method's own calibrator, for when the app issues it alone.
     conformal_single = cal_mod.ConformalCalibrator().fit(
-        cy_a, np.concatenate(cq_single), cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg
+        cy_a, np.concatenate(cq_single), cpc_a, chg_a, valid=np.isfinite(cy_a), cfg=cfg,
+        origin=corg_a,
     )
     timings["stage6_calibrate"] = time.perf_counter() - t0
     log(f"  strata fitted {len(conformal.offsets) - 1} + global "
@@ -537,7 +543,8 @@ def run(cfg: Config = CFG, quick: bool = False, ablate_censoring: bool = True,
         if name.startswith("forecast issued") and cal is conformal:
             continue              # orders read the forecast `conformal` was fitted on
         adj = cal.adjustment_report()
-        log(f"  {name}: per-level adjustment (validated on a held-out half):")
+        log(f"  {name}: per-level adjustment (floors validated on a held-out half, "
+            f"upper levels on the {cal.upper_check}):")
         log("    " + adj.round(3).to_string(index=False).replace("\n", "\n    "))
 
     # ---------------------------------------------------------- eval origin

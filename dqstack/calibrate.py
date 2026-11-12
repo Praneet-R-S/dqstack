@@ -113,9 +113,12 @@ class ConformalCalibrator:
     scales: dict[str, np.ndarray] = field(default_factory=dict)
     level_edges: np.ndarray | None = None
     level_scales: dict[int, np.ndarray] = field(default_factory=dict)
+    # How the levels above the median were validated: "latest origin" when fit()
+    # was given each row's origin, else "interleaved halves". Report only.
+    upper_check: str = "interleaved halves"
 
     # ---------------------------------------------------------------------
-    # Three rules that separate this from a naive per-level shift, all of them
+    # Four rules that separate this from a naive per-level shift, all of them
     # learned from watching the naive version degrade the system.
     #
     # 1. The median is never shifted. CQR conformalises interval *bounds*; it
@@ -145,6 +148,19 @@ class ConformalCalibrator:
     #    tie-aware question: does the factor bring tau inside [P(y < q), P(y <= q)]
     #    on the held-out half, and, where both already bracket it, does it lower
     #    the pinball loss.
+    #
+    # 4. Above the median the check runs forward in time when the origins are
+    #    known. Interleaved halves share every origin, so they cannot see drift,
+    #    and the conformal window drifts: on the demo data the uncalibrated orders
+    #    forecast held 82% of outcomes at its P75 at the window's first origins and
+    #    81% at its last, then 75-77% at the evaluation origins. Offsets fitted on
+    #    the whole window lowered every upper level for a surplus that had already
+    #    gone, and P90 held 85% of outcomes against 88% uncalibrated. So an offset
+    #    is fitted on the earlier origins and kept only if it lowers that level's
+    #    pinball loss on the latest origin; a kept one is then estimated again on
+    #    that latest origin, the freshest evidence of its size. Levels that fail
+    #    stay where the model put them. Below the median the halves stay: guarded
+    #    forward, the floors went over by more on the reconciled forecast.
     # ---------------------------------------------------------------------
 
     # -------------------------------------------------------------- fit
@@ -157,6 +173,7 @@ class ConformalCalibrator:
         horizon_group: np.ndarray,
         valid: np.ndarray | None = None,
         cfg=CFG,
+        origin: np.ndarray | None = None,
     ) -> "ConformalCalibrator":
         """
         `y`               (N,)      calibration actuals
@@ -164,6 +181,9 @@ class ConformalCalibrator:
         `planning_class`  (N,)
         `horizon_group`   (N,)
         `valid`           (N,)      exclude censored / not-carried targets
+        `origin`          (N,)      each row's forecast origin, larger = later. When
+                                    given, levels above the median are validated on
+                                    the latest origin (rule 4).
         """
         y = np.asarray(y, dtype="float64")
         q = np.asarray(q, dtype="float64")
@@ -173,14 +193,24 @@ class ConformalCalibrator:
         y, q = y[keep], q[keep]
         pc, hg = planning_class[keep], horizon_group[keep]
 
-        # Interleaved halves rather than a temporal cut, so both halves span the
-        # same origins and the validation measures the offset's generalisation
-        # rather than a drift between two periods.
+        # Interleaved halves, so both halves span the same origins: the floors'
+        # factor is validated on these (rule 3), and so are the upper levels when
+        # the origins are unknown.
         half = (np.arange(len(y)) % 2) == 0
+        latest = None
+        if origin is not None:
+            o = np.asarray(origin)[keep]
+            if len(np.unique(o)) >= 2:
+                latest = o == o.max()
+        self.upper_check = "interleaved halves" if latest is None else "latest origin"
 
-        self.offsets[GLOBAL], self.adjusted[GLOBAL] = self._fit_offsets(
-            y[half], q[half], y[~half], q[~half]
-        )
+        def upper(m: np.ndarray) -> tuple[np.ndarray, list[bool]]:
+            if latest is not None and (m & ~latest).sum() >= 30 and (m & latest).sum() >= 30:
+                return self._fit_offsets(y[m & ~latest], q[m & ~latest],
+                                         y[m & latest], q[m & latest], forward=True)
+            return self._fit_offsets(y[m & half], q[m & half], y[m & ~half], q[m & ~half])
+
+        self.offsets[GLOBAL], self.adjusted[GLOBAL] = upper(np.ones(len(y), dtype=bool))
         self.scales[GLOBAL] = self._fit_scales(
             y[half], q[half], y[~half], q[~half], self.adjusted[GLOBAL]
         )
@@ -194,9 +224,7 @@ class ConformalCalibrator:
                 continue          # too thin to estimate reliably; global applies
             hm = half & m
             cm = (~half) & m
-            self.offsets[str(s)], self.adjusted[str(s)] = self._fit_offsets(
-                y[hm], q[hm], y[cm], q[cm]
-            )
+            self.offsets[str(s)], self.adjusted[str(s)] = upper(m)
             self.scales[str(s)] = self._fit_scales(
                 y[hm], q[hm], y[cm], q[cm], self.adjusted[str(s)]
             )
@@ -224,13 +252,18 @@ class ConformalCalibrator:
         return self
 
     def _fit_offsets(
-        self, y_fit: np.ndarray, q_fit: np.ndarray, y_chk: np.ndarray, q_chk: np.ndarray
+        self, y_fit: np.ndarray, q_fit: np.ndarray, y_chk: np.ndarray, q_chk: np.ndarray,
+        forward: bool = False,
     ) -> tuple[np.ndarray, list[bool]]:
         """Per-level conformity offset, validated out of sample.
 
         The empirical tau-quantile of (y - q_tau) is the shift that makes
         empirical coverage equal tau on the data it was estimated from. Whether
         it also does so on unseen data is a separate question, and this asks it.
+
+        `forward`: the check rows are the latest origin and the fit rows the earlier
+        ones (rule 4). An offset is kept only if it lowers that level's pinball loss
+        on the latest origin, and is then estimated again on the latest origin.
         """
         K = len(self.quantiles)
         deltas = np.zeros(K, dtype="float64")
@@ -245,6 +278,11 @@ class ConformalCalibrator:
             if k < m:
                 continue                      # below the median: a factor, _fit_scales
             d = float(np.quantile(y_fit - q_fit[:, k], tau))
+            if forward:
+                if _pinball(y_chk, q_chk[:, k] + d, tau) < _pinball(y_chk, q_chk[:, k], tau) - 1e-12:
+                    deltas[k] = float(np.quantile(y_chk - q_chk[:, k], tau))
+                    kept[k] = True
+                continue
             gap_without = abs(float((y_chk <= q_chk[:, k]).mean()) - tau)
             gap_with = abs(float((y_chk <= q_chk[:, k] + d).mean()) - tau)
             if gap_with < gap_without - 1e-9:
