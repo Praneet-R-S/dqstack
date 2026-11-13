@@ -228,3 +228,24 @@ Open the Render address: under the password form, **or try the demo** lists the 
 
 Close the window afterwards, so `DATABASE_URL` does not stay pointed at Neon for your
 local work.
+
+## The landing page alone: a free static site
+
+The scrolling landing page as plain files: free, always fast, and it never sleeps. Its
+**Sign in** and **Set up your first store** buttons lead to the app at `APP_URL` (for
+example the free web service above); without `APP_URL` they scroll to the page's last
+section instead.
+
+1. **https://dashboard.render.com** > **New +** > **Static Site** > pick the `dqstack`
+   repository, branch **main**.
+2. **Build Command:** `sh scripts/build_static_site.sh`
+3. **Publish Directory:** `public`
+4. **Environment Variables:** `APP_URL` = the app's address, for example
+   `https://dqstack.onrender.com` (leave it out if there is no app to link to).
+5. **Create Static Site**. Its address is at the top, for example
+   `https://dqstack-site.onrender.com`. Every push to main rebuilds it.
+
+The build copies `site/` to `public/`, puts its images and scripts at `/site-assets/`
+where the pages expect them, and points the app links at `APP_URL`. Try it locally with
+`APP_URL=https://dqstack.onrender.com sh scripts/build_static_site.sh`, then
+`python -m http.server --directory public 8000`.

@@ -40,3 +40,5 @@ data/demo-login.txt
 
 # Local editor and assistant settings: stay on this machine.
 .claude/
+
+public/
