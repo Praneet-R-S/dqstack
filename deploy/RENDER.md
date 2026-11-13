@@ -238,14 +238,16 @@ section instead.
 
 1. **https://dashboard.render.com** > **New +** > **Static Site** > pick the `dqstack`
    repository, branch **main**.
-2. **Build Command:** `sh scripts/build_static_site.sh`
-3. **Publish Directory:** `public`
+2. **Root Directory:** `site`. This matters: from the repository's root, Render finds
+   `requirements.txt` and installs the whole forecasting engine (PyTorch and the rest,
+   gigabytes) before building, and the build fails. The `site` folder has none.
+3. **Build Command:** `sh tools/build_static.sh` (**Publish Directory:** `public`)
 4. **Environment Variables:** `APP_URL` = the app's address, for example
    `https://dqstack.onrender.com` (leave it out if there is no app to link to).
 5. **Create Static Site**. Its address is at the top, for example
    `https://dqstack-site.onrender.com`. Every push to main rebuilds it.
 
-The build copies `site/` to `public/`, puts its images and scripts at `/site-assets/`
-where the pages expect them, and points the app links at `APP_URL`. Try it locally with
-`APP_URL=https://dqstack.onrender.com sh scripts/build_static_site.sh`, then
-`python -m http.server --directory public 8000`.
+The build copies the pages to `site/public/`, puts their images and scripts at
+`/site-assets/` where the pages expect them, and points the app links at `APP_URL`. Try
+it locally with `APP_URL=https://dqstack.onrender.com sh site/tools/build_static.sh`,
+then `python -m http.server --directory site/public 8000`.
