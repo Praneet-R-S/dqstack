@@ -216,6 +216,22 @@ def test_mint_projection_satisfies_g_times_s_equals_identity():
     )
 
 
+def test_solver_leftover_is_removed_exactly():
+    """On the demo's 1,554-node hierarchy the solve alone left |G·S - I| at about
+    4e-6, which failed CI's 1e-6 invariant. Whatever the solve leaves, adding it back
+    on the bottom columns must make G·S the identity to rounding, and change G by no
+    more than the leftover itself."""
+    from dqstack.reconcile import _restore_identity
+    rng = np.random.default_rng(33)
+    series = _toy_series(n_items=10, n_stores=4)
+    rc = Reconciler().fit(series, rng.normal(0, 2.0, size=(200, len(series))))
+    damaged = rc.G + rng.normal(scale=1e-5, size=rc.G.shape)
+    assert np.abs(damaged @ rc.H.S - np.eye(rc.H.n_bottom)).max() > 1e-6
+    fixed = _restore_identity(rc.H, damaged)
+    assert np.abs(fixed @ rc.H.S - np.eye(rc.H.n_bottom)).max() < 1e-12
+    assert np.abs(fixed - damaged).max() < 1e-3
+
+
 def test_coherent_input_is_a_fixed_point():
     """With no independent aggregate forecasts the input is already coherent, so
     reconciliation must return it unchanged. If it does not, the projection is

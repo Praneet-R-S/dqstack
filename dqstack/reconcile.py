@@ -154,8 +154,27 @@ def mint_projection(H: Hierarchy, W: np.ndarray, tol: float = 1e-7) -> np.ndarra
             return G
     if best is None:
         # Last resort: the pseudo-inverse always yields a valid projection.
-        return np.linalg.pinv(S.T @ WiS) @ WiS.T
-    return best
+        best = np.linalg.pinv(S.T @ WiS) @ WiS.T
+    return _restore_identity(H, best)
+
+
+def _restore_identity(H: Hierarchy, G: np.ndarray) -> np.ndarray:
+    """Remove the solve's leftover from G @ S = I, exactly.
+
+    The bottom rows of S are the identity, so B, which picks those rows, satisfies
+    B @ S = I. With E = I - G @ S, the matrix G + E @ B gives (G + E @ B) @ S =
+    G @ S + E = I. In code, that is adding E to G's bottom columns. The change is the
+    size of the leftover (about 1e-6 at this scale), far below any forecast's
+    precision, but it turns "G @ S is nearly I" into "is I to rounding". Without it,
+    the residual multiplies through every reconciled forecast as a small, systematic
+    distortion."""
+    bottom = H.bottom_slice()
+    if not np.array_equal(H.S[bottom], np.eye(H.n_bottom)):
+        return G
+    E = np.eye(H.n_bottom) - G @ H.S.astype("float64")
+    G = G.copy()
+    G[:, bottom] += E
+    return G
 
 
 @dataclass
