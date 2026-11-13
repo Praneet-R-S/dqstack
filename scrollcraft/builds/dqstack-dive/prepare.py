@@ -105,8 +105,24 @@ def city_planes() -> None:
     save(off_im, "city-off.webp", q=84)
 
 
+def upscale_clean(im: Image.Image, factor: int = 2) -> Image.Image:
+    """A small photo the page enlarges a lot: take out the JPEG blocks first (gentle
+    non-local means), then enlarge with Lanczos and sharpen lightly, so the browser is
+    not stretching 8x8 blocks. The layout keeps the photo's original coordinates."""
+    from skimage.restoration import denoise_nl_means, estimate_sigma
+    a = np.asarray(im.convert("RGB")).astype("float32") / 255
+    sigma = float(np.mean(estimate_sigma(a, channel_axis=-1)))
+    d = denoise_nl_means(a, h=0.8 * sigma, sigma=sigma, patch_size=5, patch_distance=6,
+                         fast_mode=True, channel_axis=-1)
+    clean = Image.fromarray((np.clip(d, 0, 1) * 255 + 0.5).astype("uint8"))
+    big = clean.resize((im.width * factor, im.height * factor), Image.LANCZOS)
+    return big.filter(ImageFilter.UnsharpMask(radius=1.6, percent=70, threshold=2))
+
+
 def plain() -> None:
-    names = {"1.webp": "street.webp", "3.webp": "front.webp", "5.jpg": "aisle.webp",
+    # The aisle (5.jpg) is only 735 px wide and is shown up to about 5x: see below.
+    save(upscale_clean(Image.open(SRC / "5.jpg")), "aisle.webp", q=84)
+    names = {"1.webp": "street.webp", "3.webp": "front.webp",
              "6.webp": "front-diwali.webp", "7.webp": "shelf-gaps.webp",
              "8.webp": "shelf-over.webp", "9.webp": "label.webp", "10.webp": "people.webp"}
     for src, name in names.items():
