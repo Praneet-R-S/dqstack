@@ -328,6 +328,14 @@ def train(db: Session, company_id: str, trigger: str = "onboarding",
                        **({"workers": summary["workers"]} if "workers" in summary else {}),
                        "blend_backtest": {k: v for k, v in summary.items()
                                           if k not in ("recent", "workers")}}
+            # A sharded model's parts are the same whichever way it issues: keep their
+            # layout here. Their accuracy figures tested the blend, so they stay with
+            # blend_backtest. (Which issue wins can turn on a rupee, so a missing layout
+            # made the sharded test pass or fail by chance.)
+            parts = summary["blend_backtest"].get("shards")
+            if parts:
+                summary["shards"] = [{"name": p["name"], "series": p["series"],
+                                      "seconds": p["seconds"]} for p in parts]
         mv.backtest = summary
         mv.backtest_profit_paise = int(round(chosen["margin"] * 100))
         db.add(mv)

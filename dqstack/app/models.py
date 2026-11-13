@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import (JSON, BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer,
-                        LargeBinary, String, Text, UniqueConstraint, event)
+                        LargeBinary, String, Text, UniqueConstraint, event, func)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base, CreatedMixin, IdMixin, utcnow
@@ -249,6 +249,13 @@ class Product(IdMixin, CreatedMixin, Base):
     abc_class: Mapped[str | None] = mapped_column(String(1))
     # Link back to the forecasting engine's series id for the demo company.
     engine_ref: Mapped[str | None] = mapped_column(String(120))
+
+
+# Tills and imports look products up by SKU without regard to case (upper(sku) = ...).
+# The unique (company_id, sku) index cannot serve that, so every bill line scanned all
+# of a company's products: half of a POS request's time at 10,000 products, and the
+# 200-till scale test's latency. An index on the expression makes it one lookup.
+Index("ix_products_company_upper_sku", Product.company_id, func.upper(Product.sku))
 
 
 class Barcode(IdMixin, Base):
