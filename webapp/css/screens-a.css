@@ -24,7 +24,7 @@
 
 /* progress and score meters */
 .a-progress { height: 8px; border-radius: var(--r-pill); background: var(--bg-inset); overflow: hidden; margin: 8px 0; }
-.a-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--grad-accent); }
+.a-progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--ui-accent) 0%, var(--pop) 100%); box-shadow: 0 0 10px var(--pop-soft); }
 .a-progress[data-kind="ok"] > span { background: var(--state-ok); }
 .a-progress[data-kind="attention"] > span { background: var(--state-attention); }
 .a-progress[data-kind="risk"] > span { background: var(--state-risk); }

@@ -3,7 +3,11 @@
    Colours, spacing, radii and focus come from the planner's three-layer tokens
    (/planner/css/tokens.css) so the two read as one product: data violet, action
    orchid, and red / amber / teal for risk / attention / healthy. Type is Geist with
-   Geist Mono for figures. Touch targets are at least 44px (section 12 rule 8). */
+   Geist Mono for figures. Touch targets are at least 44px (section 12 rule 8).
+
+   The pop: one lime, purple's opposite, in small doses only. It says "you are here"
+   and carries the brand (the active page, the selected tab, the logo, the account,
+   progress), and never means good or bad: that stays with red, amber and teal. */
 
 :root {
   --font-ui: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -12,6 +16,10 @@
   --top-h: 60px;
   --tap: 44px;
   --motion: cubic-bezier(0.22, 1, 0.36, 1);
+  --pop: #C8F04A;                          /* 13:1 on the darkest surface */
+  --pop-ink: #17200A;                      /* text on a lime fill */
+  --pop-glow: rgba(200, 240, 74, 0.45);
+  --pop-soft: rgba(200, 240, 74, 0.12);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -42,16 +50,18 @@ a { color: var(--ui-accent); }
   background: var(--bg-surface); border-right: 1px solid var(--border-subtle);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 8px 10px 16px; color: var(--text-primary); font-weight: 700; font-size: 17px; text-decoration: none; }
-.brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--grad-accent); box-shadow: 0 0 0 1px var(--border-hair) inset; }
+.brand-mark { position: relative; flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--grad-accent); box-shadow: 0 0 0 1px var(--border-hair) inset; }
+.brand-mark::after { content: ""; position: absolute; right: -2px; top: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--pop); box-shadow: 0 0 0 2px var(--bg-surface), 0 0 8px var(--pop-glow); }
 .nav-group { margin-top: 12px; }
 .nav-label { margin: 8px 10px 4px; font-size: 12px; font-weight: 600; color: var(--text-tertiary); text-transform: none; }
 .nav-item {
-  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 10px;
+  position: relative; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 10px;
   border-radius: var(--r-input); color: var(--text-secondary); text-decoration: none; font-weight: 500;
 }
 .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .nav-item[aria-current="page"] { background: var(--bg-active); color: var(--text-primary); }
-.nav-item[aria-current="page"] .nav-dot { background: var(--ui-accent); }
+.nav-item[aria-current="page"] .nav-dot { background: var(--pop); box-shadow: 0 0 8px var(--pop-glow); }
+.nav-item[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--pop); }
 .nav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); flex: none; }
 .nav-badge:empty { display: none; }
 .nav-badge { margin-left: auto; font: 600 12px var(--font-num); color: var(--text-primary); background: var(--bg-raised); border-radius: var(--r-pill); padding: 0 8px; }
@@ -82,13 +92,14 @@ a { color: var(--ui-accent); }
 .bell-count { position: static; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font: 600 11px/18px var(--font-num); text-align: center; background: var(--state-attention); color: var(--bg-base); }
 .bell-count[data-kind="risk"] { background: var(--state-risk); }
 .account-wrap { position: relative; }
-.account { width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-primary); font: 600 13px var(--font-ui); cursor: pointer; }
+.account { width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-primary); font: 600 13px var(--font-ui); cursor: pointer; box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 3px var(--pop); }
 .account-menu { position: absolute; right: 0; top: 52px; min-width: 240px; padding: 8px; background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: var(--r-card); box-shadow: 0 12px 32px rgba(0,0,0,.4); }
 .account-menu a, .account-menu button { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; background: none; color: var(--text-primary); font: inherit; border-radius: var(--r-input); text-decoration: none; cursor: pointer; }
 .account-menu a:hover, .account-menu button:hover { background: var(--bg-hover); }
 .account-who { margin: 4px 12px 8px; color: var(--text-secondary); font-size: 13px; }
 
 .main { padding: 24px 32px 64px; max-width: 1400px; width: 100%; outline: none; }
+.page-head .title-1::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--pop); box-shadow: 0 0 10px var(--pop-glow); vertical-align: baseline; }
 .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-sub { margin: 4px 0 0; }
 .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -154,7 +165,7 @@ a.tile:hover { background: var(--bg-raised); }
 
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
 .tab { min-height: var(--tap); padding: 0 14px; border: 0; background: none; color: var(--text-secondary); font: 500 14px var(--font-ui); cursor: pointer; border-bottom: 2px solid transparent; }
-.tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--ui-accent); }
+.tab[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--pop); }
 
 .empty { padding: 48px 24px; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--r-panel); }
 .empty .text-2 { max-width: 520px; margin: 8px auto 16px; }
@@ -214,7 +225,7 @@ a.tile:hover { background: var(--bg-raised); }
 .demo-note { margin: 0 0 12px; font-size: 14px; }
 .demo-list { display: grid; gap: 8px; }
 .demo-btn { display: grid; gap: 2px; width: 100%; min-height: var(--tap); padding: 10px 14px; text-align: left; font: inherit; color: var(--text-primary); background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-input); cursor: pointer; transition: border-color var(--motion), background var(--motion); }
-.demo-btn:hover { background: var(--bg-hover); border-color: var(--ui-accent); }
+.demo-btn:hover { background: var(--bg-hover); border-color: var(--pop); }
 .demo-btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
 .demo-btn:disabled { opacity: .6; cursor: progress; }
 .demo-role { font-weight: 600; }
