@@ -292,9 +292,14 @@ A cashier's account opens the till and nothing else.
 
 ## Deploying
 
-There are two ways to deploy.
+There are three ways to deploy.
 
-**On Render (quickest).** [`render.yaml`](render.yaml) creates the database, the web
+**Free, for demos and trials: Hugging Face Spaces + Neon.** No card needed. The app and
+its scheduler run in a Space, and the database is Neon's free PostgreSQL. A GitHub
+workflow republishes after every green CI run. The full guide is
+**[deploy/HUGGINGFACE.md](deploy/HUGGINGFACE.md)**.
+
+**On Render.** [`render.yaml`](render.yaml) creates the database, the web
 service and the worker in one step: **New → Blueprint** in Render, then pick this
 repository. Then add email and your domain. The full guide is
 **[deploy/RENDER.md](deploy/RENDER.md)**.
@@ -446,6 +451,7 @@ These are built, but have not yet been tried in the real world:
 
 | Document | For |
 |---|---|
+| [deploy/HUGGINGFACE.md](deploy/HUGGINGFACE.md) | Running it free on Hugging Face Spaces and Neon |
 | [deploy/RENDER.md](deploy/RENDER.md) | Deploying on Render, step by step |
 | [deploy/README.md](deploy/README.md) | Running it on your own server, step by step |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security and reliability, target by target |

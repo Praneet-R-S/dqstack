@@ -7,6 +7,9 @@ all three in one step, then add email and a domain.
 For your own server with Docker Compose instead (India regions, SFTP, WAL-G backups),
 see [README.md](README.md) in this folder.
 
+**For a portfolio or a demo, at no cost,** skip to [Free: one web service and
+Neon](#free-one-web-service-and-neon) at the end. The Blueprint below uses paid plans.
+
 ## What runs where
 
 | Render resource | Name | What it does | Plan in render.yaml |
@@ -152,3 +155,76 @@ Add these in **dqstack-settings**. [.env.example](../.env.example) explains each
 | No emails arrive | Check the `DQ_SMTP_*` values; until they are set, messages go to the service's Logs instead |
 | Logs say "too many connections" | Each web process opens up to 30 database connections (`WEB_CONCURRENCY` is 2 here). If your database plan allows fewer, set `DQ_DB_POOL_SIZE=5` and `DQ_DB_MAX_OVERFLOW=10` in dqstack-settings |
 | Deploys never start after a push | GitHub's checks failed. Fix them, or use Manual Deploy |
+
+## Free: one web service and Neon
+
+For a portfolio or a demo. No card, no Blueprint: one free web service on Render, the
+database on Neon's free plan (Render's free database is deleted after 30 days; Neon's is
+not), and the demo company with its forecast made **from your own computer**, because
+training a forecast needs more memory than the free plan's 512 MB. The website itself
+uses about 220 MB with one worker.
+
+What you give up on the free plan:
+
+- **It sleeps** after 15 minutes without visitors; the next visit takes about a minute.
+- **No scheduler**, so no nightly forecast: the demo shows the forecast made when you
+  created it, dated. Buttons such as *Retrain now* queue work that nothing runs. To
+  refresh the demo, delete it and create it again (step 4).
+- No email unless you add SMTP settings; that does not matter for a demo.
+
+### 1. The database: Neon (5 minutes)
+
+1. Sign up at **https://neon.tech** with GitHub or Google.
+2. Create a project: `dqstack`, **Postgres 16**, region **AWS Asia Pacific (Singapore)**.
+3. **Connect**, turn **Connection pooling off**, copy the connection string
+   (`postgresql://...`). Keep it private: it holds the database password.
+
+### 2. The web service on Render (5 minutes, then about 15 minutes of building)
+
+1. **https://dashboard.render.com** > **New +** > **Web Service** > pick the `dqstack`
+   repository.
+2. **Language / Runtime: Docker**. **Branch: main**. **Region: Singapore**.
+   **Instance type: Free**.
+3. **Environment Variables**, add:
+
+   | Key | Value |
+   |---|---|
+   | `DATABASE_URL` | the Neon connection string |
+   | `DQ_SECRET_KEY` | 64 random characters: `python -m dqstack.app.config` prints one |
+   | `DQ_MIGRATE_ON_START` | `true` (the free plan has no pre-deploy step) |
+   | `WEB_CONCURRENCY` | `1` (one worker fits in 512 MB) |
+   | `DQ_DB_POOL_SIZE` | `3` |
+   | `DQ_DB_MAX_OVERFLOW` | `3` |
+   | `DQ_DEMO_LOGINS` | `true` (one-click demo logins on the sign-in page) |
+
+4. Under **Advanced**, set **Health Check Path** to `/api/health`.
+5. **Create Web Service**. The address is at the top, e.g. `https://dqstack.onrender.com`;
+   the app uses it by itself.
+
+### 3. Your operator account (on your computer)
+
+In the project folder on your computer, with the Neon string in place of the example
+(PowerShell; the quotes matter):
+
+```powershell
+$env:DATABASE_URL = "postgresql://...your Neon string..."
+python -m dqstack.app.manage migrate
+python -m dqstack.app.manage create-platform-admin --email you@example.com --name "Operations"
+```
+
+It asks for a password. That account signs in at `/platform` on the Render address.
+
+### 4. The demo company (on your computer, a few minutes)
+
+In the same window (it keeps `DATABASE_URL`):
+
+```powershell
+python -m dqstack.app.manage seed-demo --email owner@demo.example
+```
+
+It asks for one password for every demo account, makes Sharma Supermarkets with about 11
+months of sales, and trains its first forecast on your computer, saving it to Neon.
+Open the Render address: under the password form, **or try the demo** lists the team.
+
+Close the window afterwards, so `DATABASE_URL` does not stay pointed at Neon for your
+local work.
