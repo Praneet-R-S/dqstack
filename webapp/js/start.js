@@ -311,6 +311,36 @@
     code.focus();
   }
 
+  /* One click into the demonstration company, as any of its people. The server offers
+     this only when demo logins are on (always in development); otherwise the list is
+     empty and nothing shows. */
+  function demoLogins(box) {
+    DQ.get("/api/auth/demo", { allow401: true, quiet: true }).then(function (d) {
+      if (!d || !d.accounts || !d.accounts.length) return;
+      var err = h("p", { class: "form-error", role: "alert", hidden: true });
+      var list = h("div", { class: "demo-list" });
+      function busy(on) { Array.prototype.forEach.call(list.querySelectorAll("button"), function (b) { b.disabled = on; }); }
+      d.accounts.forEach(function (a) {
+        var where = a.stores.length ? a.stores.join(", ") : tx("All stores");
+        var b = h("button", { type: "button", class: "demo-btn" },
+          h("span", { class: "demo-role" }, roleName(a.role)),
+          h("span", { class: "demo-who" }, a.name + " · " + where));
+        b.addEventListener("click", function () {
+          busy(true); err.hidden = true;
+          DQ.post("/api/auth/demo", { person_id: a.id }, { quiet: true, allow401: true }).then(afterSignIn, function (e) {
+            busy(false); err.textContent = e.message; err.hidden = false;
+          });
+        });
+        list.appendChild(b);
+      });
+      box.appendChild(h("p", { class: "sso-or" }, h("span", null, "or try the demo")));
+      box.appendChild(h("p", { class: "text-2 demo-note" }, h("strong", null, d.company), " ", "Pick someone to see the app as they would. The figures are made up."));
+      box.appendChild(list);
+      box.appendChild(err);
+      box.hidden = false;
+    }, function () { /* no demo here: show nothing */ });
+  }
+
   DQ.route("#/signin", { title: "Sign in", render: function (main, params, query) {
     var login = DQ.ui.input({ type: "text", autocomplete: "username", required: true, inputmode: "email" });
     var pw = DQ.ui.input({ type: "password", autocomplete: "current-password", required: true });
@@ -323,13 +353,15 @@
     }
     signedOutNote = null;
     var sso = h("div", { class: "sso", hidden: true });
+    var demo = h("div", { class: "demo-logins", hidden: true });
     main.appendChild(authCard("Sign in", null, h("div", null, note, form([
       DQ.ui.field("Email or phone", login), DQ.ui.field("Password", pw)
     ], "Sign in", function () {
       return DQ.post("/api/auth/login", { login: login.value.trim(), password: pw.value }, { quiet: true, allow401: true }).then(function (r) {
         if (r && r.two_step) codeStep(main, r); else afterSignIn(r);
       });
-    }, h("p", { class: "auth-links" }, h("a", { href: "#/forgot" }, "Forgot your password?"), " · ", h("a", { href: "#/signup" }, "Start a new company"))), sso)));
+    }, h("p", { class: "auth-links" }, h("a", { href: "#/forgot" }, "Forgot your password?"), " · ", h("a", { href: "#/signup" }, "Start a new company"))), sso, demo)));
+    demoLogins(demo);
     providers().then(function (pv) {
       var btns = [["google", "Sign in with Google"], ["microsoft", "Sign in with Microsoft"]].filter(function (x) { return pv[x[0]]; });
       if (!btns.length) return;

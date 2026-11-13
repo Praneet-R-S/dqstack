@@ -1,0 +1,72 @@
+# Render Blueprint for DQ-Stack: the database, the web service and the scheduler, in
+# one step. In Render: New > Blueprint, pick this repository. Steps and what to check
+# afterwards: deploy/RENDER.md.
+#
+# Render runs HTTPS, so Caddy is not needed here, and its managed PostgreSQL keeps its
+# own backups, so the pitr and backup services of docker-compose.yml are not needed
+# either. The SFTP file drop is not available on Render.
+
+databases:
+  - name: dqstack-db
+    databaseName: dqstack
+    user: dqstack
+    plan: basic-1gb
+    region: singapore          # the closest Render region to India
+    postgresMajorVersion: "16"
+    ipAllowList: []            # reachable only from the services below, not the internet
+
+envVarGroups:
+  # Shared by the web service and the worker. They must share DQ_SECRET_KEY: it signs
+  # sessions and encrypts stored connector credentials, which both of them read.
+  - name: dqstack-settings
+    envVars:
+      - key: DQ_ENV
+        value: production
+      - key: DQ_SECRET_KEY
+        generateValue: true
+      - key: DQ_COOKIE_SECURE
+        value: "true"
+
+services:
+  - type: web
+    name: dqstack
+    runtime: docker
+    repo: https://github.com/Praneet-R-S/dqstack
+    branch: main
+    region: singapore
+    plan: standard             # 2 GB
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    preDeployCommand: dq-entrypoint migrate
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass   # deploy a push only after GitHub's checks pass
+    envVars:
+      - fromGroup: dqstack-settings
+      - key: DATABASE_URL       # postgresql://...; the app reads it as psycopg 3
+        fromDatabase:
+          name: dqstack-db
+          property: connectionString
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # DQ_PUBLIC_URL is not needed here: the app uses Render's own address for this
+      # service until you set one (for a custom domain).
+
+  - type: worker
+    name: dqstack-worker
+    runtime: docker
+    repo: https://github.com/Praneet-R-S/dqstack
+    branch: main
+    region: singapore
+    plan: standard             # 2 GB; move to pro (4 GB) if training runs out of memory
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: dq-entrypoint worker
+    autoDeployTrigger: checksPass
+    envVars:
+      - fromGroup: dqstack-settings
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dqstack-db
+          property: connectionString
+      - key: DQ_PUBLIC_URL      # the web service's address, e.g. https://dqstack.onrender.com
+        sync: false             # Render asks for it when the Blueprint is created

@@ -30,8 +30,11 @@ class Ctx:
     all_stores: bool = False
     ip: str | None = None
     device: str | None = None
+    locked: frozenset[str] = frozenset()
 
     def can(self, action: str, store_id: str | None = None) -> bool:
+        if action in self.locked:
+            return False
         return permissions.allowed(self.role, action, store_id, self.store_ids)
 
     def require(self, action: str, store_id: str | None = None) -> None:
@@ -42,6 +45,17 @@ class Ctx:
         if self.all_stores:
             return list(db.scalars(select(Store.id).where(Store.company_id == self.company_id)))
         return sorted(self.store_ids)
+
+
+# What nobody in the demonstration company may do while anyone can sign in to it from
+# the sign-in page: these reach outside the demo (invitations and messages to real
+# addresses, connections to other systems) or lock the next visitor out.
+DEMO_LOCKED = frozenset({"people.manage", "company.settings", "company.billing",
+                         "integrations.manage"})
+
+
+def is_demo_company(company: Company | None) -> bool:
+    return company is not None and (company.plan == "demo" or bool(company.is_demo))
 
 
 def _refusal(action: str) -> str:
@@ -61,8 +75,11 @@ def build_ctx(db: Session, person: Person, sess: AuthSession | None,
                                                     "Contact DQ-Stack support.")
     all_stores = permissions.sees_all_stores(person.role)
     store_ids = {s.id for s in person.stores if s.company_id == person.company_id}
+    from .config import settings
+    locked = (DEMO_LOCKED if settings.demo_logins and settings.env != "development"
+              and is_demo_company(company) else frozenset())
     return Ctx(person=person, session=sess, company_id=person.company_id, role=person.role,
-               store_ids=store_ids, all_stores=all_stores, ip=ip, device=device)
+               store_ids=store_ids, all_stores=all_stores, ip=ip, device=device, locked=locked)
 
 
 def _support_ctx(db: Session, person: Person, sess, ip, device) -> Ctx:

@@ -28,6 +28,17 @@ from dqstack.features import (
 
 @pytest.fixture(scope="module")
 def panel() -> Panel:
+    from dqstack.config import INTERIM, PROCESSED
+    needed = (INTERIM / "panel.parquet", PROCESSED / "dim_series_diagnostics.parquet",
+              PROCESSED / "censoring_masks.parquet")
+    if not all(p.exists() for p in needed):
+        # A fresh checkout (CI) has no demo data: data/ is git-ignored. Make it the way
+        # the pipeline's first steps do: generate, ingest (Stage 0), diagnose (Stage 1).
+        from dqstack import diagnose, ingest
+        from dqstack.data.generate import generate
+        generate()
+        ingest.run()
+        diagnose.run()
     return build_panel()
 
 

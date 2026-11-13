@@ -33,6 +33,26 @@ def _bool(name: str, default: bool) -> bool:
     return v.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _database_url(default: str) -> str:
+    """DATABASE_URL, in the form SQLAlchemy needs for psycopg 3.
+
+    Hosting platforms (Render, Heroku, Railway and others) hand out postgres:// or
+    postgresql:// addresses. SQLAlchemy reads both as psycopg2, which is not installed,
+    so they are rewritten to postgresql+psycopg://. An address that already names a
+    driver is left alone."""
+    url = _env("DATABASE_URL", default) or default
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def _public_url() -> str:
+    """DQ_PUBLIC_URL; on Render, the web service's own https address when it is unset."""
+    url = _env("DQ_PUBLIC_URL") or _env("RENDER_EXTERNAL_URL") or "http://127.0.0.1:8130"
+    return url.rstrip("/")
+
+
 DEV_SECRET = "dev-only-not-a-secret-change-me"
 
 
@@ -71,6 +91,11 @@ class Settings:
     microsoft_client_id: str | None = None
     microsoft_client_secret: str | None = None
     microsoft_tenant: str = "organizations"
+    # One-click sign-in to the demonstration company from the sign-in page. On by
+    # default only in development; on a public server it is turned on with
+    # DQ_DEMO_LOGINS=true, and the demo company's people then cannot invite, change
+    # roles, company settings or connections (scope.DEMO_LOCKED).
+    demo_logins: bool = False
 
     @property
     def is_sqlite(self) -> bool:
@@ -84,13 +109,13 @@ def load() -> Settings:
     secure_default = env in ("staging", "production")
     s = Settings(
         env=env,
-        database_url=_env("DATABASE_URL", Settings.database_url) or Settings.database_url,
+        database_url=_database_url(Settings.database_url),
         secret_key=_env("DQ_SECRET_KEY", DEV_SECRET) or DEV_SECRET,
         session_hours=int(_env("DQ_SESSION_HOURS", "12") or 12),
         lockout_failures=int(_env("DQ_LOCKOUT_FAILURES", "5") or 5),
         lockout_minutes=int(_env("DQ_LOCKOUT_MINUTES", "15") or 15),
         cookie_secure=_bool("DQ_COOKIE_SECURE", secure_default),
-        public_url=(_env("DQ_PUBLIC_URL", "http://127.0.0.1:8130") or "").rstrip("/"),
+        public_url=_public_url(),
         smtp_host=_env("DQ_SMTP_HOST"),
         smtp_port=int(_env("DQ_SMTP_PORT", "587") or 587),
         smtp_user=_env("DQ_SMTP_USER"),
@@ -106,6 +131,7 @@ def load() -> Settings:
         microsoft_client_id=_env("DQ_MICROSOFT_CLIENT_ID"),
         microsoft_client_secret=_env("DQ_MICROSOFT_CLIENT_SECRET"),
         microsoft_tenant=_env("DQ_MICROSOFT_TENANT", "organizations") or "organizations",
+        demo_logins=_bool("DQ_DEMO_LOGINS", env == "development"),
     )
     if env == "production":
         problems = []

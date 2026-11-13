@@ -7,7 +7,7 @@ set -e
 case "${1:-web}" in
   web)
     shift || true
-    exec uvicorn dqstack.app.main:app --host 0.0.0.0 --port 8000 \
+    exec uvicorn dqstack.app.main:app --host 0.0.0.0 --port "${PORT:-8000}" \
       --workers "${WEB_CONCURRENCY:-2}" --proxy-headers --forwarded-allow-ips '*' "$@" ;;
   worker)
     exec python -m dqstack.app.worker ;;

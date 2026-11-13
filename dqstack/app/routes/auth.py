@@ -279,6 +279,61 @@ def _system_ctx(person: Person, request: Request | None = None) -> _SysCtx:
 # and Google / Microsoft sign-in. The rules for codes are in signin.py, the OpenID
 # Connect checks in oidc.py. No code, ticket or token is ever written to the log.
 
+# ------------------------------------------------------------------ demo sign-in
+
+DEMO_ROLE_ORDER = ("owner", "admin", "store_manager", "purchaser", "stock_clerk", "cashier",
+                   "viewer")
+
+
+def _demo_company(db: Session) -> Company | None:
+    """The demonstration company the sign-in page offers, when demo logins are on."""
+    if not settings.demo_logins:
+        return None
+    from sqlalchemy import or_
+    return db.scalar(select(Company).where(
+        Company.status == "active", or_(Company.plan == "demo", Company.is_demo.is_(True)))
+        .order_by(Company.created_at.desc()).limit(1))
+
+
+@router.get("/demo")
+def demo_accounts(db: Session = Depends(get_db)):
+    """The demo company's people, for one-click sign-in. Needs no sign-in, so it gives
+    names, roles and stores only: never an email (the Owner's is a real address)."""
+    co = _demo_company(db)
+    if co is None:
+        return {"company": None, "accounts": []}
+    people = list(db.scalars(select(Person).where(Person.company_id == co.id,
+                                                  Person.status == "active")))
+    order = {r: i for i, r in enumerate(DEMO_ROLE_ORDER)}
+    people.sort(key=lambda p: (order.get(p.role, 99), p.name))
+    return {"company": co.name, "accounts": [
+        {"id": p.id, "name": p.name, "role": p.role,
+         "stores": sorted(s.name for s in p.stores if s.company_id == co.id)}
+        for p in people]}
+
+
+class DemoIn(BaseModel):
+    person_id: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/demo")
+def demo_login(body: DemoIn, request: Request, response: Response,
+               db: Session = Depends(get_db)):
+    """Sign in as one of the demo company's people, without a password. Refused unless
+    demo logins are on and the person belongs to the demonstration company."""
+    limiter.check(f"demo:{client_ip(request)}", limit=30, window_s=300)
+    co = _demo_company(db)
+    person = db.get(Person, body.person_id) if co is not None else None
+    if co is None or person is None or person.company_id != co.id or person.status != "active":
+        raise HTTPException(404, "That demo account is not available.")
+    token, sess = start_session(db, person, ip=client_ip(request), device=device_of(request))
+    _set_cookie(response, token)
+    c = build_ctx(db, person, sess, ip=client_ip(request), device=device_of(request))
+    audit.log(db, c, "person.signed_in", "person", person.id, after={"method": "demo"})
+    db.commit()
+    return me_payload(db, c)
+
+
 @router.get("/providers")
 def providers():
     """What the sign-in screens may offer. Needs no sign-in."""

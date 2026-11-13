@@ -209,6 +209,16 @@ a.tile:hover { background: var(--bg-raised); }
 .sso-or { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; font-size: 13px; color: var(--text-secondary); }
 .sso-or::before, .sso-or::after { content: ""; flex: 1; height: 1px; background: var(--border-subtle); }
 .sso-btn { text-decoration: none; }
+/* One-click demo sign-in, under the password form */
+.demo-logins { margin-top: 20px; }
+.demo-note { margin: 0 0 12px; font-size: 14px; }
+.demo-list { display: grid; gap: 8px; }
+.demo-btn { display: grid; gap: 2px; width: 100%; min-height: var(--tap); padding: 10px 14px; text-align: left; font: inherit; color: var(--text-primary); background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-input); cursor: pointer; transition: border-color var(--motion), background var(--motion); }
+.demo-btn:hover { background: var(--bg-hover); border-color: var(--ui-accent); }
+.demo-btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.demo-btn:disabled { opacity: .6; cursor: progress; }
+.demo-role { font-weight: 600; }
+.demo-who { font-size: 13px; color: var(--text-secondary); }
 .code-input { font-size: 22px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
 .link-btn { padding: 0; border: 0; background: none; color: var(--ui-accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .link-btn:disabled { opacity: .55; cursor: default; text-decoration: none; }

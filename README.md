@@ -237,7 +237,9 @@ Start the server:
 python -m dqstack.app
 ```
 
-Open **http://127.0.0.1:8130/app/** and sign in with the email and password you just gave.
+Open **http://127.0.0.1:8130/app/**. Under the password form, **or try the demo** lists the
+team: click anyone to go straight into the app as that person, from the Owner to the
+Cashier at the till. You can also sign in with the email and password you just gave.
 
 The demo is **Sharma Supermarkets**:
 - two stores: Pune runs Checkout, and Kochi uploads a daily sales file
@@ -290,7 +292,15 @@ A cashier's account opens the till and nothing else.
 
 ## Deploying
 
-One server runs everything with Docker Compose:
+There are two ways to deploy.
+
+**On Render (quickest).** [`render.yaml`](render.yaml) creates the database, the web
+service and the worker in one step: **New → Blueprint** in Render, then pick this
+repository. Then add email and your domain. The full guide is
+**[deploy/RENDER.md](deploy/RENDER.md)**.
+
+**On your own server.** One server runs everything with Docker Compose, in an Indian
+region:
 
 | Service | Job |
 |---|---|
@@ -436,7 +446,8 @@ These are built, but have not yet been tried in the real world:
 
 | Document | For |
 |---|---|
-| [deploy/README.md](deploy/README.md) | Running it in production, step by step |
+| [deploy/RENDER.md](deploy/RENDER.md) | Deploying on Render, step by step |
+| [deploy/README.md](deploy/README.md) | Running it on your own server, step by step |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security and reliability, target by target |
 | [docs/FORECASTING.md](docs/FORECASTING.md) | The forecasting method and its evidence |
 | [docs/DQ-Stack-Reference.pdf](docs/DQ-Stack-Reference.pdf) | A 20-page reference for the planner workspace |
