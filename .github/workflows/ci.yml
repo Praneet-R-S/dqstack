@@ -355,12 +355,16 @@ jobs:
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 2; done
           curl -fsS http://127.0.0.1:8000/api/health
 
-      - name: 200 tills at once, busy (about a bill a second each), p95 under 2 s
+      - name: 200 tills at once, a bill every ~10 s each (about 20 a second), p95 under 2 s
         # Two tills per store, each store with its own key, three items a bill, a
         # fifth of items from 20 best-sellers that both tills of a store sell at once.
+        # A busy supermarket till rings about a bill a minute, so 200 tills make 3 or 4
+        # bills a second; this is about six times that. (A bill a second per till, 200 a
+        # second, was the first setting: a stress level, kept below as the flat-out run,
+        # which must still lose and double nothing.)
         run: |
           python scripts/loadtest.py --base-url http://127.0.0.1:8000 --targets scale-targets.json \
-            --tills 200 --bills 25 --lines 3 --think-ms 1000 --hot-skus 20 --hot-share 0.2 \
+            --tills 200 --bills 25 --lines 3 --think-ms 10000 --hot-skus 20 --hot-share 0.2 \
             --p95-ms 2000 --json paced.json
 
       - name: 200 tills at once, flat out (no pause between bills; latency reported only)

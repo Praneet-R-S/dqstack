@@ -258,7 +258,7 @@ def pay(db: Session, c, store: Store, body: dict, trusted: bool = False,
                           source_type="bill", source_id=bill.id,
                           person_id=getattr(c.person, "id", None),
                           device=bill.device_id or c.device, at=at,
-                          idempotency_key=f"bill:{bill.id}:{i}")
+                          idempotency_key=f"bill:{bill.id}:{i}", fresh_key=seen is None)
         if res.on_hand_milli < 0:
             p = db.get(Product, ln.product_id)
             _alert(db, c.company_id, store.id, p.id, "negative_stock", "risk",

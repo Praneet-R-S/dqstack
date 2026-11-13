@@ -58,6 +58,32 @@ def _on_connect_sqlite(dbapi_conn, _record) -> None:
     cur.close()
 
 
+def pool_limits() -> tuple[int, int]:
+    """Connections per web process: (pool_size, max_overflow), from DQ_DB_POOL_SIZE and
+    DQ_DB_MAX_OVERFLOW. The defaults (10 + 20) suit docker-compose's max_connections=200
+    with 4 web processes; a managed database with a lower limit needs smaller values."""
+    import os
+    return (int(os.environ.get("DQ_DB_POOL_SIZE") or 10),
+            int(os.environ.get("DQ_DB_MAX_OVERFLOW") or 20))
+
+
+def request_threads() -> int | None:
+    """How many requests one web process works on at once (DQ_REQUEST_THREADS).
+
+    Each request holds one database connection from start to finish. If more requests
+    run than the pool has connections, the extra ones wait for a connection and fail
+    after 30 seconds with an error: under a burst from many tills, that dropped sales
+    (the scale job's HTTP 500s). Capped a few below the pool, extra requests instead
+    wait their turn before they start, which costs time, not a sale. None on SQLite."""
+    import os
+    if os.environ.get("DQ_REQUEST_THREADS"):
+        return max(1, int(os.environ["DQ_REQUEST_THREADS"]))
+    if (settings.database_url or "").startswith("sqlite"):
+        return None
+    size, overflow = pool_limits()
+    return max(1, size + overflow - 4)    # a few spare for short side sessions
+
+
 def configure(url: str | None = None, **kw) -> Engine:
     """Build (or rebuild) the engine and session factory."""
     global _engine, _Session
@@ -70,8 +96,9 @@ def configure(url: str | None = None, **kw) -> Engine:
             args["poolclass"] = StaticPool
     else:
         args["pool_pre_ping"] = True
-        args["pool_size"] = kw.pop("pool_size", 10)
-        args["max_overflow"] = kw.pop("max_overflow", 20)
+        size, overflow = pool_limits()
+        args["pool_size"] = kw.pop("pool_size", size)
+        args["max_overflow"] = kw.pop("max_overflow", overflow)
     args.update(kw)
     eng = create_engine(url, future=True, **args)
     if url.startswith("sqlite"):

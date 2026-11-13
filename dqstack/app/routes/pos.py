@@ -98,13 +98,24 @@ def revoke_key(key_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)
     return {"ok": True}
 
 
+_TOUCHED: dict[str, float] = {}
+
+
 def _touch(key_id: str) -> None:
     """Note when a key was last used, at most once a minute and in its own short
     transaction. Writing it inside the request's transaction would lock the key's row
-    until the bill is saved, so every request on one key would wait for the one before."""
+    until the bill is saved, so every request on one key would wait for the one before.
+    This process also remembers when it last wrote, so a busy till does not open a
+    second connection on every request only to find the minute has not passed."""
+    import time
+
     from sqlalchemy import or_, update
 
     from .. import db as dbmod
+    mono = time.monotonic()
+    if mono - _TOUCHED.get(key_id, -1e9) < 60:
+        return
+    _TOUCHED[key_id] = mono
     now = utcnow()
     with dbmod.SessionLocal() as s:
         s.execute(update(ApiKey).where(ApiKey.id == key_id, or_(

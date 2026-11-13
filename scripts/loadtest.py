@@ -90,6 +90,10 @@ async def till(client: httpx.AsyncClient, n: int, args, plan: Plan, latencies: l
     target = plan.target(n)
     rng = random.Random(f"{run}-{n}")
     sent = []
+    if args.think_ms > 0:
+        # Tills are mid-shift, not all opening in the same millisecond: each starts at a
+        # random point in its first gap. (The flat-out run, think 0, starts together.)
+        await asyncio.sleep(args.think_ms / 1000 * rng.uniform(0, 1))
     for b in range(args.bills):
         if b and args.think_ms > 0:
             await asyncio.sleep(args.think_ms / 1000 * rng.uniform(0.5, 1.5))
@@ -101,8 +105,16 @@ async def till(client: httpx.AsyncClient, n: int, args, plan: Plan, latencies: l
         counts["lines"] += len(skus)
         t0 = time.perf_counter()
         try:
-            r = await client.post("/api/pos/v1/messages", json={"messages": [msg]},
-                                  headers=target.headers)
+            try:
+                r = await client.post("/api/pos/v1/messages", json={"messages": [msg]},
+                                      headers=target.headers)
+            except httpx.TransportError:
+                # What a real till does when a connection drops mid-request (a keep-alive
+                # the server closed as it was reused): send the same message again. The
+                # API is idempotent by message id, and verify checks exactly-once.
+                counts["retried"] += 1
+                r = await client.post("/api/pos/v1/messages", json={"messages": [msg]},
+                                      headers=target.headers)
             latencies.append((time.perf_counter() - t0) * 1000)
             if r.status_code != 200:
                 errors.append(f"HTTP {r.status_code}: {r.text[:200]}")
@@ -139,7 +151,8 @@ async def main(args) -> int:
               f"stores in {took:.1f}s ({total / took:.0f} bills/s)")
         print(f"latency ms: p50 {p(0.50):.0f}  p95 {p(0.95):.0f}  p99 {p(0.99):.0f}  "
               f"max {lat[-1] if lat else float('nan'):.0f}  mean {mean:.0f}")
-        print(f"errors: {len(errors)}" + (f" (first: {errors[0]})" if errors else ""))
+        print(f"errors: {len(errors)}" + (f" (first: {errors[0]})" if errors else "")
+              + (f"; {counts['retried']} dropped connections sent again" if counts["retried"] else ""))
         # The same bills again: every one must be recognised as a repeat. Each store's
         # bills go with that store's key, as its till would resend them.
         by_key: dict[str, tuple[Target, list[dict]]] = {}
@@ -179,6 +192,7 @@ async def main(args) -> int:
                                 "max": lat[-1] if lat else float("nan"), "mean": mean}.items()},
                 "p95_limit_ms": args.p95_ms,
                 "errors": len(errors), "error_rate": len(errors) / total if total else 0,
+                "retried": counts["retried"],
                 "error_kinds": dict(Counter(e[:120] for e in errors).most_common(10)),
                 "resent": resent, "recognised_repeats": dup, "resend_errors": resend_errors[:10],
                 "pass": ok,

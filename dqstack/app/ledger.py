@@ -76,14 +76,41 @@ def lock_rows(db: Session, company_id: str, store_id: str, product_ids) -> None:
     (a deadlock). A no-op on SQLite, which serialises writers anyway."""
     if not _pg(db):
         return
-    for pid in sorted({p for p in product_ids if p}):
-        _soh(db, company_id, store_id, pid)
+    ids = sorted({p for p in product_ids if p})
+    if not ids:
+        return
+    # One statement, rows locked in product order; remembered for this transaction so
+    # _soh does not lock each row a second time.
+    rows = db.scalars(select(StockOnHand).where(
+        StockOnHand.store_id == store_id, StockOnHand.product_id.in_(ids))
+        .order_by(StockOnHand.product_id).with_for_update()).all()
+    held = _held(db)
+    for r in rows:
+        held[(store_id, r.product_id)] = r
+    for pid in ids:                       # a product with no stock row yet: make it
+        if (store_id, pid) not in held:
+            _soh(db, company_id, store_id, pid)
+
+
+def _held(db: Session) -> dict:
+    """Stock rows this transaction has already locked. Keyed to the transaction itself,
+    so a lock remembered in one transaction is never trusted in the next."""
+    tx = db.get_transaction()
+    cache = db.info.get("dq_locked_soh")
+    if cache is None or cache[0] is not tx:
+        cache = (tx, {})
+        db.info["dq_locked_soh"] = cache
+    return cache[1]
 
 
 def _soh(db: Session, company_id: str, store_id: str, product_id: str) -> StockOnHand:
+    pg = _pg(db)
+    if pg:
+        row = _held(db).get((store_id, product_id))
+        if row is not None and row in db:
+            return row
     q = select(StockOnHand).where(StockOnHand.store_id == store_id,
                                   StockOnHand.product_id == product_id)
-    pg = _pg(db)
     if pg:
         q = q.with_for_update()
     row = db.scalar(q)
@@ -101,6 +128,8 @@ def _soh(db: Session, company_id: str, store_id: str, product_id: str) -> StockO
                 row = db.scalar(q)        # another transaction created it; lock theirs
         else:
             db.flush([row])
+    if pg:
+        _held(db)[(store_id, product_id)] = row
     return row
 
 
@@ -110,8 +139,13 @@ def post(db: Session, *, company_id: str, store_id: str, product_id: str, qty_mi
          device: str | None = None, unit_cost_paise: int | None = None,
          batch: str | None = None, expiry: date | None = None,
          idempotency_key: str | None = None, at: datetime | None = None,
-         makes_known: bool | None = None) -> Posted:
-    """Post one movement and update stock on hand. The caller commits."""
+         makes_known: bool | None = None, fresh_key: bool = False) -> Posted:
+    """Post one movement and update stock on hand. The caller commits.
+
+    `fresh_key`: the caller guarantees the idempotency key cannot have been used, for
+    example because it contains the id of a row created in this transaction (a new
+    bill's lines). The look-up and the savepoint that guard a repeated key are then
+    skipped: three round trips per line on PostgreSQL, at a till's rate."""
     if type not in TYPES:
         raise LedgerError(f"'{type}' is not a kind of stock movement.")
     if not isinstance(qty_milli, int):
@@ -127,7 +161,7 @@ def post(db: Session, *, company_id: str, store_id: str, product_id: str, qty_mi
         raise LedgerError(f"{LABELS[type]} can only {direction} stock.")
     if type == "opening" and qty_milli < 0 and source_type != "import_undo":
         raise LedgerError("Opening stock cannot be negative.")
-    if idempotency_key:
+    if idempotency_key and not fresh_key:
         seen = db.scalar(select(StockMovement).where(
             StockMovement.company_id == company_id,
             StockMovement.idempotency_key == idempotency_key))
@@ -162,7 +196,9 @@ def post(db: Session, *, company_id: str, store_id: str, product_id: str, qty_mi
                        source_type=source_type, source_id=source_id, person_id=person_id,
                        device=device, unit_cost_paise=unit_cost_paise, batch=batch,
                        expiry=expiry, idempotency_key=idempotency_key, at=now)
-    if idempotency_key and _pg(db):
+    if fresh_key:
+        db.add(mv)
+    elif idempotency_key and _pg(db):
         db.add(mv)
         try:
             with db.begin_nested():

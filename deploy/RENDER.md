@@ -150,4 +150,5 @@ Add these in **dqstack-settings**. [.env.example](../.env.example) explains each
 | Worker restarting right after the first deploy | Wait for the web service's migrations to finish; it settles by itself |
 | Worker: "out of memory" during training | Change the worker's plan to Pro (4 GB) |
 | No emails arrive | Check the `DQ_SMTP_*` values; until they are set, messages go to the service's Logs instead |
+| Logs say "too many connections" | Each web process opens up to 30 database connections (`WEB_CONCURRENCY` is 2 here). If your database plan allows fewer, set `DQ_DB_POOL_SIZE=5` and `DQ_DB_MAX_OVERFLOW=10` in dqstack-settings |
 | Deploys never start after a push | GitHub's checks failed. Fix them, or use Manual Deploy |

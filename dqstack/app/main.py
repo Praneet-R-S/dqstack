@@ -11,6 +11,8 @@ public site at /.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import logging
 import time
 from pathlib import Path
@@ -144,11 +146,48 @@ def _app_logging() -> None:
     root.propagate = False
 
 
+class Admission:
+    """At most `n` API requests in progress per web process; the rest wait at the door.
+
+    A request takes its database connection in its first dependency (the sign-in or
+    API-key check) and keeps it until the response, including while it waits for a
+    thread to run the endpoint. With 200 tills sending at once, hundreds of requests
+    held connections that way, the pool ran dry, and requests that waited 30 seconds for
+    one failed: lost sales, in the scale job. Bounding the requests in progress to what
+    the pool can serve turns that into a short queue before any database work starts.
+    Pages and files do not touch the database and are not held back."""
+
+    def __init__(self, app, n: int | None):
+        self.app, self.n, self.sem = app, n, None
+
+    async def __call__(self, scope, receive, send):
+        if self.n is None or scope["type"] != "http" or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+        if self.sem is None:
+            import asyncio
+            self.sem = asyncio.Semaphore(self.n)
+        async with self.sem:
+            await self.app(scope, receive, send)
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    # Match the request threads to the database pool (db.request_threads explains why).
+    from .db import request_threads
+    n = request_threads()
+    if n is not None:
+        import anyio.to_thread
+        anyio.to_thread.current_default_thread_limiter().total_tokens = n
+    yield
+
+
 def create_app() -> FastAPI:
     _app_logging()
     app = FastAPI(title="DQ-Stack", version=VERSION, docs_url="/api/docs",
-                  redoc_url=None, openapi_url="/api/openapi.json")
+                  redoc_url=None, openapi_url="/api/openapi.json", lifespan=_lifespan)
     app.add_middleware(SecurityHeaders)
+    from .db import request_threads
+    app.add_middleware(Admission, n=request_threads())     # outermost: before any DB work
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
